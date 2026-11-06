@@ -3,15 +3,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Placement Review</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     color-scheme: light;
-    --paper: #f7f7ef;
-    --ink: #202921;
-    --muted: #4f5e50;
-    --line: #cdd3c7;
-    --accent: #234c36;
-    font: 15px/1.5 system-ui, sans-serif;
+    --paper: #faf9f6;
+    --ink: #171717;
+    --muted: #626262;
+    --line: #deddd9;
+    --accent: #000;
+    font: 15px/1.5 Arial, Helvetica, sans-serif;
     background: var(--paper);
     color: var(--ink);
   }
@@ -20,8 +21,8 @@
   body { margin: 0; }
   header, main { max-width: 1180px; margin: auto; padding-inline: clamp(16px, 5vw, 64px); }
   header { padding-block: 34px 22px; }
-  h1 { margin: 4px 0; font: 500 clamp(36px, 6vw, 62px)/1.02 Georgia, serif; letter-spacing: -.035em; }
-  h2 { font: 500 25px/1.2 Georgia, serif; margin: 0 0 12px; }
+  h1 { margin: 4px 0; font-size: clamp(36px, 6vw, 62px); line-height: 1.02; letter-spacing: -.035em; }
+  h2 { font-size: 25px; line-height: 1.2; letter-spacing: -.035em; margin: 0 0 12px; }
   p { margin: 5px 0 14px; }
   small, .muted { color: var(--muted); }
   .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .74rem; font-weight: 650; }
@@ -35,6 +36,8 @@
   textarea { display: block; width: 100%; resize: vertical; }
   button { border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); background: transparent; padding: 7px 12px; }
   button.primary { background: var(--accent); color: white; }
+  button, select { min-height: 44px; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
   button:disabled { opacity: .55; }
   button:not(:disabled):hover { box-shadow: 0 0 0 1px var(--accent); }
   a { color: var(--accent); }
@@ -51,6 +54,9 @@
   .video-row button { margin-left: auto; flex-shrink: 0; }
   .error { color: #96372b; }
   #proposal-results { margin-top: 12px; }
+  #campaign-name { margin-bottom: 2px; overflow-wrap: anywhere; }
+  #campaign-status { min-height: 1.5em; overflow-wrap: anywhere; }
+  #conflict-videos { overflow-wrap: anywhere; }
   @media (max-width: 720px) {
     main { grid-template-columns: 1fr; }
     aside { grid-row: 1; }
@@ -62,7 +68,7 @@
     <span id="mode" class="eyebrow muted">Connecting</span>
   </div>
   <h1>Placement review</h1>
-  <p class="muted">Find videos for each creative and export the buyer’s selections.</p>
+  <p class="muted">Find videos for each creative, save a campaign draft and export selections.</p>
 </header>
 <main>
   <section aria-labelledby="discovery-heading">
@@ -88,16 +94,29 @@
     </form>
     <p id="status" role="status"></p>
     <a id="brand" class="brand" href="https://www.youtube.com/" target="_blank" rel="noopener" hidden>
-      <img alt="Developed with YouTube" src="https://developers.google.com/static/youtube/images/developed-with-youtube-sentence-case-light.png">
+      <img alt="Developed with YouTube" data-src="https://developers.google.com/static/youtube/images/developed-with-youtube-sentence-case-light.png">
     </a>
     <div id="results" aria-label="Video search results"></div>
   </section>
   <aside aria-labelledby="plan-heading">
     <h2 id="plan-heading">Placement draft</h2>
+    <p id="campaign-name" hidden></p>
+    <small id="campaign-revision"></small>
     <p class="muted">Verify each selection in Google Ads before launch. A search result only establishes that the video matched a phrase.</p>
     <div class="actions">
+      <button id="save" type="button" class="primary" disabled>Save to campaign</button>
       <button id="export" type="button" disabled>Export selected videos</button>
       <span id="count" aria-live="polite">0 selected</span>
+    </div>
+    <p id="campaign-status" role="status" tabindex="-1"></p>
+    <div id="draft-conflict" hidden>
+      <h3>Review the newer draft</h3>
+      <p id="conflict-summary"></p>
+      <ul id="conflict-videos"></ul>
+      <div class="actions">
+        <button id="review-latest" type="button">Review merged draft</button>
+        <button id="review-mine" type="button" hidden>Keep my version of conflicting videos</button>
+      </div>
     </div>
     <details id="selection-panel" hidden>
       <summary>Selected videos</summary>
@@ -125,9 +144,21 @@ const queries = byId("queries");
 const selections = new Map();
 const searchResults = new Map();
 const videoIdPattern = /^[A-Za-z0-9_-]{11}$/;
+const sourceLabels = {
+  sample_search: "Fictional search",
+  synthetic: "Fictional catalog",
+  youtube_search: "YouTube search · session only",
+  creator_supplied: "Creator-supplied catalog",
+  licensed: "Licensed catalog"
+};
 let active = creative.value;
 let live = false;
 let imported = [];
+let campaign = null;
+let latestCampaign = null;
+let limits;
+let saving = false;
+let saveError = "";
 queries.value = drafts[active].join("\n");
 
 function element(tag, text, className) {
@@ -150,22 +181,125 @@ function videoLabel(videoId, title) {
   return link;
 }
 
+function draftPayload(rows) {
+  return {campaign_id: campaign.campaign_id, revision: campaign.revision, placements: rows};
+}
+
+function draftLimitError(rows) {
+  if (rows.length > limits.maxPlacements) {
+    return "The draft can hold up to " + limits.maxPlacements.toLocaleString() + " placements across both groups.";
+  }
+  if (campaign && new TextEncoder().encode(JSON.stringify(draftPayload(rows))).length > limits.maxDraftBytes) {
+    return "The draft exceeds the " + limits.maxDraftBytes.toLocaleString() + "-byte save limit across both groups.";
+  }
+  return "";
+}
+
+function addSelections(rows) {
+  const proposed = [...selections.values(), ...rows];
+  const limit = draftLimitError(proposed);
+  if (campaign) saveError = limit ? limit + " Remove placements or select a smaller group." : "";
+  if (!limit) rows.forEach((row) => selections.set(row.id, row));
+  updateSelection();
+}
+
+function reconcileDraft(preferLocal = false) {
+  const base = new Map(campaign.placements.map((row) => [row.id, row]));
+  const merged = new Map(latestCampaign.placements.map((row) => [row.id, row]));
+  const conflicts = [];
+  let localEdits = 0;
+  for (const id of new Set([...base.keys(), ...selections.keys()])) {
+    const before = base.get(id);
+    const mine = selections.get(id);
+    const latest = merged.get(id);
+    if (JSON.stringify(mine) === JSON.stringify(before)) continue;
+    localEdits += 1;
+    if (JSON.stringify(latest) !== JSON.stringify(before) && JSON.stringify(mine) !== JSON.stringify(latest)) {
+      conflicts.push({id, mine, latest});
+      if (!preferLocal) continue;
+    }
+    if (mine) merged.set(id, mine);
+    else merged.delete(id);
+  }
+  return {merged, conflicts, localEdits};
+}
+
+function renderConflict() {
+  byId("draft-conflict").hidden = !latestCampaign;
+  if (!latestCampaign) return;
+  const {conflicts, localEdits} = reconcileDraft();
+  const label = (row) => row
+    ? row.title + " · " + campaign.brief.contexts[row.creative].title + " · " + sourceLabels[row.source]
+    : "Removed";
+  byId("conflict-summary").textContent =
+    "Latest revision " + latestCampaign.revision + ". Your " + localEdits +
+    " local edits are still here. Edits to different videos will be combined. Review the result before saving.";
+  byId("conflict-videos").replaceChildren(...conflicts.map(({id, mine, latest}) =>
+    element("li", id + " · Yours: " + label(mine) + " · Latest: " + label(latest))));
+  byId("review-latest").textContent = conflicts.length
+    ? "Use latest version of conflicting videos" : "Review merged draft";
+  byId("review-mine").hidden = !conflicts.length;
+}
+
+function reviewMerge(preferLocal) {
+  const {merged} = reconcileDraft(preferLocal);
+  selections.clear();
+  merged.forEach((row, id) => selections.set(id, row));
+  campaign = latestCampaign;
+  latestCampaign = null;
+  saveError = "";
+  updateSelection();
+  (byId("save").disabled ? byId("campaign-status") : byId("save")).focus();
+}
+
+byId("review-latest").addEventListener("click", () => reviewMerge(false));
+byId("review-mine").addEventListener("click", () => reviewMerge(true));
+
+function updateCampaign() {
+  const button = byId("save");
+  const status = byId("campaign-status");
+  const rows = [...selections.values()];
+  const sessionOnly = rows.some((row) => row.source === "youtube_search");
+  const unregistered = live && rows.some((row) => row.source !== "youtube_search" && !row.catalog_ref);
+  const changed = campaign && JSON.stringify(rows) !== JSON.stringify(campaign.placements);
+  const limit = limits && draftLimitError(rows);
+  button.disabled = !changed || sessionOnly || unregistered || Boolean(limit) || saving || Boolean(latestCampaign);
+  status.className = saveError || limit ? "error" : "";
+  if (campaign) {
+    byId("campaign-revision").textContent = "Draft revision " + campaign.revision + " · brief revision " + campaign.brief.revision;
+  }
+  if (saveError) status.textContent = saveError;
+  else if (saving) status.textContent = "Saving draft…";
+  else if (latestCampaign) status.textContent = "Another tab saved first. Review the newer draft below.";
+  else if (limit) status.textContent = limit + " Remove placements before saving.";
+  else if (sessionOnly) status.textContent = "Live search selections can be exported. Remove them to save independently supplied placements.";
+  else if (unregistered) status.textContent = "Register the independent catalog before saving these placements. Unregistered selections can still be exported.";
+  else if (changed) status.textContent = "Unsaved changes across placement groups.";
+  else if (campaign?.revision > 1) status.textContent = "Campaign draft saved.";
+  else status.textContent = "";
+  renderConflict();
+}
+
+function removeSelection(id) {
+  selections.delete(id);
+  if (campaign) saveError = "";
+  updateSelection();
+}
+
 function updateSelection() {
   const chosen = [...selections.values()].filter((row) => row.creative === active);
-  byId("count").textContent = chosen.length + " selected";
+  const context = campaign?.brief.contexts[active].title;
+  byId("count").textContent = chosen.length + " selected" + (context ? " · " + context : "");
   byId("export").disabled = chosen.length === 0;
   byId("selection-panel").hidden = chosen.length === 0;
   byId("selected").replaceChildren(...chosen.map((row) => {
     const line = element("div", undefined, "video-row");
     const info = element("div");
-    info.append(videoLabel(row.id, row.title));
+    info.append(videoLabel(row.id, row.title), element("small", sourceLabels[row.source]));
     const remove = element("button", "Remove");
     remove.type = "button";
     remove.setAttribute("aria-label", "Remove " + row.title);
-    remove.addEventListener("click", () => {
-      selections.delete(row.id);
-      updateSelection();
-    });
+    remove.addEventListener("click", () => removeSelection(row.id));
     line.append(info, remove);
     return line;
   }));
@@ -176,18 +310,18 @@ function updateSelection() {
     input.nextElementSibling.querySelector(".assignment-status").textContent =
       input.disabled ? "Selected for the other creative" : "";
   });
+  updateCampaign();
 }
 
-function candidateRow(id, title, detail) {
+function candidateRow(id, title, detail, source, catalog_ref) {
   const row = element("div", undefined, "video-row");
   const input = element("input");
   input.type = "checkbox";
   input.dataset.video = id;
   input.setAttribute("aria-label", "Select " + title);
   input.addEventListener("change", () => {
-    if (input.checked) selections.set(id, {id, title, creative: active});
-    else selections.delete(id);
-    updateSelection();
+    if (input.checked) addSelections([{id, title, creative: active, source, catalog_ref}]);
+    else removeSelection(id);
   });
   const info = element("div");
   info.append(videoLabel(id, title), element("small", detail), element("small", "", "assignment-status"));
@@ -207,7 +341,7 @@ function renderResults() {
     for (const item of items) {
       const id = item.id?.videoId;
       if (!videoIdPattern.test(id || "")) continue;
-      group.append(candidateRow(id, item.snippet.title, item.snippet.channelTitle));
+      group.append(candidateRow(id, item.snippet.title, item.snippet.channelTitle, live ? "youtube_search" : "sample_search"));
     }
     return group;
   }));
@@ -225,21 +359,19 @@ function renderProposals() {
     const approve = element("button", "Select all proposed for this creative");
     approve.type = "button";
     approve.addEventListener("click", () => {
-      for (const row of rows) {
-        if (selections.has(row.video_id)) continue;
-        selections.set(row.video_id, {id: row.video_id, title: row.description, creative: active});
-      }
-      updateSelection();
+      addSelections(rows.filter((row) => !selections.has(row.video_id)).map((row) => ({
+        id: row.video_id, title: row.description, creative: active, source: row.source, catalog_ref: row.catalog_ref
+      })));
     });
     const group = element("details");
     group.append(element("summary", "Inspect proposals"));
-    for (const row of rows) group.append(candidateRow(row.video_id, row.description, "Proposed by " + row.method));
+    for (const row of rows) group.append(candidateRow(row.video_id, row.description, "Proposed by " + row.method, row.source, row.catalog_ref));
     container.append(approve, group);
   }
   if (review.length) {
     const group = element("details");
     group.append(element("summary", "Inspect videos needing review"));
-    for (const row of review) group.append(candidateRow(row.video_id, row.description, "Assign to the current creative after reviewing"));
+    for (const row of review) group.append(candidateRow(row.video_id, row.description, "Assign to the current creative after reviewing", row.source, row.catalog_ref));
     container.append(group);
   }
   updateSelection();
@@ -313,6 +445,7 @@ byId("proposals").addEventListener("change", async (event) => {
       typeof row.description !== "string" || !row.description.trim() || row.description.length > 3000 ||
       !["video-editing", "audiobook", "review"].includes(row.route) ||
       typeof row.method !== "string" ||
+      (row.catalog_ref !== undefined && (!live || typeof row.catalog_ref !== "string" || !/^[0-9a-f]{32}$/.test(row.catalog_ref))) ||
       (live ? !["creator_supplied", "licensed"].includes(row.source) : row.source !== "synthetic")
     ) || new Set(rows.map((row) => row.video_id)).size !== rows.length) {
       throw new Error("Use a unique proposal file from this workspace with sources matching the current mode.");
@@ -340,13 +473,56 @@ byId("export").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
+byId("save").addEventListener("click", async () => {
+  const payload = draftPayload([...selections.values()]);
+  saving = true;
+  saveError = "";
+  updateCampaign();
+  try {
+    const response = await fetch("/api/campaign", {
+      method: "POST",
+      headers: {"X-Placement-Review": "campaign", "Content-Type": "application/json"},
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (response.status === 409 && data.latest) {
+      latestCampaign = data.latest;
+      return;
+    }
+    if (!response.ok) throw new Error(data.error);
+    campaign = data;
+  } catch (error) {
+    saveError = error.message || "Could not save the campaign draft.";
+  } finally {
+    saving = false;
+    updateCampaign();
+  }
+});
+
 fetch("/api/mode").then((response) => {
   if (!response.ok) throw new Error();
   return response.json();
-}).then((mode) => {
+}).then(async (mode) => {
   live = mode.live;
+  limits = mode;
   byId("mode").textContent = live ? "Live YouTube search" : "Sample data";
   byId("brand").hidden = !live;
+  if (live) {
+    const logo = byId("brand").querySelector("img");
+    logo.src = logo.dataset.src;
+  }
+  try {
+    const response = await fetch("/api/campaign", {headers: {"X-Placement-Review": "campaign"}});
+    if (!response.ok) throw new Error();
+    campaign = await response.json();
+    for (const row of campaign.placements) selections.set(row.id, row);
+    const name = byId("campaign-name");
+    name.textContent = campaign.brief.title;
+    name.hidden = false;
+  } catch {
+    saveError = "Could not load the campaign draft. Reopen the page to try again.";
+  }
+  updateSelection();
   byId("proposals").disabled = false;
   byId("run").disabled = false;
 }).catch(() => {
