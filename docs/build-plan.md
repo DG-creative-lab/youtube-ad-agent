@@ -1,6 +1,6 @@
 # Campaign agent build plan
 
-6 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Engineering workflow](engineering-workflow.md)
+6 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
 
 ## Application deliverable
 
@@ -19,6 +19,8 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 | **5. Verify and package · 13 and 16 Nov** | Freeze the working path on Friday. Run the walkthrough on a fresh local database, then use Monday for fixes, the recording and setup notes. Show where product approval ends and manual Google Ads setup begins. Include the actual results of any optional runtime or sandbox checks. | A reviewer can follow the documented setup, play both viewer paths and reproduce the two runs without credentials. Every part of the walkthrough identifies its evidence source and shows which capability was exercised. |
 
 ## First implementation slice
+
+Build this slice in Python and SQLite with the existing browser screen. React and TypeScript are for the fuller planner. Use the same backend API for both. The viewer comparison uses plain HTML, CSS and JavaScript.
 
 1. Keep `scripts/placement_review.py serve` and `assign` as developer entry points. Extract the discovery, catalog classification and export behavior into callable functions only where the web or agent workflow needs them. Keep public YouTube search in its native review flow. Use independently supplied or fictional catalog material for model assignment.
 2. Add the SQLite store and load one versioned brief with two contexts, approved claims and asset references. Store app state under `.local/`. The first browser change is **Save to campaign** in placement review. Persist the campaign and context, video IDs and provenance. Reload the saved selection in the planner.

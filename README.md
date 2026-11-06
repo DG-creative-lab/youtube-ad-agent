@@ -1,8 +1,10 @@
 # Contextual creative for YouTube
 
-An application project for the [ElevenLabs Ads Engine engineering role](https://jobs.ashbyhq.com/elevenlabs/3abf96ca-2937-4290-9d23-5208aece08b2). The product helps a YouTube media buyer find relevant video placements, pair each group with a creative and a matching product demo, and use delivery and viewer activity to plan the next test.
+A proof of concept for planning YouTube campaigns around what people are watching. It explores how a media buyer can find relevant video placements, pair each group with an ad and a matching product demo, and use delivery and viewer activity to plan the next test.
 
-Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md) and [build plan](docs/build-plan.md). Placement discovery and draft export run locally. The viewer experience is at the storyboard stage. This is an independent application project.
+Placement discovery and draft export run locally. The viewer experience is at the storyboard stage. If the workflow proves useful and there’s demand, it could become a standalone product or a tool for delivering campaign planning and testing services.
+
+Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md), [design direction](docs/design-direction.md) and [build plan](docs/build-plan.md).
 
 ## Placement review
 

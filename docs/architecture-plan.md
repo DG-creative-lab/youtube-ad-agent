@@ -1,10 +1,12 @@
 # Campaign agent architecture
 
-Updated 6 November 2026 · Proposed for the ElevenLabs application. The product brief defines the two Text to Speech creatives and viewer task. This plan defines the system boundaries. [Product brief](product-brief.md) · [Build plan](build-plan.md)
+Updated 6 November 2026 · Proposed for the ElevenLabs application. The product brief defines the two Text to Speech creatives and viewer task. This plan defines the system boundaries. [Product brief](product-brief.md) · [Build plan](build-plan.md) · [Design direction](design-direction.md)
 
 ## Decision
 
-Use a modular monolith with a local web UI, one application backend and SQLite. Keep domain commands and state in the product. Give the agent typed tools for planning, discovery, production, handoff and review. Connect providers through ports where their capabilities differ. Start with the existing Python placement code and test a pinned DeepSeek Harness runner behind the same tool boundary. Compare the runner against a small OpenRouter tool loop before committing to either runtime.
+Use a modular monolith with a Python backend and SQLite. Keep domain commands, approval rules and durable state in the application. Give the agent typed tools for planning, discovery, production, handoff and review. Connect providers through ports where their capabilities differ. Start with the existing Python placement code and test a pinned DeepSeek Harness runner behind the same tool boundary. Compare the runner against a small OpenRouter tool loop before committing to either runtime.
+
+Keep the existing HTML, CSS and JavaScript placement screen for the first `Save to campaign` slice. It calls the Python backend through a same-origin JSON API. Build the fuller planner in React and TypeScript when the brief, placements, creative previews, approvals and review need a shared workspace. Its client state handles navigation, forms and display. The Python commands remain the source of truth for campaign revisions, approvals and results. Keep the viewer comparison as a small HTML, CSS and JavaScript page using the same backend for versioned content and events. The planner and viewer share brand tokens and have separate layouts.
 
 The first run starts with a request such as “Prepare a UK YouTube test for ElevenLabs Text to Speech using our approved material.” The agent loads the approved brief and brand policy, proposes viewing contexts, gathers placement candidates, prepares two cuts and matching destinations, and presents a campaign package. The buyer can answer or correct it in one place. The product saves progress while the browser is closed and shows the next useful action when it reopens. The POC uses manual Google Ads handoff, real local viewer activity and labelled sample delivery. A subsequent run can show how a saved buyer preference or a scoped finding changes what the agent proposes.
 
