@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Placement Review</title>
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f7f7ef;
+    --ink: #202921;
+    --muted: #4f5e50;
+    --line: #cdd3c7;
+    --accent: #234c36;
+    font: 15px/1.5 system-ui, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; }
+  header, main { max-width: 1180px; margin: auto; padding-inline: clamp(16px, 5vw, 64px); }
+  header { padding-block: 34px 22px; }
+  h1 { margin: 4px 0; font: 500 clamp(36px, 6vw, 62px)/1.02 Georgia, serif; letter-spacing: -.035em; }
+  h2 { font: 500 25px/1.2 Georgia, serif; margin: 0 0 12px; }
+  p { margin: 5px 0 14px; }
+  small, .muted { color: var(--muted); }
+  .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .74rem; font-weight: 650; }
+  .topline, .actions, .video-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .topline { justify-content: space-between; }
+  main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 26px; padding-bottom: 32px; }
+  section, aside { border-top: 1px solid var(--line); padding-top: 20px; min-width: 0; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; }
+  select, textarea, button, input { font: inherit; }
+  select, textarea { border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); padding: 8px; }
+  textarea { display: block; width: 100%; resize: vertical; }
+  button { border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); background: transparent; padding: 7px 12px; }
+  button.primary { background: var(--accent); color: white; }
+  button:disabled { opacity: .55; }
+  button:not(:disabled):hover { box-shadow: 0 0 0 1px var(--accent); }
+  a { color: var(--accent); }
+  form { display: grid; gap: 12px; }
+  .brand { display: inline-flex; margin: 0 0 8px; padding: 6px; background: white; }
+  .brand img { width: 125px; height: auto; align-self: center; }
+  details { border-top: 1px solid var(--line); padding: 9px 0; }
+  summary { font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+  .video-row { border-bottom: 1px solid var(--line); padding: 8px 0; flex-wrap: nowrap; }
+  .video-row:last-child { border-bottom: 0; }
+  .video-row div { min-width: 0; overflow-wrap: anywhere; }
+  .video-row input { width: 17px; height: 17px; flex-shrink: 0; accent-color: var(--accent); }
+  .video-row small { display: block; }
+  .video-row button { margin-left: auto; flex-shrink: 0; }
+  .error { color: #96372b; }
+  #proposal-results { margin-top: 12px; }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; }
+    aside { grid-row: 1; }
+  }
+</style>
+<header>
+  <div class="topline">
+    <span class="eyebrow muted">Campaign planning</span>
+    <span id="mode" class="eyebrow muted">Connecting</span>
+  </div>
+  <h1>Placement review</h1>
+  <p class="muted">Find videos for each creative and export the buyer’s selections.</p>
+</header>
+<main>
+  <section aria-labelledby="discovery-heading">
+    <h2 id="discovery-heading">Find candidates</h2>
+    <form id="search">
+      <div>
+        <label for="creative">Creative</label>
+        <select id="creative">
+          <option value="video-editing">Video editing · Voiceover timing</option>
+          <option value="audiobook">Audiobook production · Narrator delivery</option>
+        </select>
+      </div>
+      <div>
+        <label for="queries">Search phrases, one per line</label>
+        <textarea id="queries" rows="4" maxlength="1210" required></textarea>
+      </div>
+      <div class="actions">
+        <label for="pages">Pages per phrase</label>
+        <select id="pages"><option>1</option><option selected>2</option><option>3</option></select>
+        <button id="run" type="submit" class="primary" disabled>Find videos</button>
+        <small>Up to 50 results per page · UK search, English preferred</small>
+      </div>
+    </form>
+    <p id="status" role="status"></p>
+    <a id="brand" class="brand" href="https://www.youtube.com/" target="_blank" rel="noopener" hidden>
+      <img alt="Developed with YouTube" src="https://developers.google.com/static/youtube/images/developed-with-youtube-sentence-case-light.png">
+    </a>
+    <div id="results" aria-label="Video search results"></div>
+  </section>
+  <aside aria-labelledby="plan-heading">
+    <h2 id="plan-heading">Placement draft</h2>
+    <p class="muted">Verify each selection in Google Ads before launch. A search result only establishes that the video matched a phrase.</p>
+    <div class="actions">
+      <button id="export" type="button" disabled>Export selected videos</button>
+      <span id="count" aria-live="polite">0 selected</span>
+    </div>
+    <details id="selection-panel" hidden>
+      <summary>Selected videos</summary>
+      <div id="selected"></div>
+    </details>
+    <details>
+      <summary>Import creative assignments</summary>
+      <p class="muted">Load proposals from a creator-supplied or licensed catalog. Review uncertain items separately.</p>
+      <label for="proposals">Proposal file (.jsonl)</label>
+      <input id="proposals" type="file" accept=".jsonl,.txt" disabled>
+      <p id="proposal-status" role="status"></p>
+      <div id="proposal-results"></div>
+    </details>
+  </aside>
+</main>
+<script>
+"use strict";
+const drafts = {
+  "video-editing": ["voiceover editing tutorial", "voiceover timing video editing", "Premiere Pro voiceover tutorial", "DaVinci Resolve narration tutorial"],
+  audiobook: ["audiobook narration tutorial", "audiobook production tutorial", "fiction narrator performance tutorial", "audiobook character voices tutorial"]
+};
+const byId = (id) => document.getElementById(id);
+const creative = byId("creative");
+const queries = byId("queries");
+const selections = new Map();
+const searchResults = new Map();
+const videoIdPattern = /^[A-Za-z0-9_-]{11}$/;
+let active = creative.value;
+let live = false;
+let imported = [];
+queries.value = drafts[active].join("\n");
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+function watchUrl(videoId) {
+  return "https://www.youtube.com/watch?v=" + videoId;
+}
+
+function videoLabel(videoId, title) {
+  if (!live) return element("span", title);
+  const link = element("a", title);
+  link.href = watchUrl(videoId);
+  link.target = "_blank";
+  link.rel = "noopener";
+  return link;
+}
+
+function updateSelection() {
+  const chosen = [...selections.values()].filter((row) => row.creative === active);
+  byId("count").textContent = chosen.length + " selected";
+  byId("export").disabled = chosen.length === 0;
+  byId("selection-panel").hidden = chosen.length === 0;
+  byId("selected").replaceChildren(...chosen.map((row) => {
+    const line = element("div", undefined, "video-row");
+    const info = element("div");
+    info.append(videoLabel(row.id, row.title));
+    const remove = element("button", "Remove");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove " + row.title);
+    remove.addEventListener("click", () => {
+      selections.delete(row.id);
+      updateSelection();
+    });
+    line.append(info, remove);
+    return line;
+  }));
+  document.querySelectorAll("input[data-video]").forEach((input) => {
+    const selected = selections.get(input.dataset.video);
+    input.checked = selected?.creative === active;
+    input.disabled = Boolean(selected && selected.creative !== active);
+    input.nextElementSibling.querySelector(".assignment-status").textContent =
+      input.disabled ? "Selected for the other creative" : "";
+  });
+}
+
+function candidateRow(id, title, detail) {
+  const row = element("div", undefined, "video-row");
+  const input = element("input");
+  input.type = "checkbox";
+  input.dataset.video = id;
+  input.setAttribute("aria-label", "Select " + title);
+  input.addEventListener("change", () => {
+    if (input.checked) selections.set(id, {id, title, creative: active});
+    else selections.delete(id);
+    updateSelection();
+  });
+  const info = element("div");
+  info.append(videoLabel(id, title), element("small", detail), element("small", "", "assignment-status"));
+  row.append(input, info);
+  return row;
+}
+
+function renderResults() {
+  const batches = searchResults.get(active) || [];
+  const container = byId("results");
+  const opened = new Set([...container.querySelectorAll("details[open]")].map((node) => node.dataset.query));
+  container.replaceChildren(...batches.map(({query, items}, index) => {
+    const group = element("details");
+    group.dataset.query = query;
+    group.open = opened.has(query) || (opened.size === 0 && index === 0);
+    group.append(element("summary", query + " · " + items.length + " results"));
+    for (const item of items) {
+      const id = item.id?.videoId;
+      if (!videoIdPattern.test(id || "")) continue;
+      group.append(candidateRow(id, item.snippet.title, item.snippet.channelTitle));
+    }
+    return group;
+  }));
+  updateSelection();
+}
+
+function renderProposals() {
+  const rows = imported.filter((row) => row.route === active);
+  const review = imported.filter((row) => row.route === "review");
+  const container = byId("proposal-results");
+  container.replaceChildren();
+  if (!imported.length) return;
+  container.append(element("p", rows.length + " proposed for this creative · " + review.length + " need review"));
+  if (rows.length) {
+    const approve = element("button", "Select all proposed for this creative");
+    approve.type = "button";
+    approve.addEventListener("click", () => {
+      for (const row of rows) {
+        if (selections.has(row.video_id)) continue;
+        selections.set(row.video_id, {id: row.video_id, title: row.description, creative: active});
+      }
+      updateSelection();
+    });
+    const group = element("details");
+    group.append(element("summary", "Inspect proposals"));
+    for (const row of rows) group.append(candidateRow(row.video_id, row.description, "Proposed by " + row.method));
+    container.append(approve, group);
+  }
+  if (review.length) {
+    const group = element("details");
+    group.append(element("summary", "Inspect videos needing review"));
+    for (const row of review) group.append(candidateRow(row.video_id, row.description, "Assign to the current creative after reviewing"));
+    container.append(group);
+  }
+  updateSelection();
+}
+
+creative.addEventListener("change", () => {
+  drafts[active] = queries.value.split("\n");
+  active = creative.value;
+  queries.value = drafts[active].join("\n");
+  byId("status").textContent = "";
+  renderResults();
+  renderProposals();
+});
+
+byId("search").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const phrases = [...new Set(queries.value.split("\n").map((line) => line.trim()).filter(Boolean))];
+  const status = byId("status");
+  if (!phrases.length || phrases.length > 8 || phrases.some((phrase) => phrase.length > 150)) {
+    status.className = "error";
+    status.textContent = "Enter 1–8 search phrases of up to 150 characters.";
+    return;
+  }
+  creative.disabled = true;
+  byId("run").disabled = true;
+  status.className = "";
+  const batches = [];
+  const pages = Number(byId("pages").value);
+  let requests = 0;
+  try {
+    for (const query of phrases) {
+      const items = [];
+      let page = "";
+      for (let index = 0; index < pages; index += 1) {
+        status.textContent = "Searching · request " + (++requests) + " of up to " + phrases.length * pages;
+        const response = await fetch("/api/search?" + new URLSearchParams({q: query, page}), {
+          headers: {"X-Placement-Review": "search"}
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error);
+        items.push(...data.items);
+        if (index === 0) {
+          batches.push({query, items});
+          searchResults.set(active, batches);
+        }
+        page = data.nextPageToken;
+        if (!page) break;
+      }
+    }
+    const ids = new Set(batches.flatMap(({items}) => items.map((item) => item.id?.videoId).filter(Boolean)));
+    status.textContent = ids.size + " unique candidates across " + batches.length + " searches. Review before selecting.";
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error.message || "Search stopped. Review any results already returned.";
+  } finally {
+    renderResults();
+    creative.disabled = false;
+    byId("run").disabled = false;
+  }
+});
+
+byId("proposals").addEventListener("change", async (event) => {
+  const status = byId("proposal-status");
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    if (file.size > 2_000_000) throw new Error("Select a proposal file smaller than 2 MB.");
+    const rows = (await file.text()).split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
+    if (!rows.length || rows.some((row) =>
+      typeof row?.video_id !== "string" || !videoIdPattern.test(row.video_id) ||
+      typeof row.description !== "string" || !row.description.trim() || row.description.length > 3000 ||
+      !["video-editing", "audiobook", "review"].includes(row.route) ||
+      typeof row.method !== "string" ||
+      (live ? !["creator_supplied", "licensed"].includes(row.source) : row.source !== "synthetic")
+    ) || new Set(rows.map((row) => row.video_id)).size !== rows.length) {
+      throw new Error("Use a unique proposal file from this workspace with sources matching the current mode.");
+    }
+    imported = rows;
+    status.className = "";
+    status.textContent = rows.length + " proposals loaded.";
+    renderProposals();
+  } catch (error) {
+    status.className = "error";
+    status.textContent = error instanceof SyntaxError ? "The proposal file must contain one JSON object per line." : error.message;
+  } finally {
+    event.target.value = "";
+  }
+});
+
+byId("export").addEventListener("click", () => {
+  const ids = [...selections.values()].filter((row) => row.creative === active).map((row) => row.id);
+  const lines = live ? ids.map(watchUrl) : ["SAMPLE ONLY — fictional videos", ...ids.map((id) => "sample:" + id)];
+  const url = URL.createObjectURL(new Blob([lines.join("\n") + "\n"], {type: "text/plain"}));
+  const download = element("a");
+  download.href = url;
+  download.download = (live ? "" : "sample-") + active + "-placements.txt";
+  download.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+fetch("/api/mode").then((response) => {
+  if (!response.ok) throw new Error();
+  return response.json();
+}).then((mode) => {
+  live = mode.live;
+  byId("mode").textContent = live ? "Live YouTube search" : "Sample data";
+  byId("brand").hidden = !live;
+  byId("proposals").disabled = false;
+  byId("run").disabled = false;
+}).catch(() => {
+  byId("mode").textContent = "Server unavailable";
+  byId("status").textContent = "Start the placement review server and reopen this page.";
+});
+</script>
+</html>

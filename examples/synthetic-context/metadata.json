@@ -1,0 +1,30 @@
+{
+  "fixture_id": "context_mix_and_response_decline_v1",
+  "source_kind": "synthetic",
+  "construction": "Independently authored deterministic illustrative counts. No employer data, client-derived parameters, identifiers, model outputs, or historical performance were used to construct these values.",
+  "fictional_dates": true,
+  "currency": "GBP",
+  "observation_grain": ["period", "creative_version_id", "audience_cohort_id", "inventory_surface"],
+  "standardisation_weights": {"cohort_cold": 0.5, "cohort_warm": 0.5},
+  "outcomes": {
+    "clicks": "Synthetic click count; CTR denominator is impressions.",
+    "completed_views": "Synthetic completed-play count; distinct from TrueView view definitions and sales conversions.",
+    "qualified_leads": "Fictional business outcome used to exercise objective-aware decisions; not an actual tracked or attributed conversion."
+  },
+  "ground_truth": {
+    "baseline": "Equal cohort mix for both creatives. A has higher CTR in each cohort.",
+    "mix_shift": "Conditional response rates unchanged from baseline. A receives mostly cold-cohort impressions; B mostly warm-cohort impressions. Raw CTR ranking reverses because of delivery mix.",
+    "within_cohort_decline": "Same delivery mix as mix_shift. A's conditional click and lead rates halve and completed-view rates decline; B remains unchanged. This decline is authored, not inferred from real data."
+  },
+  "expected_ctr": {
+    "baseline": {"creative_a_v1": {"raw": 0.06, "standardised": 0.06}, "creative_b_v1": {"raw": 0.045, "standardised": 0.045}},
+    "mix_shift": {"creative_a_v1": {"raw": 0.028, "standardised": 0.06}, "creative_b_v1": {"raw": 0.073, "standardised": 0.045}},
+    "within_cohort_decline": {"creative_a_v1": {"raw": 0.014, "standardised": 0.03}, "creative_b_v1": {"raw": 0.073, "standardised": 0.045}}
+  },
+  "limitations": [
+    "Not a validated market simulator, randomised experiment, or evidence of real advertising lift.",
+    "Fixed-mix standardisation is descriptive; causal conclusions require an appropriate identification design.",
+    "Do not pool this fixture with participant or Google Ads evidence, train a production policy on it, or upload its outcomes as real conversions.",
+    "A recommendation depends on the selected objective; CTR ranking is not qualified-lead or profit ranking."
+  ]
+}

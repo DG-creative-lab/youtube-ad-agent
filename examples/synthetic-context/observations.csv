@@ -1,0 +1,13 @@
+source_kind,period,period_start,period_end,creative_version_id,audience_cohort_id,inventory_surface,impressions,clicks,completed_views,qualified_leads,spend_gbp
+synthetic,baseline,2026-01-01,2026-01-07,creative_a_v1,cohort_cold,youtube_shorts,1000,20,400,2,40
+synthetic,baseline,2026-01-01,2026-01-07,creative_a_v1,cohort_warm,youtube_shorts,1000,100,700,20,60
+synthetic,baseline,2026-01-01,2026-01-07,creative_b_v1,cohort_cold,youtube_shorts,1000,10,300,1,20
+synthetic,baseline,2026-01-01,2026-01-07,creative_b_v1,cohort_warm,youtube_shorts,1000,80,600,4,40
+synthetic,mix_shift,2026-01-08,2026-01-14,creative_a_v1,cohort_cold,youtube_shorts,9000,180,3600,18,360
+synthetic,mix_shift,2026-01-08,2026-01-14,creative_a_v1,cohort_warm,youtube_shorts,1000,100,700,20,60
+synthetic,mix_shift,2026-01-08,2026-01-14,creative_b_v1,cohort_cold,youtube_shorts,1000,10,300,1,20
+synthetic,mix_shift,2026-01-08,2026-01-14,creative_b_v1,cohort_warm,youtube_shorts,9000,720,5400,36,360
+synthetic,within_cohort_decline,2026-01-15,2026-01-21,creative_a_v1,cohort_cold,youtube_shorts,9000,90,1800,9,360
+synthetic,within_cohort_decline,2026-01-15,2026-01-21,creative_a_v1,cohort_warm,youtube_shorts,1000,50,350,10,60
+synthetic,within_cohort_decline,2026-01-15,2026-01-21,creative_b_v1,cohort_cold,youtube_shorts,1000,10,300,1,20
+synthetic,within_cohort_decline,2026-01-15,2026-01-21,creative_b_v1,cohort_warm,youtube_shorts,9000,720,5400,36,360

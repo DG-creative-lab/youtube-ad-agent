@@ -1,0 +1,24 @@
+# Credentials, account-specific research, and earlier project drafts.
+.local/
+/docs/archive/
+/docs/evidence/
+/requirements-investigation.txt
+/scripts/authorize_google.py
+/scripts/authorize_youtube_readonly.py
+/scripts/probe_google_ads_test.py
+/scripts/probe_youtube_owned.py
+/scripts/probe_youtube_public.py
+/scripts/ads_mapping_queries.py
+
+.env
+.env.*
+!.env.example
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.sqlite*
+*.db
+playwright-report/
+test-results/

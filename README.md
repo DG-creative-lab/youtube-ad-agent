@@ -1,0 +1,32 @@
+# Contextual creative for YouTube
+
+An application project for the [ElevenLabs Ads Engine engineering role](https://jobs.ashbyhq.com/elevenlabs/3abf96ca-2937-4290-9d23-5208aece08b2). The product helps a YouTube media buyer find relevant video placements, pair each group with a creative and a matching product demo, and use delivery and viewer activity to plan the next test.
+
+Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md) and [build plan](docs/build-plan.md). Placement discovery and draft export run locally. The viewer experience is at the storyboard stage. This is an independent application project.
+
+## Placement review
+
+Run the local workspace with Python 3.12 or newer and open [http://127.0.0.1:8765](http://127.0.0.1:8765). The default mode uses fictional candidates and needs no credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. Search results stay in the browser session. The export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.
+
+```sh
+python3 scripts/placement_review.py serve
+```
+
+In a second terminal, generate the example proposals.
+
+```sh
+mkdir -p .local
+python3 scripts/placement_review.py assign examples/placement-review/catalog.json > .local/sample-proposals.jsonl
+```
+
+Use **Import creative assignments** to load the example output in sample mode. For real assignments, supply a JSON catalog with `video_id`, `description` and `source` for each video. Use `creator_supplied` or `licensed` only for material you have permission to classify, and `synthetic` for rehearsal. Review ambiguous items and approve the proposed group as a batch if appropriate.
+
+The default assignment uses local rules. To explicitly enable the billed Jev adapter, provide `OPENROUTER_API_KEY` server-side and pass `--paid-jev-limit N` to `assign`, where `N` covers the catalog and is at most 500. The model receives the permitted descriptions. It proposes a creative or sends the item to review. The current probability cutoffs are provisional. [OpenRouter Jev 1.14](https://openrouter.ai/typesafe/jev-1.14)
+
+## Engineering checks
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+See the [engineering workflow](docs/engineering-workflow.md) for design, test and review expectations. The [synthetic context example](examples/synthetic-context/metadata.json) is authored test data. Prior Google Ads test-account reads verified access and returned empty reports. The build uses a zero-cost budget across media, models, hosting and ads.

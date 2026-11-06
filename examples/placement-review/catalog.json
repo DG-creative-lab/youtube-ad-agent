@@ -1,0 +1,22 @@
+[
+  {
+    "video_id": "SAMPLE00001",
+    "source": "synthetic",
+    "description": "A video editing tutorial that shows how to fit two spoken takes to the same clip in DaVinci Resolve."
+  },
+  {
+    "video_id": "SAMPLE00002",
+    "source": "synthetic",
+    "description": "An audiobook tutorial on choosing character voices and directing a reading of the same passage."
+  },
+  {
+    "video_id": "SAMPLE00003",
+    "source": "synthetic",
+    "description": "A creator explains how they do both video editing and audiobook production from one studio."
+  },
+  {
+    "video_id": "SAMPLE00004",
+    "source": "synthetic",
+    "description": "A home gardening tutorial about repotting a lemon tree."
+  }
+]
