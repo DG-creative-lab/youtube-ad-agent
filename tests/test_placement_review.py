@@ -13,6 +13,13 @@ CATALOG = Path(__file__).resolve().parents[1] / "examples/placement-review/catal
 
 
 class PlacementReviewTests(unittest.TestCase):
+    def test_viewer_requires_a_fixed_port_separate_from_planner(self):
+        with patch.object(placement_review, "ThreadingHTTPServer", side_effect=AssertionError("Unexpected socket bind")):
+            for viewer_port, error in ((0, "fixed viewer port"), (8765, "different ports")):
+                with self.subTest(viewer_port=viewer_port):
+                    with self.assertRaisesRegex(ValueError, error):
+                        placement_review.serve(8765, live=False, viewer_port=viewer_port)
+
     def test_sample_search_pages_are_repeatable_and_disjoint(self):
         first = placement_review.demo_search("editing", None)
         self.assertEqual(first, placement_review.demo_search("editing", None))

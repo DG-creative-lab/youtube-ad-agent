@@ -2,13 +2,13 @@
 
 A proof of concept for planning YouTube campaigns around what people are watching. It explores how a media buyer can find relevant video placements, pair each group with an ad and a matching product demo, and use delivery and viewer activity to plan the next test.
 
-Placement discovery, draft saving and export run locally. The viewer experience is at the storyboard stage. If the workflow proves useful and there’s demand, it could become a standalone product or a tool for delivering campaign planning and testing services.
+Placement discovery, draft saving, export and the two-take comparison run locally. If the workflow proves useful and there’s demand, it could become a standalone product or a tool for delivering campaign planning and testing services.
 
 Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md), [design direction](docs/design-direction.md) and [build plan](docs/build-plan.md).
 
 ## Placement review
 
-Run the local workspace with Python 3.12 or newer and open [http://127.0.0.1:8765](http://127.0.0.1:8765). The default mode uses fictional candidates and needs no credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.
+Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.
 
 ```sh
 python3 scripts/placement_review.py serve
@@ -30,6 +30,14 @@ Use **Import creative assignments** to load the example output in sample mode. F
 To save real placements, add a `source_reference` to each independent catalog entry, such as the identifier of a creator handoff or a license record. Generate the proposals on the same local installation with `python3 scripts/placement_review.py assign your-catalog.json --register-catalog > .local/catalog-proposals.jsonl`, then import them. Registration records your source declaration. It does not verify the underlying permission. Older proposals can still be reviewed and exported. Register and reselect those placements to save a new revision.
 
 The default assignment uses local rules. To explicitly enable the billed Jev adapter, provide `OPENROUTER_API_KEY` server-side and pass `--paid-jev-limit N` to `assign`, where `N` covers the catalog and is at most 500. The model receives the permitted descriptions. It proposes a creative or sends the item to review. The current probability cutoffs are provisional. [OpenRouter Jev 1.14](https://openrouter.ai/typesafe/jev-1.14)
+
+## Viewer comparison
+
+On macOS with FFmpeg installed, run `python3 -m scripts.prepare_viewer_media` once. It uses the local Samantha voice and writes the original demo media to ignored `.local/viewer-media/`. Start the placement server and open **Preview local creatives** to play the captioned previews and follow their comparison links.
+
+The comparison records local viewer activity in the draft database. A visit keeps its original creative reference when the viewer switches examples. Playing both takes through and choosing one records one completion per visit and example version. The viewer retries pending activity with the same event IDs after a refresh in the same tab.
+
+The planner link contains a private token for the current server process. Keep that link local and use the separate viewer link for the comparison. The viewer runs at `http://127.0.0.1:8766` by default. If that port is busy, pass `--viewer-port 8876` and reuse the same port and database on each restart so saved viewer links and pending activity in the same tab still work. Planner access uses the seeded local operator, client and brand. Hosted staff authentication is a separate milestone.
 
 ## Engineering checks
 

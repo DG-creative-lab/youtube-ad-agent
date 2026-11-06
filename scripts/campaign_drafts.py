@@ -7,6 +7,8 @@ import re
 import sqlite3
 from uuid import uuid4
 
+from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 MAX_PLACEMENTS = 2400
@@ -56,7 +58,8 @@ class StaleDraft(ValueError):
 
 
 class CampaignDrafts:
-    def __init__(self, path, live):
+    def __init__(self, path, live, operator=LOCAL_OPERATOR):
+        operator.require_brand(LOCAL_BRAND)
         self.path = path
         self.live = live
         self.campaign_id = "tts-catalog" if live else "tts-sample"
