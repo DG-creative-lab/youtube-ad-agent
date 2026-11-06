@@ -54,6 +54,7 @@
   .video-row button { margin-left: auto; flex-shrink: 0; }
   .error { color: #96372b; }
   #proposal-results { margin-top: 12px; }
+  .viewer-preview { display: block; width: 100%; aspect-ratio: 16/9; background: var(--ink); }
   #campaign-name { margin-bottom: 2px; overflow-wrap: anywhere; }
   #campaign-status { min-height: 1.5em; overflow-wrap: anywhere; }
   #conflict-videos { overflow-wrap: anywhere; }
@@ -130,6 +131,20 @@
       <p id="proposal-status" role="status"></p>
       <div id="proposal-results"></div>
     </details>
+    <details>
+      <summary>Preview local creatives</summary>
+      <p class="muted">Play the sample cut, then follow its comparison link.</p>
+      <h3>Video editing</h3>
+      <video class="viewer-preview" controls preload="none" playsinline aria-label="Video editing sample cut" src="/viewer/media/editing-voiceover-v1/editing-comparison-v1/preview">
+        <track default kind="captions" srclang="en" label="English" src="/viewer/media/editing-voiceover-v1/editing-comparison-v1/captions">
+      </video>
+      <p><a href="VIEWER_ORIGIN_PLACEHOLDER/viewer?ad=editing-voiceover-v1">Compare the voiceover takes</a></p>
+      <h3>Audiobook production</h3>
+      <video class="viewer-preview" controls preload="none" playsinline aria-label="Audiobook sample cut" src="/viewer/media/audiobook-reading-v1/audiobook-comparison-v1/preview">
+        <track default kind="captions" srclang="en" label="English" src="/viewer/media/audiobook-reading-v1/audiobook-comparison-v1/captions">
+      </video>
+      <p><a href="VIEWER_ORIGIN_PLACEHOLDER/viewer?ad=audiobook-reading-v1">Compare the audiobook takes</a></p>
+    </details>
   </aside>
 </main>
 <script>
@@ -139,6 +154,13 @@ const drafts = {
   audiobook: ["audiobook narration tutorial", "audiobook production tutorial", "fiction narrator performance tutorial", "audiobook character voices tutorial"]
 };
 const byId = (id) => document.getElementById(id);
+const operatorStorage = "placement-review:operator";
+const operator = new URLSearchParams(location.hash.slice(1)).get("operator");
+if (operator) {
+  sessionStorage.setItem(operatorStorage, operator);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+const operatorHeaders = {"X-Local-Operator": sessionStorage.getItem(operatorStorage) || ""};
 const creative = byId("creative");
 const queries = byId("queries");
 const selections = new Map();
@@ -408,7 +430,7 @@ byId("search").addEventListener("submit", async (event) => {
       for (let index = 0; index < pages; index += 1) {
         status.textContent = "Searching · request " + (++requests) + " of up to " + phrases.length * pages;
         const response = await fetch("/api/search?" + new URLSearchParams({q: query, page}), {
-          headers: {"X-Placement-Review": "search"}
+          headers: {...operatorHeaders, "X-Placement-Review": "search"}
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
@@ -481,7 +503,7 @@ byId("save").addEventListener("click", async () => {
   try {
     const response = await fetch("/api/campaign", {
       method: "POST",
-      headers: {"X-Placement-Review": "campaign", "Content-Type": "application/json"},
+      headers: {...operatorHeaders, "X-Placement-Review": "campaign", "Content-Type": "application/json"},
       body: JSON.stringify(payload)
     });
     const data = await response.json();
@@ -499,7 +521,8 @@ byId("save").addEventListener("click", async () => {
   }
 });
 
-fetch("/api/mode").then((response) => {
+fetch("/api/mode", {headers: operatorHeaders}).then((response) => {
+  if (response.status === 403) throw new Error("Open the planner link printed in the terminal.");
   if (!response.ok) throw new Error();
   return response.json();
 }).then(async (mode) => {
@@ -512,7 +535,7 @@ fetch("/api/mode").then((response) => {
     logo.src = logo.dataset.src;
   }
   try {
-    const response = await fetch("/api/campaign", {headers: {"X-Placement-Review": "campaign"}});
+    const response = await fetch("/api/campaign", {headers: {...operatorHeaders, "X-Placement-Review": "campaign"}});
     if (!response.ok) throw new Error();
     campaign = await response.json();
     for (const row of campaign.placements) selections.set(row.id, row);
@@ -525,9 +548,9 @@ fetch("/api/mode").then((response) => {
   updateSelection();
   byId("proposals").disabled = false;
   byId("run").disabled = false;
-}).catch(() => {
-  byId("mode").textContent = "Server unavailable";
-  byId("status").textContent = "Start the placement review server and reopen this page.";
+}).catch((error) => {
+  byId("mode").textContent = "Planner locked";
+  byId("status").textContent = error.message || "Start the placement review server and reopen the planner link.";
 });
 </script>
 </html>

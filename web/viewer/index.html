@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare two voice takes</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: light; --paper: #faf9f6; --ink: #171717; --muted: #626262; --rule: #deddd9; --surface: #efeeeb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Arial, Helvetica, sans-serif; }
+  header { background: #000; color: #f4f3ed; padding: 14px max(20px, calc((100% - 760px) / 2)); }
+  header span { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+  main { max-width: 800px; padding: 30px 20px 40px; margin: auto; }
+  h1 { font-size: clamp(34px, 7vw, 58px); line-height: 1; letter-spacing: -.045em; margin: 10px 0 12px; }
+  .muted, #progress { color: var(--muted); }
+  blockquote { margin: 20px 0; padding: 0 0 0 16px; border-left: 2px solid var(--ink); font-size: clamp(18px, 4vw, 24px); }
+  #player { background: var(--surface); }
+  #player:empty { display: none; }
+  video { width: 100%; aspect-ratio: 16/9; display: block; background: var(--ink); }
+  audio { width: 100%; display: block; }
+  button, select { min-height: 44px; border: 1px solid var(--ink); padding: 8px 12px; background: var(--paper); color: inherit; font: inherit; }
+  button.primary { background: #000; color: #f4f3ed; }
+  button[aria-pressed="true"] { background: var(--surface); box-shadow: inset 0 -2px var(--ink); }
+  button:disabled { opacity: .55; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .support { border-top: 1px solid var(--rule); padding-top: 16px; margin-top: 22px; }
+  label { display: block; font-size: 14px; margin-bottom: 5px; font-weight: 700; }
+  #status { min-height: 1.5em; }
+  [hidden] { display: none !important; }
+  @media (max-width: 440px) { .actions button { flex: 1 1 100%; } }
+</style>
+<header><span>Voice comparison · Local demo</span></header>
+<main>
+  <h1 id="title">Compare two voice takes</h1>
+  <p id="instruction"></p>
+  <blockquote id="passage" hidden></blockquote>
+  <div id="player"></div>
+  <div class="actions" id="takes"></div>
+  <p id="progress" aria-live="polite"></p>
+  <button id="choose" class="primary" type="button" disabled hidden>Choose this take</button>
+  <p id="status" role="status"></p>
+  <button id="retry" type="button" hidden>Retry saving activity</button>
+  <section id="other" class="support" hidden>
+    <label for="example">Comparison example</label>
+    <select id="example"></select>
+    <p class="muted">Original demo material · Local synthetic speech</p>
+  </section>
+</main>
+<script>
+"use strict";
+const el = (id) => document.getElementById(id);
+const defaultCreative = "editing-voiceover-v1";
+const query = new URLSearchParams(location.search);
+const content = query.get("content");
+const reviewed = query.getAll("reviewed");
+const references = reviewed.length ? Object.fromEntries(reviewed.map(value => value.split(":"))) : null;
+let creative = query.get("ad") || defaultCreative;
+let visit;
+let current;
+let chosenTake;
+let state;
+let sending = false;
+let queue = [];
+
+async function post(action, payload) {
+  const response = await fetch("/api/viewer/" + action, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Viewer": "comparison"},
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) throw Object.assign(new Error(data.error), {status: response.status});
+  return data;
+}
+
+function storageKey() { return "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : ""); }
+
+function persistVisit() {
+  sessionStorage.setItem(storageKey(), JSON.stringify({visit, example: current.ref, queue}));
+}
+
+function showState() {
+  el("progress").textContent = state.finished.length + " of 2 takes finished";
+  if (state.choice) el("progress").textContent += " · You chose Take " + state.choice.toUpperCase();
+  el("choose").disabled = !chosenTake || state.finished.length !== 2;
+  for (const button of el("takes").children) {
+    button.setAttribute("aria-pressed", String(button.dataset.take === chosenTake?.id));
+  }
+}
+
+async function flushEvents() {
+  if (sending) return;
+  sending = true;
+  el("retry").hidden = true;
+  try {
+    while (queue.length) {
+      const event = queue[0];
+      const result = await post("event", event);
+      queue.shift();
+      persistVisit();
+      if (event.visit_id !== visit || event.example_ref !== current?.ref) continue;
+      state = result;
+      showState();
+      if (event.kind === "choose") el("status").textContent = "Choice saved. You can replay either take.";
+    }
+  } catch (error) {
+    el("status").textContent = error.message || "Could not save comparison activity.";
+    el("retry").hidden = false;
+  } finally {
+    sending = false;
+  }
+}
+
+function record(kind, take, binding) {
+  queue.push({...binding, event_id: crypto.randomUUID().replaceAll("-", ""), kind, take});
+  try {
+    persistVisit();
+  } catch {
+    el("status").textContent = "Could not keep pending activity across a reload. Retry before closing this page.";
+    el("retry").hidden = false;
+    return;
+  }
+  flushEvents();
+}
+
+function playedThrough(media) {
+  const ranges = media.played;
+  let played = 0;
+  for (let index = 0; index < ranges.length; index++) {
+    played += ranges.end(index) - ranges.start(index);
+  }
+  // Allow a small gap for browser timing at the boundaries of a sample.
+  return Number.isFinite(media.duration) && played >= media.duration - 0.25;
+}
+
+function play(take) {
+  const binding = {creative_ref: creative, visit_id: visit, example_ref: current.ref};
+  const media = document.createElement(take.video ? "video" : "audio");
+  media.src = take.url;
+  media.controls = true;
+  media.setAttribute("playsinline", "");
+  media.setAttribute("aria-label", "Take " + take.id.toUpperCase() + " · " + take.label);
+  if (take.video) {
+    const track = document.createElement("track");
+    track.kind = "captions";
+    track.label = "English";
+    track.srclang = "en";
+    track.src = current.captions;
+    media.append(track);
+  }
+  media.addEventListener("playing", () => record("start", take.id, binding), {once: true});
+  media.addEventListener("ended", () => {
+    if (el("player").firstElementChild !== media || state.finished.includes(take.id)) return;
+    if (playedThrough(media)) {
+      record("finish", take.id, binding);
+    } else {
+      el("status").textContent = "Play the whole take to count it as finished.";
+    }
+  });
+  media.addEventListener("error", () => {
+    el("status").textContent = "This sample is unavailable. Try another take or switch examples below.";
+  });
+  const prior = el("player").firstElementChild;
+  if (prior) prior.pause();
+  el("player").replaceChildren(media);
+  chosenTake = take;
+  el("status").textContent = "";
+  showState();
+  media.play().catch(() => {
+    if (!media.error) el("status").textContent = "Use the player controls to start this take.";
+  });
+}
+
+function render(data) {
+  el("player").firstElementChild?.pause();
+  el("player").replaceChildren();
+  current = data.example;
+  visit = data.visit_id;
+  state = data;
+  chosenTake = current.takes.find((take) => take.id === state.choice);
+  persistVisit();
+  el("title").textContent = current.title;
+  el("instruction").textContent = current.instruction;
+  el("passage").textContent = current.passage;
+  el("passage").hidden = false;
+  el("takes").replaceChildren(...current.takes.map((take) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.take = take.id;
+    button.textContent = "Play Take " + take.id.toUpperCase() + " · " + take.label;
+    button.onclick = () => play(take);
+    return button;
+  }));
+  el("example").replaceChildren(...data.examples.map((item) => new Option(item.title, item.ref)));
+  el("example").value = current.ref;
+  el("other").hidden = data.examples.length < 2;
+  el("choose").hidden = false;
+  el("status").textContent = data.notice || "";
+  showState();
+}
+
+function openExample(example = null, id = null) {
+  return post("open", {creative_ref: creative, example_ref: example, visit_id: id,
+                       ...(content && {content}), ...(references && {references})});
+}
+
+el("choose").onclick = () => {
+  record("choose", chosenTake.id, {creative_ref: creative, visit_id: visit, example_ref: current.ref});
+};
+el("retry").onclick = flushEvents;
+el("example").onchange = async () => {
+  el("example").disabled = true;
+  el("status").textContent = "";
+  try {
+    render(await openExample(el("example").value, visit));
+  } catch (error) {
+    el("example").value = current.ref;
+    el("status").textContent = error.message;
+  } finally {
+    el("example").disabled = false;
+  }
+};
+
+(async () => {
+  try {
+    let saved;
+    try { saved = JSON.parse(sessionStorage.getItem(storageKey())); } catch {}
+    if (saved?.visit) {
+      try {
+        const data = await openExample(saved.example, saved.visit);
+        queue = Array.isArray(saved.queue) ? saved.queue : [];
+        render(data);
+        await flushEvents();
+        return;
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+    }
+    try {
+      render(await openExample());
+    } catch (error) {
+      if (error.status !== 404 || creative === defaultCreative || content) throw error;
+      creative = defaultCreative;
+      render(await openExample());
+      history.replaceState(null, "", "/viewer");
+      el("status").textContent = "That comparison link is unavailable. The default example is open.";
+    }
+  } catch (error) {
+    el("status").textContent = error.message || "Could not open the comparison. Reload to try again.";
+  }
+})();
+</script>
+</html>

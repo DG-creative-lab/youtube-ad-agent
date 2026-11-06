@@ -1,0 +1,147 @@
+"""Scoped viewer visits, events and comparison completion in local SQLite."""
+
+from contextlib import closing
+import re
+import sqlite3
+from uuid import uuid4
+
+from .creatives import EXAMPLES
+
+
+class ViewerNotFound(LookupError):
+    """The requested link, example or visit is outside the viewer's scope."""
+
+
+class ViewerMeasurement:
+    def __init__(self, path, examples=EXAMPLES):
+        self.path = path
+        self.examples = {example.ref: example for example in examples}
+        self.links = {example.creative_ref: example for example in examples}
+        with closing(self.connect()) as db:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS viewer_visits (
+                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                    creative_ref TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS viewer_events (
+                    seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
+                    event_id TEXT NOT NULL, example_ref TEXT NOT NULL, kind TEXT NOT NULL,
+                    take TEXT NOT NULL, UNIQUE (visit_id, event_id)
+                );
+                CREATE TABLE IF NOT EXISTS viewer_completions (
+                    visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
+                    example_ref TEXT NOT NULL, first_choice TEXT NOT NULL,
+                    PRIMARY KEY (visit_id, example_ref)
+                );
+            """)
+
+    def connect(self):
+        db = sqlite3.connect(self.path)
+        db.execute("PRAGMA foreign_keys = ON")
+        return db
+
+    def resolve(self, creative_ref, example_ref=None):
+        origin = self.links.get(creative_ref)
+        target = self.examples.get(example_ref) if example_ref is not None else origin
+        if origin is None or target is None or origin.scope != target.scope:
+            raise ViewerNotFound("This comparison is unavailable.")
+        return origin, target
+
+    @staticmethod
+    def visit_key(origin, visit_id):
+        return visit_id, origin.scope.client_id, origin.scope.brand_id, origin.creative_ref
+
+    def require_visit(self, db, origin, visit_id):
+        if not db.execute(
+            "SELECT 1 FROM viewer_visits WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
+            self.visit_key(origin, visit_id),
+        ).fetchone():
+            raise ViewerNotFound("This visit is unavailable.")
+
+    def open_example(self, creative_ref, example_ref=None, visit_id=None):
+        origin, target = self.resolve(creative_ref, example_ref)
+        with closing(self.connect()) as db, db:
+            if visit_id is None:
+                visit_id = uuid4().hex
+                db.execute("INSERT INTO viewer_visits VALUES (?, ?, ?, ?)", self.visit_key(origin, visit_id))
+            else:
+                self.require_visit(db, origin, visit_id)
+            db.execute(
+                "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) "
+                "VALUES (?, ?, ?, 'arrival', '') ON CONFLICT (visit_id, event_id) DO NOTHING",
+                (visit_id, f"arrival:{target.ref}", target.ref),
+            )
+            state = self.state(db, visit_id, target.ref)
+        return {
+            "visit_id": visit_id,
+            "example": {
+                "ref": target.ref, "title": target.title, "instruction": target.instruction,
+                "passage": target.passage, "takes": [
+                    {"id": take, "label": label, "video": name.endswith(".mp4"),
+                     "url": f"/viewer/media/{creative_ref}/{target.ref}/{take}"}
+                    for take, label, name in target.takes
+                ],
+                "captions": f"/viewer/media/{creative_ref}/{target.ref}/captions",
+            },
+            "examples": [
+                {"ref": item.ref, "title": item.title}
+                for item in self.examples.values() if item.scope == origin.scope
+            ],
+            **state,
+        }
+
+    @staticmethod
+    def state(db, visit_id, example_ref):
+        scope = (visit_id, example_ref)
+        finished = [row[0] for row in db.execute(
+            "SELECT DISTINCT take FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'finish' ORDER BY take",
+            scope,
+        )]
+        choice = db.execute(
+            "SELECT take FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'choose' ORDER BY seq DESC LIMIT 1",
+            scope,
+        ).fetchone()
+        complete = db.execute(
+            "SELECT 1 FROM viewer_completions WHERE visit_id = ? AND example_ref = ?", scope,
+        ).fetchone()
+        return {"finished": finished, "choice": choice[0] if choice else None, "complete": bool(complete)}
+
+    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take):
+        origin, target = self.resolve(creative_ref, example_ref)
+        takes = {item[0] for item in target.takes}
+        if not re.fullmatch(r"[0-9a-f]{32}", event_id) or kind not in {"start", "finish", "choose"} or take not in takes:
+            raise ValueError("Invalid comparison event.")
+        event = (example_ref, kind, take)
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            self.require_visit(db, origin, visit_id)
+            existing = db.execute(
+                "SELECT example_ref, kind, take FROM viewer_events WHERE visit_id = ? AND event_id = ?",
+                (visit_id, event_id),
+            ).fetchone()
+            if existing is not None:
+                if existing != event:
+                    raise ValueError("This event ID belongs to a different action.")
+                return self.state(db, visit_id, example_ref)
+            if not db.execute(
+                "SELECT 1 FROM viewer_events WHERE visit_id = ? AND event_id = ?",
+                (visit_id, f"arrival:{example_ref}"),
+            ).fetchone():
+                raise ViewerNotFound("Open this comparison before recording playback.")
+            if kind == "finish" and not db.execute(
+                "SELECT 1 FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'start' AND take = ?",
+                (visit_id, example_ref, take),
+            ).fetchone():
+                raise ValueError("Start this take before finishing it.")
+            if kind == "choose" and set(self.state(db, visit_id, example_ref)["finished"]) != takes:
+                raise ValueError("Finish both takes before choosing.")
+            db.execute(
+                "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) VALUES (?, ?, ?, ?, ?)",
+                (visit_id, event_id, *event),
+            )
+            if kind == "choose":
+                db.execute(
+                    "INSERT INTO viewer_completions VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                    (visit_id, example_ref, take),
+                )
+            return self.state(db, visit_id, example_ref)

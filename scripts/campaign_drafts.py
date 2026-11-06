@@ -1,11 +1,15 @@
 """Local campaign draft commands and their SQLite storage."""
 
 from contextlib import closing
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
 import sqlite3
 from uuid import uuid4
+
+from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+from campaign_agent.handoff import MEDIA_DIR, package_blockers, package_fingerprint, sample_package
 
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -55,14 +59,22 @@ class StaleDraft(ValueError):
         self.latest = latest
 
 
+class PackageConflict(ValueError):
+    """The reviewed package is stale or lacks a matching approval."""
+
+
 class CampaignDrafts:
-    def __init__(self, path, live):
+    def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=MEDIA_DIR):
+        operator.require_brand(LOCAL_BRAND)
+        self.operator = operator
         self.path = path
+        self.media_dir = media_dir
         self.live = live
         self.campaign_id = "tts-catalog" if live else "tts-sample"
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS campaign_revisions (
                     campaign_id TEXT NOT NULL,
@@ -71,6 +83,23 @@ class CampaignDrafts:
                     PRIMARY KEY (campaign_id, revision)
                 )
             """)
+            if not live:
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS campaign_package_approvals (
+                        client_id TEXT NOT NULL,
+                        brand_id TEXT NOT NULL,
+                        campaign_id TEXT NOT NULL,
+                        revision INTEGER NOT NULL,
+                        fingerprint TEXT NOT NULL,
+                        actor_id TEXT NOT NULL,
+                        approved_at TEXT NOT NULL,
+                        snapshot TEXT,
+                        PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint)
+                    )
+                """)
+                columns = db.execute("PRAGMA table_info(campaign_package_approvals)").fetchall()
+                if "snapshot" not in {column[1] for column in columns}:
+                    db.execute("ALTER TABLE campaign_package_approvals ADD COLUMN snapshot TEXT")
             if live:
                 db.execute("""
                     CREATE TABLE IF NOT EXISTS catalog_entries (
@@ -112,6 +141,102 @@ class CampaignDrafts:
         with closing(sqlite3.connect(self.path)) as db:
             return self._read(db, revision)
 
+    def _package_scope(self, campaign_id, revision):
+        self.operator.require_brand(LOCAL_BRAND)
+        if (self.live or campaign_id != self.campaign_id
+                or type(revision) is not int or not 1 <= revision < 2**63):
+            raise ValueError("Choose a valid sample campaign revision.")
+        return LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id
+
+    def _package_review(self, db, campaign_id, revision):
+        scope = self._package_scope(campaign_id, revision)
+        latest = self._read(db)
+        draft = latest if latest["revision"] == revision else self._read(db, revision)
+        if draft is None:
+            raise ValueError("Campaign revision unavailable.")
+        package = sample_package(draft, self.media_dir)
+        fingerprint = package_fingerprint(package)
+        key = (*scope, revision, fingerprint)
+        row = db.execute(
+            "SELECT actor_id, approved_at FROM campaign_package_approvals WHERE "
+            "client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ? "
+            "AND snapshot IS NOT NULL",
+            key,
+        ).fetchone()
+        approval = {"actor_id": row[0], "approved_at": row[1]} if row else None
+        return {"package": package, "fingerprint": fingerprint, "approval": approval,
+                "current_revision": latest["revision"], "blockers": package_blockers(package)}, key
+
+    def _approval_history(self, db, scope):
+        return [
+            {"revision": revision, "fingerprint": fingerprint, "approved_at": approved_at,
+             "snapshot_available": bool(available)}
+            for revision, fingerprint, approved_at, available in db.execute(
+                "SELECT revision, fingerprint, approved_at, snapshot IS NOT NULL "
+                "FROM campaign_package_approvals WHERE client_id = ? AND brand_id = ? AND campaign_id = ? "
+                "ORDER BY revision DESC, approved_at DESC, fingerprint", scope,
+            )
+        ]
+
+    def read_approved_package(self, campaign_id, revision, fingerprint):
+        scope = self._package_scope(campaign_id, revision)
+        with closing(sqlite3.connect(self.path)) as db:
+            row = db.execute(
+                "SELECT actor_id, approved_at, snapshot FROM campaign_package_approvals "
+                "WHERE client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ?",
+                (*scope, revision, fingerprint),
+            ).fetchone()
+        if row is None or row[2] is None:
+            return None
+        return {"fingerprint": fingerprint, "approval": {"actor_id": row[0], "approved_at": row[1]},
+                "package": json.loads(row[2])}
+
+    def review_package(self, campaign_id, revision):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN")
+            review, key = self._package_review(db, campaign_id, revision)
+            review["history"] = self._approval_history(db, key[:3])
+            return review
+
+    def _require_current_package(self, review, revision, fingerprint):
+        if review["current_revision"] != revision or review["fingerprint"] != fingerprint:
+            raise PackageConflict("The package has changed. Load and review the latest draft.")
+        if review["blockers"]:
+            raise PackageConflict(" ".join(review["blockers"]))
+
+    def approve_package(self, campaign_id, revision, fingerprint):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            review, key = self._package_review(db, campaign_id, revision)
+            self._require_current_package(review, revision, fingerprint)
+            if review["approval"] is None:
+                approved_at = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    "INSERT INTO campaign_package_approvals "
+                    "(client_id, brand_id, campaign_id, revision, fingerprint, actor_id, approved_at, snapshot) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (*key, self.operator.id, approved_at, json.dumps(review["package"])),
+                )
+                review["approval"] = {"actor_id": self.operator.id, "approved_at": approved_at}
+            review["history"] = self._approval_history(db, key[:3])
+            return review
+
+    def export_setup(self, campaign_id, revision, fingerprint):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN")
+            review, _ = self._package_review(db, campaign_id, revision)
+            self._require_current_package(review, revision, fingerprint)
+            if review["approval"] is None:
+                raise PackageConflict("Approve this revision before exporting the setup.")
+            return {
+                "handoff": "Manual Google Ads setup example",
+                "instructions": "Use this as a walkthrough. Replace fictional placements with verified targets "
+                                "and replace local preview and viewer paths before a live campaign.",
+                "approval": review["approval"],
+                "fingerprint": fingerprint,
+                **review["package"],
+            }
+
     def register_catalog(self, rows):
         """Record independently supplied entries admitted by the local CLI."""
         entries = []
@@ -135,7 +260,7 @@ class CampaignDrafts:
                 for entry in entries
             }
 
-    def save(self, payload):
+    def save(self, payload, *, connection=None):
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:
             raise ValueError("Send a campaign ID, expected revision and placements.")
         expected = payload["revision"]
@@ -146,23 +271,28 @@ class CampaignDrafts:
         if not isinstance(rows, list) or len(rows) > MAX_PLACEMENTS:
             raise ValueError(f"Save up to {MAX_PLACEMENTS} placements at a time.")
 
+        if connection is not None:
+            return self._save(db=connection, expected=expected, rows=rows)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            current = self._read(db)
-            placements = self._validate_placements(db, rows, current["brief"]["contexts"])
-            revision = current["revision"]
-            if expected != revision:
-                if expected == revision - 1 and placements == current["placements"]:
-                    return current
-                raise StaleDraft(current)
-            if placements == current["placements"]:
+            return self._save(db, expected, rows)
+
+    def _save(self, db, expected, rows):
+        current = self._read(db)
+        placements = self._validate_placements(db, rows, current["brief"]["contexts"])
+        revision = current["revision"]
+        if expected != revision:
+            if expected == revision - 1 and placements == current["placements"]:
                 return current
-            saved = {**current, "revision": revision + 1, "placements": placements}
-            db.execute(
-                "INSERT INTO campaign_revisions VALUES (?, ?, ?)",
-                (self.campaign_id, saved["revision"], json.dumps(saved)),
-            )
-            return saved
+            raise StaleDraft(current)
+        if placements == current["placements"]:
+            return current
+        saved = {**current, "revision": revision + 1, "placements": placements}
+        db.execute(
+            "INSERT INTO campaign_revisions VALUES (?, ?, ?)",
+            (self.campaign_id, saved["revision"], json.dumps(saved)),
+        )
+        return saved
 
     def _validate_placements(self, db, rows, contexts):
         seen = set()

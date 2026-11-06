@@ -1,0 +1,14 @@
+{
+  "name": "campaign-planner",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "type": "module",
+  "scripts": { "build": "tsc --noEmit && vite build" },
+  "dependencies": { "react": "19.2.5", "react-dom": "19.2.5" },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.2"
+  }
+}
