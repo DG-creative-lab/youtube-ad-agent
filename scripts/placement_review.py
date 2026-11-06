@@ -7,16 +7,21 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, StaleDraft, VIDEO_ID
+else:
+    from campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, StaleDraft, VIDEO_ID
+
 ROOT = Path(__file__).resolve().parents[1]
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.14"
-VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 ROUTES = {
     "video-editing": "Tutorial about editing video, voiceover timing, or placing narration on a video timeline.",
     "audiobook": "Tutorial about producing audiobooks or directing a narrator to interpret a story.",
@@ -54,7 +59,7 @@ def youtube_search(key, query, page):
         return json.load(response)
 
 
-def serve(port, live):
+def serve(port, live, draft_path=DEFAULT_DRAFT_PATH):
     key = None
     if live:
         try:
@@ -63,6 +68,8 @@ def serve(port, live):
                 raise ValueError("Missing key")
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
+    drafts = CampaignDrafts(draft_path, live)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
@@ -78,16 +85,54 @@ def serve(port, live):
             self.end_headers()
             self.wfile.write(content)
 
-        def do_GET(self):
-            if self.headers.get("Host") != f"127.0.0.1:{port}":
+        def check_host(self):
+            if self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}":
                 self.send(403, {"error": "Open the loopback URL printed in the terminal."})
+                return False
+            return True
+
+        def do_POST(self):
+            if not self.check_host():
+                return
+            if self.path != "/api/campaign":
+                self.send(404, {"error": "Not found."})
+                return
+            if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
+                    or self.headers.get("X-Placement-Review") != "campaign"):
+                self.send(403, {"error": "Save drafts from the placement review page."})
+                return
+            if self.headers.get_content_type() != "application/json":
+                self.send(415, {"error": "Send a JSON draft."})
+                return
+            length = self.headers.get("Content-Length", "")
+            if not re.fullmatch(r"[0-9]{1,7}", length) or not 0 < int(length) <= MAX_DRAFT_BYTES:
+                self.send(400, {"error": f"Send a draft of up to {MAX_DRAFT_BYTES:,} bytes."})
+                return
+            try:
+                saved = drafts.save(json.loads(self.rfile.read(int(length))))
+            except StaleDraft as exc:
+                self.send(409, {"error": str(exc), "latest": exc.latest})
+            except (UnicodeError, json.JSONDecodeError, RecursionError):
+                self.send(400, {"error": "Send a valid JSON draft."})
+            except ValueError as exc:
+                self.send(400, {"error": str(exc)})
+            except sqlite3.Error:
+                self.send(503, {"error": "Could not save the draft. Try again."})
+            else:
+                self.send(200, saved)
+
+        def do_GET(self):
+            if not self.check_host():
                 return
             url = urlsplit(self.path)
             if url.path == "/":
                 self.send(200, (ROOT / "placement-review/index.html").read_bytes(), "text/html; charset=utf-8")
                 return
             if url.path == "/api/mode":
-                self.send(200, {"live": live})
+                self.send(200, {"live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS})
+                return
+            if url.path == "/api/campaign":
+                self.read_campaign(url.query)
                 return
             if url.path != "/api/search":
                 self.send(404, {"error": "Not found."})
@@ -109,8 +154,29 @@ def serve(port, live):
             except (URLError, TimeoutError, ValueError):
                 self.send(502, {"error": "YouTube search could not be reached. Earlier results are still available."})
 
+        def read_campaign(self, query):
+            if self.headers.get("X-Placement-Review") != "campaign":
+                self.send(403, {"error": "Open drafts from the placement review page."})
+                return
+            requested = parse_qs(query, keep_blank_values=True).get("revision")
+            if requested is not None and (
+                len(requested) != 1 or not re.fullmatch(r"[1-9][0-9]{0,18}", requested[0])
+                or int(requested[0]) >= 2**63
+            ):
+                self.send(400, {"error": "Use a valid revision number."})
+                return
+            try:
+                draft = drafts.read(int(requested[0]) if requested else None)
+            except sqlite3.Error:
+                self.send(503, {"error": "Could not load the draft. Try again."})
+                return
+            if draft is None:
+                self.send(404, {"error": "Revision not found."})
+            else:
+                self.send(200, draft)
+
     with ThreadingHTTPServer(("127.0.0.1", port), Handler) as server:
-        print(f"Open http://127.0.0.1:{port} ({'live YouTube search' if live else 'fictional sample data'})", flush=True)
+        print(f"Open http://127.0.0.1:{server.server_port} ({'live YouTube search' if live else 'fictional sample data'})", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
@@ -177,7 +243,7 @@ def jev_assignment(description, key):
     return route, probabilities, payload.get("model", JEV_MODEL)
 
 
-def assign(path, jev_limit):
+def assign(path, jev_limit, register_catalog=False):
     records = read_catalog(path)
     key = None
     if jev_limit is not None:
@@ -186,10 +252,13 @@ def assign(path, jev_limit):
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
             raise ValueError("Set OPENROUTER_API_KEY to use the paid OpenRouter mode.")
+    references = CampaignDrafts(DEFAULT_DRAFT_PATH, live=True).register_catalog(records) if register_catalog else {}
     for row in records:
         description = row["description"]
         result = {"video_id": row["video_id"], "source": row["source"],
                   "description": description, "status": "proposed"}
+        if register_catalog:
+            result["catalog_ref"] = references[row["video_id"]]
         if key:
             try:
                 route, probabilities, model = jev_assignment(description, key)
@@ -212,12 +281,16 @@ def main():
     routing = commands.add_parser("assign", help="Propose creative assignments for an independently supplied catalog.")
     routing.add_argument("catalog", type=Path)
     routing.add_argument("--paid-jev-limit", type=int, help="Enable paid Jev requests. Maximum calls for this invocation.")
+    routing.add_argument("--register-catalog", action="store_true", help="Register independently supplied entries with source references for draft saving.")
     args = parser.parse_args()
     try:
         if args.command == "serve":
             serve(args.port, args.live_youtube)
         else:
-            assign(args.catalog, args.paid_jev_limit)
+            assign(args.catalog, args.paid_jev_limit, args.register_catalog)
+    except sqlite3.Error:
+        print("Could not open the local campaign database.", file=sys.stderr)
+        return 1
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
