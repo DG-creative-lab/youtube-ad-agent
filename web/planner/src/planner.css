@@ -79,6 +79,11 @@ button:disabled { opacity: .58; cursor: wait; }
 .performance-results .setup-details > div { grid-template-columns: minmax(80px, 135px) minmax(0, 1fr); }
 .performance-results .setup-details dt { text-transform: none; }
 .performance-results .label + h3 { margin-top: 7px; }
+.correction-form { display: grid; gap: 12px; margin-top: 16px; }
+.correction-form label { display: grid; gap: 6px; font-size: .8rem; }
+.correction-form select, .correction-form textarea { min-height: 44px; max-width: 100%; padding: 8px 10px; font: inherit; background: #fff; color: inherit; border: 1px solid var(--line); }
+.correction-form textarea { resize: vertical; }
+.correction-form button { justify-self: start; margin: 0; }
 .approval-history button { margin: 6px 0 8px; }
 .approval-snapshot { max-height: 420px; overflow: auto; background: #efeeeb; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-action { margin-top: 14px; }

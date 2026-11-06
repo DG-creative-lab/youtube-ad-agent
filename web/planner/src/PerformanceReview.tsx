@@ -1,6 +1,7 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 
 type Scenario = {id: string; label: string};
+type Correction = {id: string; kind: string; label: string; note: string; review_id: string};
 type PerformanceResult = {
   id: string;
   created_at: string;
@@ -27,12 +28,14 @@ type PerformanceResult = {
     }[];
   };
   proposal: {
+    kind: string;
     creative_version: string | null;
     title: string;
     reason: string;
     change: string;
     hold_constant: string;
     measure: string;
+    correction?: Correction;
   };
 };
 
@@ -54,16 +57,25 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
   const [result, setResult] = useState<PerformanceResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [correctionChoices, setCorrectionChoices] = useState<Scenario[]>([]);
+  const [savedCorrection, setSavedCorrection] = useState<Correction | null>(null);
+  const [correctionKind, setCorrectionKind] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const correctionOperation = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const query = new URLSearchParams({revision: String(revision), fingerprint});
-    request<{scenarios: Scenario[]; review: PerformanceResult | null}>(endpoint + "?" + query)
+    request<{scenarios: Scenario[]; review: PerformanceResult | null; correction: Correction | null;
+             correction_choices: Scenario[]}>(endpoint + "?" + query)
       .then(data => {
         if (cancelled) return;
         setScenarios(data.scenarios);
         setScenario(data.review?.sample_delivery.scenario ?? data.scenarios[0]?.id ?? "");
         setResult(data.review);
+        setCorrectionChoices(data.correction_choices);
+        setSavedCorrection(data.correction);
       })
       .catch(failure => {
         if (!cancelled) setError(failure.message || "Could not load the performance review.");
@@ -72,11 +84,16 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
   }, [revision, fingerprint, request]);
 
   async function runReview() {
-    if (busy || !scenario) return;
+    if (busy || saving || !scenario) return;
     setBusy(true);
     setError("");
     try {
-      setResult(await request<PerformanceResult>(endpoint, {campaign_id: campaignId, revision, fingerprint, scenario}));
+      const next = await request<PerformanceResult>(endpoint, {campaign_id: campaignId, revision, fingerprint, scenario});
+      setResult(next);
+      setSavedCorrection(next.proposal.correction ?? null);
+      correctionOperation.current = null;
+      setCorrectionKind("");
+      setNote("");
     } catch (failure) {
       if (failure instanceof Error && "status" in failure && failure.status === 409) {
         onPackageConflict(failure.message);
@@ -88,10 +105,38 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
     }
   }
 
+  async function saveCorrection() {
+    if (!result || !correctionKind || saving || busy) return;
+    const operation = correctionOperation.current ?? crypto.randomUUID().replaceAll("-", "");
+    correctionOperation.current = operation;
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await request<Correction>("/api/campaign/correction", {
+        campaign_id: campaignId, revision, fingerprint, review_id: result.id, kind: correctionKind, note,
+        operation_id: operation,
+      });
+      setSavedCorrection(saved);
+      correctionOperation.current = null;
+      setCorrectionKind("");
+      setNote("");
+    } catch (failure) {
+      if (failure instanceof Error && "status" in failure && failure.status === 409) {
+        onPackageConflict(failure.message);
+      } else {
+        setError(failure instanceof Error ? failure.message : "Could not save the buyer correction.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const label = (creative: string) => groups.find(group => group.creative_version === creative)?.title ?? creative;
   const delivery = result?.sample_delivery;
   const activity = result?.local_viewer_activity;
   const proposal = result?.proposal;
+  const needsRerun = proposal?.correction?.id !== savedCorrection?.id;
+  const proposalLabel = needsRerun ? "Saved proposal · Rerun needed" : "Proposed next test";
 
   return (
     <section className="performance" aria-labelledby="performance-heading">
@@ -100,11 +145,11 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
       <p className="revision">Review sample delivery alongside observed local viewer activity for revision {revision}.</p>
       <div className="performance-controls">
         <label>Sample delivery scenario
-          <select value={scenario} onChange={event => setScenario(event.target.value)} disabled={busy || !scenarios.length}>
+          <select value={scenario} onChange={event => setScenario(event.target.value)} disabled={busy || saving || !scenarios.length}>
             {scenarios.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
           </select>
         </label>
-        <button onClick={runReview} disabled={busy || !scenario}>{busy ? "Reviewing…" : "Review performance"}</button>
+        <button onClick={runReview} disabled={busy || saving || !scenario}>{busy ? "Reviewing…" : "Review performance"}</button>
       </div>
       {error && <p className="performance-error" role="alert">{error}</p>}
       {delivery && activity && proposal && (
@@ -135,8 +180,15 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
               </div>)}
             </dl>
           </section>
-          <section aria-label="Proposed next test" aria-live="polite">
-            <p className="label">Proposed next test</p>
+          <section aria-label={proposalLabel} aria-live="polite">
+            <p className="label">{proposalLabel}</p>
+            {needsRerun && <p className="revision">
+              {savedCorrection ? (
+                <>Current correction · {savedCorrection.label}.
+                  {savedCorrection.note && ` ${savedCorrection.note}`}
+                  {" Run another review to apply it."}</>
+              ) : "The correction used in this review no longer applies. Run another review to get an updated proposal."}
+            </p>}
             <h3>{proposal.title}</h3>
             <p className="revision">
               {proposal.creative_version && `${label(proposal.creative_version)} · `}{proposal.reason}
@@ -146,8 +198,40 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
               <div><dt>Keep fixed</dt><dd>{proposal.hold_constant}</dd></div>
               <div><dt>Measure</dt><dd>{proposal.measure}</dd></div>
             </dl>
+            {proposal.correction && (
+              <p className="revision">
+                Used buyer correction from review {proposal.correction.review_id.slice(0, 8)}.{" "}
+                {proposal.correction.label}. {proposal.correction.note}
+              </p>
+            )}
             <p className="provenance">Offline review · Illustrative decision rules</p>
           </section>
+          {proposal.kind === "comparison_test" && (
+            <section aria-labelledby="buyer-correction">
+              <h3 id="buyer-correction">Buyer correction</h3>
+              <p className="revision">Tell the agent what to keep fixed for this comparison.</p>
+              <form className="correction-form" onSubmit={event => { event.preventDefault(); void saveCorrection(); }}>
+                <label>What should stay unchanged?
+                  <select value={correctionKind} onChange={event => {
+                    correctionOperation.current = null;
+                    setCorrectionKind(event.target.value);
+                  }}
+                    disabled={busy || saving} required>
+                    <option value="">Choose a correction</option>
+                    {correctionChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+                  </select>
+                </label>
+                <label>Reason for the correction (optional)
+                  <textarea value={note} maxLength={500} rows={2} disabled={busy || saving}
+                    onChange={event => {
+                      correctionOperation.current = null;
+                      setNote(event.target.value);
+                    }} />
+                </label>
+                <button disabled={!correctionKind || busy || saving}>{saving ? "Saving…" : "Save correction"}</button>
+              </form>
+            </section>
+          )}
         </div>
       )}
     </section>

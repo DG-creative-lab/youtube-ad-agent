@@ -128,7 +128,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if self.path == "/api/agent/run":
                 self.post_agent()
                 return
-            if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance"}:
+            if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
+                             "/api/campaign/correction"}:
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -179,14 +180,21 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 data = json.loads(self.rfile.read(int(length)))
                 fields = {"campaign_id", "revision", "fingerprint"}
                 is_performance = self.path.endswith("/performance")
+                is_correction = self.path.endswith("/correction")
                 if is_performance:
                     fields.add("scenario")
+                if is_correction:
+                    fields.update({"review_id", "kind", "note", "operation_id"})
                 if (not isinstance(data, dict) or set(data) != fields
                         or not isinstance(data["fingerprint"], str)
                         or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])
-                        or (is_performance and not isinstance(data["scenario"], str))):
+                        or (is_performance and not isinstance(data["scenario"], str))
+                        or (is_correction and (not isinstance(data["review_id"], str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", data["review_id"])))):
                     raise ValueError("Send a valid package reference.")
-                if is_performance:
+                if is_correction:
+                    command = performance.save_correction
+                elif is_performance:
                     command = performance.review
                 else:
                     command = drafts.approve_package if self.path.endswith("/approve") else drafts.export_setup
