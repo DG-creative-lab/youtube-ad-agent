@@ -6,6 +6,20 @@ Placement discovery, draft saving, export and the two-take comparison run locall
 
 Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md), [design direction](docs/design-direction.md) and [build plan](docs/build-plan.md).
 
+## Run the planner
+
+Use Python 3.12 or newer, Node 22.12 or newer, and pnpm 10.33.0 to run the React planner. After building the frontend, start the Python server and open the private planner link printed in the terminal.
+
+```sh
+pnpm --dir web/planner install --frozen-lockfile
+pnpm --dir web/planner build
+python3 scripts/placement_review.py serve
+```
+
+Choose **Try the offline example** on the home screen to open the campaign workspace and run the recorded agent against the fictional catalog. The workspace shows the completed steps, saved draft revision, placements and comparison links. **Resume preparation** continues a run interrupted in the same browser tab. Use **Placements** to search, edit selections or export placement URLs. Rebuild after editing the React source.
+
+In the campaign workspace, review the setup, preview the cuts and choose **Approve package**. Both placement groups and their generated media must be ready. **Export setup** downloads a JSON handoff with fictional placement labels. Review links allow switching between the examples whose content still matches the package. If the draft, comparison text or media changes, reload and review the package before approving it again. **Approval history** shows the saved contents of each approval recorded with a snapshot.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.
@@ -38,6 +52,12 @@ On macOS with FFmpeg installed, run `python3 -m scripts.prepare_viewer_media` on
 The comparison records local viewer activity in the draft database. A visit keeps its original creative reference when the viewer switches examples. Playing both takes through and choosing one records one completion per visit and example version. The viewer retries pending activity with the same event IDs after a refresh in the same tab.
 
 The planner link contains a private token for the current server process. Keep that link local and use the separate viewer link for the comparison. The viewer runs at `http://127.0.0.1:8766` by default. If that port is busy, pass `--viewer-port 8876` and reuse the same port and database on each restart so saved viewer links and pending activity in the same tab still work. Planner access uses the seeded local operator, client and brand. Hosted staff authentication is a separate milestone.
+
+## Offline agent preparation
+
+Run `python3 -m campaign_agent.agent` to prepare the fictional Text to Speech campaign from the recorded demo request. The command prints a run ID before it starts and returns the saved draft revision and ambiguous catalog entries. Use `python3 -m campaign_agent.agent --resume RUN_ID` to continue an interrupted run. The planner opens the saved sample draft for review.
+
+The recorded decisions support the included demo request and local fictional catalog. The run preserves existing placements and stops if the draft changes while it is preparing. Campaign approval, export of a complete package, and live model inference are later steps.
 
 ## Engineering checks
 

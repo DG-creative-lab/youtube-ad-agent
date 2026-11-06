@@ -19,8 +19,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if not __package__:
     sys.path.insert(0, str(ROOT))
 
+from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.creatives import EXAMPLES
+from campaign_agent.handoff import caption_bytes, example_content, media_sha256, package_fingerprint
+from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, StaleDraft, VIDEO_ID
+from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
 
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
@@ -31,10 +35,7 @@ ROUTES = {
     "audiobook": "Tutorial about producing audiobooks or directing a narrator to interpret a story.",
     "review": "Neither context fits clearly, both fit equally, or the evidence is insufficient.",
 }
-TERMS = {
-    "video-editing": ("video editing", "video editor", "voiceover timing", "video timeline", "davinci resolve", "premiere pro"),
-    "audiobook": ("audiobook", "audiobooks", "audio book", "fiction narration", "character voices", "narrator direction"),
-}
+
 
 
 def demo_search(query, page):
@@ -77,8 +78,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     drafts = CampaignDrafts(draft_path, live)
+    agent = None if live else AgentRuntime(draft_path)
     viewer = ViewerMeasurement(draft_path)
     operator_token = secrets.token_urlsafe(32)
+    planner_build = ROOT / "web/planner/dist"
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -120,6 +123,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 else:
                     self.send(404, {"error": "Not found."})
                 return
+            if self.path == "/api/agent/run":
+                self.post_agent()
+                return
+            if self.path in {"/api/campaign/approve", "/api/campaign/export"}:
+                self.post_package()
+                return
             if self.path != "/api/campaign":
                 self.send(404, {"error": "Not found."})
                 return
@@ -149,6 +158,77 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             else:
                 self.send(200, saved)
 
+        def post_package(self):
+            if not self.check_operator():
+                return
+            if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
+                    or self.headers.get("X-Placement-Review") != "campaign"):
+                self.send(403, {"error": "Open the package in the local planner."})
+                return
+            if live:
+                self.send(404, {"error": "Package handoff is available in sample mode."})
+                return
+            length = self.headers.get("Content-Length", "")
+            if (self.headers.get_content_type() != "application/json"
+                    or not re.fullmatch(r"[0-9]{1,4}", length) or not 0 < int(length) <= 4096):
+                self.send(400, {"error": "Send a valid package reference."})
+                return
+            try:
+                data = json.loads(self.rfile.read(int(length)))
+                if (not isinstance(data, dict) or set(data) != {"campaign_id", "revision", "fingerprint"}
+                        or not isinstance(data["fingerprint"], str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])):
+                    raise ValueError("Send a valid package reference.")
+                command = drafts.approve_package if self.path.endswith("/approve") else drafts.export_setup
+                result = command(**data)
+            except PackageConflict as exc:
+                self.send(409, {"error": str(exc)})
+            except (ValueError, RecursionError):
+                self.send(400, {"error": "Send a valid package reference."})
+            except PermissionError:
+                self.send(403, {"error": "The package is unavailable to this operator."})
+            except (sqlite3.Error, OSError):
+                self.send(503, {"error": "Could not complete this action. Try again."})
+            else:
+                self.send(200, result)
+
+        def post_agent(self):
+            if not self.check_operator():
+                return
+            if self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}":
+                self.send(403, {"error": "Start the run from the local planner."})
+                return
+            if agent is None:
+                self.send(404, {"error": "The recorded agent is available in sample mode."})
+                return
+            length = self.headers.get("Content-Length", "")
+            if (self.headers.get_content_type() != "application/json"
+                    or not re.fullmatch(r"[0-9]{1,4}", length) or not 0 < int(length) <= 4096):
+                self.send(400, {"error": "Send a valid agent request."})
+                return
+            try:
+                data = json.loads(self.rfile.read(int(length)))
+                run_id = data.get("run_id") if isinstance(data, dict) else None
+                if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+                    raise ValueError("Invalid run ID.")
+                if set(data) == {"run_id", "request"}:
+                    agent.start(data["request"], run_id=run_id)
+                    result = agent.read(run_id)
+                elif set(data) == {"run_id"}:
+                    result = agent.resume(run_id, max_steps=1)
+                else:
+                    raise ValueError("Invalid agent request.")
+            except StaleDraft:
+                self.send(409, {"error": "The draft changed during preparation. Start a new run from the latest revision."})
+            except PermissionError as exc:
+                self.send(403, {"error": str(exc)})
+            except (ValueError, RecursionError):
+                self.send(400, {"error": "The recorded agent supports the sample campaign request only."})
+            except (sqlite3.Error, OSError):
+                self.send(503, {"error": "Could not complete this step. Try resuming the run."})
+            else:
+                self.send(200, result)
+
         def post_viewer(self):
             if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
                     or self.headers.get("X-Viewer") != "comparison"):
@@ -164,12 +244,20 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if not isinstance(data, dict):
                     raise ValueError("Invalid comparison request.")
                 if self.path == "/api/viewer/open":
+                    content = data.pop("content", None)
+                    references = data.pop("references", None)
                     if (set(data) != {"creative_ref", "example_ref", "visit_id"}
                             or not isinstance(data["creative_ref"], str)
+                            or (content is not None and (not isinstance(content, str)
+                                or not re.fullmatch(r"[0-9a-f]{64}", content)))
+                            or (references is not None and (
+                                content is None or not isinstance(references, dict)
+                                or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                                       for digest in references.values())))
                             or any(data[key] is not None and not isinstance(data[key], str)
                                    for key in ("example_ref", "visit_id"))):
                         raise ValueError("Invalid comparison request.")
-                    result = viewer.open_example(**data)
+                    result = self.open_comparison(data, content, references)
                 else:
                     if (set(data) != {"creative_ref", "example_ref", "visit_id", "event_id", "kind", "take"}
                             or any(not isinstance(value, str) for value in data.values())):
@@ -177,21 +265,53 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     result = viewer.record(**data)
             except ViewerNotFound as exc:
                 self.send(404, {"error": str(exc)})
+            except PackageConflict as exc:
+                self.send(409, {"error": str(exc)})
             except (UnicodeError, json.JSONDecodeError, RecursionError):
                 self.send(400, {"error": "Send valid comparison JSON."})
             except ValueError as exc:
                 self.send(400, {"error": str(exc)})
-            except sqlite3.Error:
+            except (sqlite3.Error, OSError):
                 self.send(503, {"error": "Could not save comparison activity. Try again."})
             else:
                 self.send(200, result)
+
+        def open_comparison(self, data, fingerprint, references):
+            if fingerprint is None:
+                return viewer.open_example(**data)
+            origin, example = viewer.resolve(data["creative_ref"], data["example_ref"])
+            if references is None:
+                references = {origin.ref: fingerprint}
+            if references.get(origin.ref) != fingerprint or example.ref not in references:
+                raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+            verified = {}
+            for item in viewer.examples.values():
+                if item.scope != origin.scope or item.ref not in references:
+                    continue
+                content = example_content(item, drafts.media_dir)
+                if (package_fingerprint(content) == references[item.ref]
+                        and all(take["sha256"] for take in content["takes"])):
+                    verified[item.ref] = content
+            if not verified:
+                raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+            selected_ref = example.ref if example.ref in verified else next(iter(verified))
+            result = viewer.open_example(**{**data, "example_ref": selected_ref})
+            content = verified[selected_ref]
+            comparison = result["example"]
+            for take, reviewed in zip(comparison["takes"], content["takes"]):
+                take["url"] += "?sha256=" + reviewed["sha256"]
+            comparison["captions"] += "?sha256=" + content["captions_sha256"]
+            result["examples"] = [item for item in result["examples"] if item["ref"] in verified]
+            if selected_ref != example.ref:
+                result["notice"] = "That reviewed example is unavailable. Another verified example is open."
+            return result
 
         def do_GET(self):
             if not self.check_host():
                 return
             url = urlsplit(self.path)
             if url.path.startswith("/viewer/media/"):
-                self.read_viewer_media(url.path.removeprefix("/viewer/media/"))
+                self.read_viewer_media(url.path.removeprefix("/viewer/media/"), url.query)
                 return
             if self.server is viewer_server:
                 if url.path == "/viewer":
@@ -199,18 +319,52 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 else:
                     self.send(404, {"error": "Not found."})
                 return
-            if url.path == "/":
+            if url.path in {"/", "/campaign"} and (planner_build / "index.html").is_file():
+                self.send(200, (planner_build / "index.html").read_bytes(), "text/html; charset=utf-8")
+                return
+            asset = re.fullmatch(r"/assets/([A-Za-z0-9_-]+\.(js|css))", url.path)
+            if asset:
+                file = planner_build / "assets" / asset[1]
+                if file.is_file():
+                    content_type = "text/javascript" if file.suffix == ".js" else "text/css"
+                    self.send(200, file.read_bytes(), content_type + "; charset=utf-8")
+                else:
+                    self.send(404, {"error": "Not found."})
+                return
+            if url.path in {"/", "/placements"}:
                 page = (ROOT / "placement-review/index.html").read_bytes()
                 viewer_origin = f"http://127.0.0.1:{viewer_server.server_port}".encode()
                 self.send(200, page.replace(b"VIEWER_ORIGIN_PLACEHOLDER", viewer_origin), "text/html; charset=utf-8")
                 return
             if url.path == "/api/mode":
                 if self.check_operator():
-                    self.send(200, {"live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS})
+                    self.send(200, {
+                        "live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS,
+                        "demoRequest": DEMO_REQUEST,
+                        "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
+                        "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
+                                     for item in EXAMPLES],
+                    })
                 return
-            if url.path == "/api/campaign":
+            if url.path == "/api/agent/run":
+                if not self.check_operator():
+                    return
+                run_id = parse_qs(url.query).get("id", [""])[0]
+                if agent is None or not RUN_ID.fullmatch(run_id):
+                    self.send(404, {"error": "Run unavailable."})
+                    return
+                try:
+                    result = agent.read(run_id)
+                except PermissionError:
+                    self.send(404, {"error": "Run unavailable."})
+                except sqlite3.Error:
+                    self.send(503, {"error": "Could not load run progress. Try again."})
+                else:
+                    self.send(200, result)
+                return
+            if url.path in {"/api/campaign", "/api/campaign/package"}:
                 if self.check_operator():
-                    self.read_campaign(url.query)
+                    self.read_campaign(url.query, package=url.path.endswith("/package"))
                 return
             if url.path != "/api/search":
                 self.send(404, {"error": "Not found."})
@@ -234,27 +388,34 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             except (URLError, TimeoutError, ValueError):
                 self.send(502, {"error": "YouTube search could not be reached. Earlier results are still available."})
 
-        def read_viewer_media(self, route):
+        def read_viewer_media(self, route, query):
             try:
                 creative_ref, example_ref, take = route.split("/")
                 _, example = viewer.resolve(creative_ref, example_ref)
                 if take == "captions":
-                    caption = f"WEBVTT\n\n00:00:00.000 --> 00:00:08.000\n{example.passage}\n"
-                    self.send(200, caption.encode(), "text/vtt; charset=utf-8")
-                    return
-                name = next((name for id_, _, name in example.takes if id_ == take), None)
-                if take == "preview":
-                    name = example.preview
-                if name is None:
-                    raise ViewerNotFound()
-                data = (ROOT / ".local/viewer-media" / name).read_bytes()
+                    data = caption_bytes(example)
+                    content_type = "text/vtt; charset=utf-8"
+                else:
+                    name = next((name for id_, _, name in example.takes if id_ == take), None)
+                    if take == "preview":
+                        name = example.preview
+                    if name is None:
+                        raise ViewerNotFound()
+                    data = (drafts.media_dir / name).read_bytes()
+                    content_type = "video/mp4" if name.endswith(".mp4") else "audio/mpeg"
             except (ValueError, ViewerNotFound, FileNotFoundError):
                 self.send(404, {"error": "This sample is unavailable."})
                 return
             except OSError:
                 self.send(503, {"error": "Could not read the sample. Try again."})
                 return
-            content_type = "video/mp4" if name.endswith(".mp4") else "audio/mpeg"
+            fingerprints = parse_qs(query, keep_blank_values=True).get("sha256")
+            if fingerprints is not None and fingerprints != [media_sha256(data)]:
+                self.send(409, {"error": "The media has changed. Reload the package in the planner."})
+                return
+            if take == "captions":
+                self.send(200, data, content_type)
+                return
             headers = [("Accept-Ranges", "bytes")]
             match = re.fullmatch(r"bytes=([0-9]{0,19})-([0-9]{0,19})", self.headers.get("Range", ""))
             if not match or not any(match.groups()):
@@ -275,24 +436,42 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             headers.append(("Content-Range", f"bytes {start}-{end}/{size}"))
             self.send(206, data[start:end + 1], content_type, headers)
 
-        def read_campaign(self, query):
+        def read_campaign(self, query, *, package=False):
             if self.headers.get("X-Placement-Review") != "campaign":
                 self.send(403, {"error": "Open drafts from the placement review page."})
                 return
-            requested = parse_qs(query, keep_blank_values=True).get("revision")
+            params = parse_qs(query, keep_blank_values=True)
+            requested = params.get("revision")
+            approved = params.get("approval") if package else None
+            if package and live:
+                self.send(404, {"error": "Package review is available in sample mode."})
+                return
             if requested is not None and (
                 len(requested) != 1 or not re.fullmatch(r"[1-9][0-9]{0,18}", requested[0])
                 or int(requested[0]) >= 2**63
             ):
                 self.send(400, {"error": "Use a valid revision number."})
                 return
+            if package and requested is None:
+                self.send(400, {"error": "Choose the draft revision to review."})
+                return
+            if approved is not None and (len(approved) != 1 or not re.fullmatch(r"[0-9a-f]{64}", approved[0])):
+                self.send(400, {"error": "Use a valid approval fingerprint."})
+                return
             try:
-                draft = drafts.read(int(requested[0]) if requested else None)
-            except sqlite3.Error:
+                if approved is not None:
+                    draft = drafts.read_approved_package(drafts.campaign_id, int(requested[0]), approved[0])
+                elif package:
+                    draft = drafts.review_package(drafts.campaign_id, int(requested[0]))
+                else:
+                    draft = drafts.read(int(requested[0]) if requested else None)
+            except ValueError as exc:
+                self.send(400, {"error": str(exc)})
+            except (sqlite3.Error, OSError):
                 self.send(503, {"error": "Could not load the draft. Try again."})
                 return
             if draft is None:
-                self.send(404, {"error": "Revision not found."})
+                self.send(404, {"error": "Approved snapshot unavailable." if approved else "Revision not found."})
             else:
                 self.send(200, draft)
 
@@ -312,33 +491,6 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         finally:
             viewer_server.shutdown()
             viewer_thread.join()
-
-
-def read_catalog(path):
-    """Read only independently supplied descriptions with an explicit source."""
-    records = json.loads(path.read_text())
-    if not isinstance(records, list) or not records:
-        raise ValueError("The catalog must be a nonempty JSON array.")
-    seen = set()
-    for index, row in enumerate(records, 1):
-        if not isinstance(row, dict):
-            raise ValueError(f"Catalog row {index} must be an object.")
-        video_id = row.get("video_id", "")
-        description = row.get("description", "")
-        if (not isinstance(video_id, str) or not VIDEO_ID.fullmatch(video_id)
-                or row.get("source") not in ("creator_supplied", "licensed", "synthetic")
-                or not isinstance(description, str) or not description.strip() or len(description) > 3000):
-            raise ValueError(f"Invalid catalog row {index}. Use a video ID, permitted source and description (up to 3,000 characters).")
-        if video_id in seen:
-            raise ValueError(f"Duplicate video ID at catalog row {index}.")
-        seen.add(video_id)
-    return records
-
-
-def rule_assignment(description):
-    matches = [route for route, terms in TERMS.items()
-               if any(re.search(r"\b" + re.escape(term) + r"\b", description.lower()) for term in terms)]
-    return matches[0] if len(matches) == 1 else "review"
 
 
 def jev_request(description):

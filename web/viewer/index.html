@@ -51,7 +51,11 @@
 "use strict";
 const el = (id) => document.getElementById(id);
 const defaultCreative = "editing-voiceover-v1";
-let creative = new URLSearchParams(location.search).get("ad") || defaultCreative;
+const query = new URLSearchParams(location.search);
+const content = query.get("content");
+const reviewed = query.getAll("reviewed");
+const references = reviewed.length ? Object.fromEntries(reviewed.map(value => value.split(":"))) : null;
+let creative = query.get("ad") || defaultCreative;
 let visit;
 let current;
 let chosenTake;
@@ -70,7 +74,7 @@ async function post(action, payload) {
   return data;
 }
 
-function storageKey() { return "viewer:" + creative; }
+function storageKey() { return "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : ""); }
 
 function persistVisit() {
   sessionStorage.setItem(storageKey(), JSON.stringify({visit, example: current.ref, queue}));
@@ -192,11 +196,13 @@ function render(data) {
   el("example").value = current.ref;
   el("other").hidden = data.examples.length < 2;
   el("choose").hidden = false;
+  el("status").textContent = data.notice || "";
   showState();
 }
 
 function openExample(example = null, id = null) {
-  return post("open", {creative_ref: creative, example_ref: example, visit_id: id});
+  return post("open", {creative_ref: creative, example_ref: example, visit_id: id,
+                       ...(content && {content}), ...(references && {references})});
 }
 
 el("choose").onclick = () => {
@@ -234,7 +240,7 @@ el("example").onchange = async () => {
     try {
       render(await openExample());
     } catch (error) {
-      if (error.status !== 404 || creative === defaultCreative) throw error;
+      if (error.status !== 404 || creative === defaultCreative || content) throw error;
       creative = defaultCreative;
       render(await openExample());
       history.replaceState(null, "", "/viewer");
