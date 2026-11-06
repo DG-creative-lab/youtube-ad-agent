@@ -17,11 +17,12 @@ class ViewerMeasurement:
         self.path = path
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
-        with closing(self.connect()) as db:
+        with closing(self.connect()) as db, db:
             db.executescript("""
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS viewer_visits (
                     id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    creative_ref TEXT NOT NULL
+                    creative_ref TEXT NOT NULL, content_fingerprint TEXT
                 );
                 CREATE TABLE IF NOT EXISTS viewer_events (
                     seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
@@ -34,6 +35,9 @@ class ViewerMeasurement:
                     PRIMARY KEY (visit_id, example_ref)
                 );
             """)
+            columns = db.execute("PRAGMA table_info(viewer_visits)").fetchall()
+            if "content_fingerprint" not in {column[1] for column in columns}:
+                db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
 
     def connect(self):
         db = sqlite3.connect(self.path)
@@ -52,20 +56,74 @@ class ViewerMeasurement:
         return visit_id, origin.scope.client_id, origin.scope.brand_id, origin.creative_ref
 
     def require_visit(self, db, origin, visit_id):
-        if not db.execute(
-            "SELECT 1 FROM viewer_visits WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
+        visit = db.execute(
+            "SELECT content_fingerprint FROM viewer_visits WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
             self.visit_key(origin, visit_id),
-        ).fetchone():
+        ).fetchone()
+        if visit is None:
             raise ViewerNotFound("This visit is unavailable.")
+        return visit[0]
 
-    def open_example(self, creative_ref, example_ref=None, visit_id=None):
+    def summarize(self, scope, comparisons):
+        """Count tagged visits and intended-example outcomes in one local snapshot."""
+        with closing(self.connect()) as db:
+            db.execute("BEGIN")
+            observations = []
+            for creative_ref, example_ref, fingerprint in comparisons:
+                origin, example = self.resolve(creative_ref, example_ref)
+                if origin.scope != scope or origin.ref != example.ref:
+                    raise ViewerNotFound("This comparison is unavailable.")
+                arrivals, opened, completed = db.execute("""
+                    SELECT COUNT(*),
+                        COUNT(CASE WHEN EXISTS (
+                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
+                                AND e.kind = 'arrival' AND e.example_ref = ?
+                        ) THEN 1 END),
+                        COUNT(CASE WHEN EXISTS (
+                            SELECT 1 FROM viewer_completions c WHERE c.visit_id = v.id AND c.example_ref = ?
+                        ) THEN 1 END)
+                    FROM viewer_visits v
+                    WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
+                        AND EXISTS (
+                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
+                        )
+                """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint)).fetchone()
+                unattributed, = db.execute("""
+                    SELECT COUNT(*) FROM viewer_visits v
+                    WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ?
+                        AND v.content_fingerprint IS NULL
+                        AND EXISTS (
+                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
+                        )
+                """, (scope.client_id, scope.brand_id, creative_ref)).fetchone()
+                observations.append({
+                    "creative_version": creative_ref, "comparison_version": example_ref,
+                    "comparison_fingerprint": fingerprint, "unattributed_arrivals": unattributed,
+                    "arrivals": arrivals, "intended_opens": opened, "completions": completed,
+                    "completion_rate": completed / arrivals if arrivals else None,
+                })
+        return observations
+
+    def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
+                     content_fingerprint=None, origin_unavailable=False):
         origin, target = self.resolve(creative_ref, example_ref)
         with closing(self.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
             if visit_id is None:
                 visit_id = uuid4().hex
-                db.execute("INSERT INTO viewer_visits VALUES (?, ?, ?, ?)", self.visit_key(origin, visit_id))
+                attribution = None if origin_unavailable else content_fingerprint
+                db.execute(
+                    "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint) "
+                    "VALUES (?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution),
+                )
             else:
-                self.require_visit(db, origin, visit_id)
+                attribution = self.require_visit(db, origin, visit_id)
+                # A visit with unknown content can resume, but later verification cannot attribute its old activity.
+                if attribution is not None:
+                    if attribution != content_fingerprint:
+                        raise ViewerNotFound("This visit is unavailable.")
+                    if origin_unavailable:
+                        db.execute("UPDATE viewer_visits SET content_fingerprint = NULL WHERE id = ?", (visit_id,))
             db.execute(
                 "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) "
                 "VALUES (?, ?, ?, 'arrival', '') ON CONFLICT (visit_id, event_id) DO NOTHING",

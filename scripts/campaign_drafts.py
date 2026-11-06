@@ -221,13 +221,18 @@ class CampaignDrafts:
             review["history"] = self._approval_history(db, key[:3])
             return review
 
+    def require_approved_package(self, db, campaign_id, revision, fingerprint):
+        """Validate approval in the caller's transaction and return the reviewed package."""
+        review, _ = self._package_review(db, campaign_id, revision)
+        self._require_current_package(review, revision, fingerprint)
+        if review["approval"] is None:
+            raise PackageConflict("Approve this revision before continuing.")
+        return review
+
     def export_setup(self, campaign_id, revision, fingerprint):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN")
-            review, _ = self._package_review(db, campaign_id, revision)
-            self._require_current_package(review, revision, fingerprint)
-            if review["approval"] is None:
-                raise PackageConflict("Approve this revision before exporting the setup.")
+            review = self.require_approved_package(db, campaign_id, revision, fingerprint)
             return {
                 "handoff": "Manual Google Ads setup example",
                 "instructions": "Use this as a walkthrough. Replace fictional placements with verified targets "

@@ -67,6 +67,39 @@ class ViewerMeasurementTests(unittest.TestCase):
                 "SELECT example_ref, take FROM viewer_events WHERE kind = 'finish' ORDER BY seq",
             ).fetchall(), [(EDIT.ref, "a"), (BOOK.ref, "b")])
 
+    def test_legacy_visit_resumes_from_reviewed_link_without_gaining_attribution(self):
+        self.event("start", "a")
+        self.event("finish", "a")
+        self.event("start", "b")
+        queued_finish = uuid4().hex
+        reopened = ViewerMeasurement(self.path)
+        fingerprint = "a" * 64
+        state = reopened.open_example(EDIT.creative_ref, EDIT.ref, self.visit, content_fingerprint=fingerprint)
+        self.assertEqual((state["visit_id"], state["finished"]), (self.visit, ["a"]))
+        self.assertEqual(self.event("finish", "b", queued_finish)["finished"], ["a", "b"])
+        self.assertEqual(self.event("finish", "b", queued_finish)["finished"], ["a", "b"])
+        row, = reopened.summarize(LOCAL_BRAND, [(EDIT.creative_ref, EDIT.ref, fingerprint)])
+        self.assertEqual((row["arrivals"], row["unattributed_arrivals"]), (0, 1))
+
+    def test_reviewed_visit_keeps_progress_and_loses_attribution_on_fallback(self):
+        fingerprint = "a" * 64
+        self.visit = self.viewer.open_example(EDIT.creative_ref, content_fingerprint=fingerprint)["visit_id"]
+        self.event("start", "a")
+        self.event("finish", "a")
+        self.event("start", "b")
+        with self.assertRaises(ViewerNotFound):
+            self.viewer.open_example(EDIT.creative_ref, BOOK.ref, self.visit,
+                                     content_fingerprint="b" * 64, origin_unavailable=True)
+        fallback = self.viewer.open_example(EDIT.creative_ref, BOOK.ref, self.visit,
+                                            content_fingerprint=fingerprint, origin_unavailable=True)
+        self.assertEqual((fallback["visit_id"], fallback["example"]["ref"]), (self.visit, BOOK.ref))
+        self.event("finish", "b")
+        restored = self.viewer.open_example(EDIT.creative_ref, EDIT.ref, self.visit, content_fingerprint=fingerprint)
+        self.assertEqual(restored["finished"], ["a", "b"])
+        self.assertTrue(self.event("choose", "a")["complete"])
+        row, = self.viewer.summarize(LOCAL_BRAND, [(EDIT.creative_ref, EDIT.ref, fingerprint)])
+        self.assertEqual((row["arrivals"], row["completions"], row["unattributed_arrivals"]), (0, 0, 2))
+
     def test_rejects_cross_scope_examples_visits_and_planner_access(self):
         scopes = (BrandScope("other-client", LOCAL_BRAND.brand_id), BrandScope(LOCAL_BRAND.client_id, "other-brand"))
         foreign = tuple(replace(BOOK, ref=f"other-{i}", creative_ref=f"other-cut-{i}", scope=scope)
