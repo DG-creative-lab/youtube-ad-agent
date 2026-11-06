@@ -1,6 +1,7 @@
 import {useEffect, useState} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
+import {PerformanceReview} from "./PerformanceReview";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -16,7 +17,7 @@ type PackageReview = {
     campaign_id: string;
     revision: number;
     proposed_setup: {objective: string; format: string; budget: string; schedule: string};
-    groups: {context: string; creative_version: string; preview_path: string | null; viewer_path: string}[];
+    groups: {context: string; title: string; creative_version: string; preview_path: string | null; viewer_path: string}[];
   };
   fingerprint: string;
   current_revision: number;
@@ -396,6 +397,15 @@ function App() {
                   </details>}
                   {draft && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
+                {activePackage?.approval && !needsLatest && !busy && (
+                  <PerformanceReview key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
+                    revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
+                    groups={activePackage.package.groups} request={request}
+                    onPackageConflict={message => {
+                      setPackageChanged(true);
+                      setPackageError(message);
+                    }} />
+                )}
               </div>
               <aside className="activity" aria-label="Run details">
                 <span className="label">Run details</span>

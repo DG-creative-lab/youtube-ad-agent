@@ -24,6 +24,7 @@ from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import caption_bytes, example_content, media_sha256, package_fingerprint
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
+from campaign_agent.performance import CampaignPerformance
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
 
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
@@ -80,6 +81,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     drafts = CampaignDrafts(draft_path, live)
     agent = None if live else AgentRuntime(draft_path)
     viewer = ViewerMeasurement(draft_path)
+    performance = None if live else CampaignPerformance(drafts, viewer)
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -126,7 +128,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if self.path == "/api/agent/run":
                 self.post_agent()
                 return
-            if self.path in {"/api/campaign/approve", "/api/campaign/export"}:
+            if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance"}:
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -175,11 +177,19 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             try:
                 data = json.loads(self.rfile.read(int(length)))
-                if (not isinstance(data, dict) or set(data) != {"campaign_id", "revision", "fingerprint"}
+                fields = {"campaign_id", "revision", "fingerprint"}
+                is_performance = self.path.endswith("/performance")
+                if is_performance:
+                    fields.add("scenario")
+                if (not isinstance(data, dict) or set(data) != fields
                         or not isinstance(data["fingerprint"], str)
-                        or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])):
+                        or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])
+                        or (is_performance and not isinstance(data["scenario"], str))):
                     raise ValueError("Send a valid package reference.")
-                command = drafts.approve_package if self.path.endswith("/approve") else drafts.export_setup
+                if is_performance:
+                    command = performance.review
+                else:
+                    command = drafts.approve_package if self.path.endswith("/approve") else drafts.export_setup
                 result = command(**data)
             except PackageConflict as exc:
                 self.send(409, {"error": str(exc)})
@@ -187,7 +197,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Send a valid package reference."})
             except PermissionError:
                 self.send(403, {"error": "The package is unavailable to this operator."})
-            except (sqlite3.Error, OSError):
+            except (sqlite3.Error, OSError, ViewerNotFound):
                 self.send(503, {"error": "Could not complete this action. Try again."})
             else:
                 self.send(200, result)
@@ -295,7 +305,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if not verified:
                 raise PackageConflict("The comparison has changed. Reload the package in the planner.")
             selected_ref = example.ref if example.ref in verified else next(iter(verified))
-            result = viewer.open_example(**{**data, "example_ref": selected_ref})
+            result = viewer.open_example(
+                **{**data, "example_ref": selected_ref},
+                content_fingerprint=fingerprint,
+                origin_unavailable=origin.ref not in verified,
+            )
             content = verified[selected_ref]
             comparison = result["example"]
             for take, reviewed in zip(comparison["takes"], content["takes"]):
@@ -366,6 +380,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if self.check_operator():
                     self.read_campaign(url.query, package=url.path.endswith("/package"))
                 return
+            if url.path == "/api/campaign/performance":
+                if self.check_operator():
+                    self.read_performance(url.query)
+                return
             if url.path != "/api/search":
                 self.send(404, {"error": "Not found."})
                 return
@@ -435,6 +453,24 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             headers.append(("Content-Range", f"bytes {start}-{end}/{size}"))
             self.send(206, data[start:end + 1], content_type, headers)
+
+        def read_performance(self, query):
+            if performance is None:
+                self.send(404, {"error": "Performance review is available in sample mode."})
+                return
+            params = parse_qs(query)
+            revision = params.get("revision", [""])[0]
+            fingerprint = params.get("fingerprint", [""])[0]
+            if (not re.fullmatch(r"[1-9][0-9]{0,18}", revision) or int(revision) >= 2**63
+                    or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)):
+                self.send(400, {"error": "Choose an approved package to review."})
+                return
+            try:
+                result = performance.read(drafts.campaign_id, int(revision), fingerprint)
+            except sqlite3.Error:
+                self.send(503, {"error": "Could not load performance review. Try again."})
+            else:
+                self.send(200, result)
 
         def read_campaign(self, query, *, package=False):
             if self.headers.get("X-Placement-Review") != "campaign":

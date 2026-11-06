@@ -68,6 +68,17 @@ button:disabled { opacity: .58; cursor: wait; }
 .package-actions .error { margin-top: 8px; font-size: .875rem; line-height: 1.5; }
 .package-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .package-buttons button:disabled { cursor: default; }
+.performance { margin-top: 25px; padding-top: 24px; border-top: 1px solid var(--line); }
+.performance-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-top: 17px; }
+.performance-controls label { display: grid; gap: 6px; font-size: .8rem; }
+.performance-controls select { min-height: 44px; max-width: 100%; padding: 0 10px; font: inherit; background: #fff; color: inherit; border: 1px solid var(--line); }
+.performance-controls button { margin: 0; }
+.performance-error { margin-top: 10px; color: #882b25; font-size: .875rem; }
+.performance-results { display: grid; gap: 22px; margin-top: 22px; }
+.performance-results section { padding-top: 15px; border-top: 1px solid var(--line); }
+.performance-results .setup-details > div { grid-template-columns: minmax(80px, 135px) minmax(0, 1fr); }
+.performance-results .setup-details dt { text-transform: none; }
+.performance-results .label + h3 { margin-top: 7px; }
 .approval-history button { margin: 6px 0 8px; }
 .approval-snapshot { max-height: 420px; overflow: auto; background: #efeeeb; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-action { margin-top: 14px; }

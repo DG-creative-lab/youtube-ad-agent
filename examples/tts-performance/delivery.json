@@ -1,0 +1,21 @@
+{
+  "id": "tts_sample_delivery_v1",
+  "source": "Authored fictional delivery",
+  "grain": "Creative totals",
+  "window": {"start": "2026-01-01", "end": "2026-01-07"},
+  "scenarios": {
+    "balanced": {
+      "label": "Both creatives delivered",
+      "rows": {
+        "editing-voiceover-v1": {"impressions": 840, "clicks": 29},
+        "audiobook-reading-v1": {"impressions": 720, "clicks": 24}
+      }
+    },
+    "limited": {
+      "label": "Limited delivery · Partial report",
+      "rows": {
+        "editing-voiceover-v1": {"impressions": 35, "clicks": 2}
+      }
+    }
+  }
+}
