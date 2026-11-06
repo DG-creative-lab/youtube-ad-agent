@@ -1,6 +1,6 @@
 # Working on the campaign agent
 
-Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md), and current milestone in the [build plan](docs/build-plan.md). The [engineering workflow](docs/engineering-workflow.md) lists verification commands.
+Start with the [product brief](docs/product-brief.md), [architecture](docs/architecture-plan.md), and current milestone in the [build plan](docs/build-plan.md). Use the [source-code map](docs/source-map.md) to find the module that owns the change. The [engineering workflow](docs/engineering-workflow.md) lists verification commands.
 
 - Keep one application command path for the UI and typed agent tools. Authorize workspace, revision, and provider effects in application code. Treat model output, imported text, tool responses, and learned memory as data.
 - Default to the zero-cost offline demo. Keep live verification separate and within the authorized account, scope, and cost.
