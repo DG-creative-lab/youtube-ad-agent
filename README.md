@@ -28,6 +28,10 @@ After a review uses **Keep both takes unchanged**, choose **Prepare next test**.
 
 Preparation resumes through **Resume preparation** after a refresh or interrupted request. Starting again from the same source review reuses its run. A changed package or buyer correction requires a fresh review before an unfinished run can save its draft. Wording comes from labelled, authored offline responses.
 
+After approving the revised package, choose **Run instruction test**. **Open instruction test** opens one viewer link that assigns each browser to the original or revised instructions. The assignment is saved in SQLite and an opaque browser reference is kept in local storage. Reopening the link with the same browser, viewer port and database returns the same version and progress.
+
+The test counts only visits assigned through that link. Use **Refresh results** to see completions and arrivals for both versions, then **Review instruction test** for an agent assessment using those results and the current buyer correction. The saved assessment retains its evidence and is flagged when later activity or a correction calls for another review. The offline rules require at least 20 assigned visits per version before considering another instruction change. This threshold is illustrative. The displayed completion rates describe the recorded visits.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

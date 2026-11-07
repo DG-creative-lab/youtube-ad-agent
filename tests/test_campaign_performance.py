@@ -1,4 +1,5 @@
 from dataclasses import replace
+from contextlib import closing
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -69,7 +70,7 @@ class CampaignPerformanceTests(unittest.TestCase):
                 reopened.resume(run_id, max_steps=1)
         self.assertIsNone(self.drafts.read(3))
         self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM comparison_instruction_versions").fetchone()[0], 0)
 
         result = reopened.resume(run_id)
@@ -325,7 +326,7 @@ class CampaignPerformanceTests(unittest.TestCase):
         correction = self.performance.save_correction(
             self.campaign, 2, self.fingerprint, original["id"], "keep_comparison", "", uuid4().hex,
         )
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             db.execute("ALTER TABLE campaign_buyer_corrections DROP COLUMN comparison_identity")
         (self.drafts.media_dir / audiobook.preview).write_bytes(b"Changed only the ad preview")
         self.performance = CampaignPerformance(self.drafts, self.viewer)
@@ -349,7 +350,7 @@ class CampaignPerformanceTests(unittest.TestCase):
         correction = self.performance.save_correction(
             self.campaign, 2, self.fingerprint, original["id"], "keep_takes", "", uuid4().hex,
         )
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             db.execute("ALTER TABLE campaign_buyer_corrections DROP COLUMN takes_identity")
         self.performance = CampaignPerformance(self.drafts, self.viewer)
         with patch("campaign_agent.handoff.EXAMPLES", (replace(editing, instruction="Listen to both takes."), audiobook)):
@@ -362,7 +363,7 @@ class CampaignPerformanceTests(unittest.TestCase):
             self.campaign, 2, self.fingerprint, original["id"], "keep_comparison", "", uuid4().hex,
         )
         self.assertEqual(replacement["kind"], "keep_comparison")
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             # Older keep-comparison records had no takes identity even with all columns present.
             db.execute("UPDATE campaign_buyer_corrections SET takes_identity = NULL WHERE id = ?", (replacement["id"],))
         self.performance = CampaignPerformance(self.drafts, self.viewer)
@@ -376,7 +377,7 @@ class CampaignPerformanceTests(unittest.TestCase):
     def test_older_review_without_content_attribution_is_not_restored(self):
         self.drafts.approve_package(self.campaign, 2, self.fingerprint)
         review = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             db.execute(
                 "UPDATE campaign_performance_reviews SET snapshot = "
                 "json_remove(snapshot, '$.local_viewer_activity.attribution') WHERE id = ?", (review["id"],),
@@ -387,7 +388,7 @@ class CampaignPerformanceTests(unittest.TestCase):
         editing = EXAMPLES[0]
         original_visit = self.viewer.open_example(editing.creative_ref)["visit_id"]
         self.complete(editing.creative_ref, editing.ref, original_visit)
-        with sqlite3.connect(self.drafts.path) as db:
+        with closing(sqlite3.connect(self.drafts.path)) as db, db:
             db.execute("ALTER TABLE viewer_visits DROP COLUMN content_fingerprint")
 
         reopened = ViewerMeasurement(self.drafts.path)

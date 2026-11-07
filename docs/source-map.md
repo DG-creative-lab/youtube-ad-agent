@@ -11,6 +11,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, catalog registration, draft validation, revision checks, approval snapshots and immutable instruction versions. |
 | [campaign_agent/agent/run.py](../campaign_agent/agent/run.py) | Recorded model inference, scoped preparation runs, tool dispatch and atomic step results. Prepares placement drafts and instruction tests. |
 | [campaign_agent/performance.py](../campaign_agent/performance.py) | Sample reporting, saved reviews, buyer corrections and validation of the evidence supporting an instruction test. |
+| [campaign_agent/instruction_tests.py](../campaign_agent/instruction_tests.py) | Approved test pairs, stable viewer assignments, experiment-specific evidence and saved agent assessments. |
 | [campaign_agent/handoff.py](../campaign_agent/handoff.py) | Package content fingerprints, media references and the manual setup export. |
 | [campaign_agent/measurement.py](../campaign_agent/measurement.py) | Scoped viewer activity and completion attributed to exact comparison content. |
 | [web/planner/src/](../web/planner/src/) and [web/viewer/](../web/viewer/) | React campaign workspace and the public comparison experience. |
@@ -57,5 +58,7 @@ These are proposed homes. Create a file or subpackage when a slice gives it real
 2. The runtime stores the source reference in `agent_test_sources`, loads validated review evidence through `CampaignPerformance` and supplies it to `ModelInference`. The authored offline response proposes revised instructions.
 3. At save, performance code rechecks the current package and correction. `CampaignDrafts` writes the new revision and instruction versions in the transaction that records the completed agent step.
 4. Package construction reads the revision's instructions. The viewer verifies its content fingerprint against current media and persisted wording, and measurement keeps activity for that content separate from the original.
+5. Starting an experiment freezes both approved contents in `instruction_tests`. `instruction_test_assignments` binds a browser reference to an arm and visit in the transaction that records its first arrival.
+6. The agent captures experiment evidence, assesses both versions and saves a review with its completed step. Later events retain their own records. The planner compares current evidence and correction against the saved assessment to indicate when to review again.
 
 Move existing files in small changes when a feature needs their boundary. Preserve the documented CLI, browser API and existing SQLite drafts during extraction. Start with import and ownership checks during review. Introduce an automated architecture check when a concrete dependency rule needs enforcement.

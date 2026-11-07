@@ -20,7 +20,7 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 
 ## Current follow-up slice
 
-The current follow-up slice closes the loop from a corrected review to another draft. **Prepare next test** runs the Python agent with authored offline responses for instruction tests supported by **Keep both takes unchanged**. Save the source review, correction and original wording with the new revision. Compare the wording in the planner, approve the revised package and open its content-specific viewer link. Retain the original comparison and its activity. Replay or resume the same preparation run without creating another revision, and reject an unfinished save if the source package or correction changes.
+**Prepare next test** drafts revised instructions from a corrected review. After approval, **Run instruction test** pins the exact original and revised content and creates one viewer link. Persist each browser's random assignment with its visit so refreshes and restarts preserve its version and progress. Count only assigned visits in the experiment's results. **Review instruction test** runs the Python agent with authored offline responses to assess both versions and the current buyer correction, retaining the evidence used. Mark saved assessments when new activity or a correction warrants another review. The first rules use an illustrative minimum of 20 assigned visits per version before proposing another instruction change.
 
 ## First implementation slice
 
