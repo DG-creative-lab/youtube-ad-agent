@@ -32,6 +32,22 @@ After approving the revised package, choose **Run instruction test**. **Open ins
 
 The test counts only visits assigned through that link. Use **Refresh results** to see completions and arrivals for both versions, then **Review instruction test** for an agent assessment using those results and the current buyer correction. The saved assessment retains its evidence and is flagged when later activity or a correction calls for another review. The offline rules require at least 20 assigned visits per version before considering another instruction change. This threshold is illustrative. The displayed completion rates describe the recorded visits.
 
+### Review models
+
+**Review mode** defaults to **Offline**. To enable OpenRouter for instruction-test assessments, provide `OPENROUTER_API_KEY` in the server environment and explicitly configure permitted models at startup. Replace the model placeholder below with a compatible `:free` model ID. Repeat the flag to offer several models.
+
+```sh
+python3 scripts/placement_review.py serve --openrouter-review-model 'provider/model:free'
+```
+
+Choose **OpenRouter** and a model in the test panel before reviewing. Each run allows one request, at most 512 output tokens and a 30-second HTTP timeout. The request filters routes to zero prompt, completion and per-request prices and disables provider fallback. The adapter requests a strict JSON schema from a provider that supports it. The application also validates the assessment and buyer constraint. [OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs) · [Provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+
+The provider receives the two instruction texts, their observed results and the buyer correction. **Review provenance and usage** shows the selected and reported model, evidence reference, prompt version, provider request ID and reported usage. Unavailable usage is shown as unknown. Credentials are read server-side when dispatching.
+
+The model selects a constrained reason code. The application checks that code against the captured counts and buyer correction, then generates the assessment's title and factual wording itself. Older saved assessments are displayed with regenerated factual wording and a notice to review again.
+
+An interrupted run can reuse a saved provider receipt through **Resume preparation**. A request with an unknown outcome or a failed response consumes its allowance. A new deliberate review creates a new operation. Integration verification uses simulated responses, including receipt recovery, timeouts, malformed output, rejected permissions and budget checks.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

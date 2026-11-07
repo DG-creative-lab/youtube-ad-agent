@@ -13,7 +13,14 @@ from scripts.campaign_drafts import PackageConflict
 
 
 MIN_TEST_ARRIVALS = 20
-ASSESSMENT_KINDS = {"insufficient_evidence", "keep_collecting", "prepare_another_test"}
+# Bump when saved assessments need reverification under a changed acceptance contract.
+ASSESSMENT_VERSION = "evidence-reasons-v1"
+ASSESSMENT_REASONS = {
+    "insufficient_visits": ("insufficient_evidence", "Insufficient evidence"),
+    "continue_observation": ("keep_collecting", "Keep collecting evidence"),
+    "revised_not_higher": ("prepare_another_test", "Consider another instruction test"),
+}
+LEGACY_REASON_CODES = {kind: code for code, (kind, _title) in ASSESSMENT_REASONS.items()}
 
 
 class InstructionTests:
@@ -179,35 +186,70 @@ class InstructionTests:
             test = self._test(db, test_id)
             return self._evidence(db, test)
 
-    def save_review(self, db, context, assessment):
+    def require_review_context(self, db, context):
         self.drafts.operator.require_brand(LOCAL_BRAND)
         test = self._test(db, context["test_id"])
         current = self.performance.correction_for_comparison(db, test["package"], test["creative_version"])
         if current != context["correction"]:
             raise PackageConflict("The buyer correction changed. Review the instruction test again.")
+
+    def save_review(self, db, context, assessment, *, inference=None):
+        self.require_review_context(db, context)
         assessment = self.validate_assessment(context, assessment)
         review = {"evidence": context, "assessment": assessment}
+        if inference is not None:
+            review["inference"] = inference
         review_id = package_fingerprint(review)
         db.execute(
             "INSERT INTO instruction_test_reviews VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-            (review_id, test["id"], self.drafts.operator.id, datetime.now(timezone.utc).isoformat(), json.dumps(review)),
+            (review_id, context["test_id"], self.drafts.operator.id, datetime.now(timezone.utc).isoformat(), json.dumps(review)),
         )
         return {"id": review_id, **review}
 
     @staticmethod
     def validate_assessment(context, assessment):
-        if (not isinstance(assessment, dict) or set(assessment) != {"kind", "title", "reason"}
-                or not isinstance(assessment["kind"], str) or assessment["kind"] not in ASSESSMENT_KINDS
-                or any(not isinstance(assessment[key], str) or not assessment[key].strip()
-                       or len(assessment[key]) > 1000 for key in ("title", "reason"))):
+        if not isinstance(assessment, dict):
             raise ValueError("Provide a structured instruction-test assessment.")
-        sufficient = all(row["arrivals"] >= MIN_TEST_ARRIVALS for row in context["rows"])
-        if not sufficient and assessment["kind"] != "insufficient_evidence":
+        if set(assessment) == {"kind", "title", "reason"}:
+            # Earlier runs returned prose. Retain their bounded decision and regenerate all factual wording.
+            code = LEGACY_REASON_CODES.get(assessment["kind"]) if isinstance(assessment["kind"], str) else None
+        elif set(assessment) in ({"reason_code"}, {"kind", "reason_code", "title", "reason"}):
+            code = assessment["reason_code"]
+        else:
+            raise ValueError("Provide a structured instruction-test assessment.")
+        if not isinstance(code, str) or code not in ASSESSMENT_REASONS:
+            raise ValueError("Choose a supported assessment reason code.")
+        kind, title = ASSESSMENT_REASONS[code]
+        minimum = context["minimum_per_version"]
+        sufficient = all(row["arrivals"] >= minimum for row in context["rows"])
+        if not sufficient and code != "insufficient_visits":
             raise ValueError("Collect more assigned visits before proposing another test.")
-        if (assessment["kind"] == "prepare_another_test"
+        if sufficient and code == "insufficient_visits":
+            raise ValueError("The captured evidence already meets the visit minimum.")
+        if (code == "revised_not_higher"
                 and (not context["correction"] or context["correction"]["kind"] != "keep_takes")):
             raise ValueError("The buyer correction does not permit another instruction change.")
-        return assessment
+        original, revised = context["rows"]
+        if (code == "revised_not_higher"
+                and revised["completions"] * original["arrivals"] > original["completions"] * revised["arrivals"]):
+            raise ValueError("The revised completion rate is higher in the captured evidence.")
+        facts = (
+            f"Original instructions had {original['completions']} completed comparisons from "
+            f"{original['arrivals']} assigned visits. Revised instructions had {revised['completions']} "
+            f"completed comparisons from {revised['arrivals']} assigned visits. "
+        )
+        guidance = {
+            "insufficient_visits": (
+                f"Collect at least {minimum} assigned visits per version before considering another change. "
+                "This is an illustrative POC threshold."
+            ),
+            "continue_observation": "Continue collecting evidence with the approved versions and buyer correction.",
+            "revised_not_higher": (
+                "The revised version has no higher observed completion rate. "
+                "Keep both recordings fixed when considering another instruction test."
+            ),
+        }
+        return {"kind": kind, "reason_code": code, "title": title, "reason": facts + guidance[code]}
 
     def read(self, campaign_id, revision, fingerprint):
         self.drafts._package_scope(campaign_id, revision)
@@ -223,5 +265,17 @@ class InstructionTests:
                 (test_id,),
             ).fetchone()
             review = {"id": row[0], "created_at": row[1], **json.loads(row[2])} if row else None
+            if review:
+                saved_assessment = review["assessment"]
+                try:
+                    assessment = self.validate_assessment(review["evidence"], saved_assessment)
+                except ValueError:
+                    enough = all(row["arrivals"] >= review["evidence"]["minimum_per_version"]
+                                 for row in review["evidence"]["rows"])
+                    assessment = self.validate_assessment(review["evidence"], {
+                        "reason_code": "continue_observation" if enough else "insufficient_visits",
+                    })
+                review["assessment"] = assessment
+                review["assessment_verified"] = assessment == saved_assessment
             return {**test, "evidence": evidence, "review": review,
-                    "needs_review": review is None or review["evidence"] != evidence}
+                    "needs_review": review is None or not review["assessment_verified"] or review["evidence"] != evidence}

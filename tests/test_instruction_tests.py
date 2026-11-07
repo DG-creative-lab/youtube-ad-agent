@@ -154,8 +154,8 @@ class InstructionTestTests(unittest.TestCase):
         reopened = AgentRuntime(self.path, media_dir=self.media)
         save_review = reopened.instruction_tests.save_review
 
-        def interrupted(*args):
-            save_review(*args)
+        def interrupted(*args, **kwargs):
+            save_review(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted review commit")
 
         with patch.object(reopened.instruction_tests, "save_review", side_effect=interrupted):

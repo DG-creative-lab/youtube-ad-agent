@@ -10,6 +10,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [scripts/placement_review.py](../scripts/placement_review.py) | The local server and developer CLI. It also contains YouTube search, sample search, catalog classification and the optional Jev call. |
 | [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, catalog registration, draft validation, revision checks, approval snapshots and immutable instruction versions. |
 | [campaign_agent/agent/run.py](../campaign_agent/agent/run.py) | Recorded model inference, scoped preparation runs, tool dispatch and atomic step results. Prepares placement drafts and instruction tests. |
+| [campaign_agent/adapters/openrouter_reviews.py](../campaign_agent/adapters/openrouter_reviews.py) | Bounded structured assessment requests, provider response parsing and sanitized errors. |
 | [campaign_agent/performance.py](../campaign_agent/performance.py) | Sample reporting, saved reviews, buyer corrections and validation of the evidence supporting an instruction test. |
 | [campaign_agent/instruction_tests.py](../campaign_agent/instruction_tests.py) | Approved test pairs, stable viewer assignments, experiment-specific evidence and saved agent assessments. |
 | [campaign_agent/handoff.py](../campaign_agent/handoff.py) | Package content fingerprints, media references and the manual setup export. |
@@ -60,5 +61,6 @@ These are proposed homes. Create a file or subpackage when a slice gives it real
 4. Package construction reads the revision's instructions. The viewer verifies its content fingerprint against current media and persisted wording, and measurement keeps activity for that content separate from the original.
 5. Starting an experiment freezes both approved contents in `instruction_tests`. `instruction_test_assignments` binds a browser reference to an arm and visit in the transaction that records its first arrival.
 6. The agent captures experiment evidence, assesses both versions and saves a review with its completed step. Later events retain their own records. The planner compares current evidence and correction against the saved assessment to indicate when to review again.
+7. OpenRouter review settings and request state live in `agent_review_inference`. The runtime reserves one request before dispatch, calls the adapter outside the write transaction and retains the receipt for recovery. The model proposes assessment data through this boundary, and application code checks the current correction before accepting it.
 
 Move existing files in small changes when a feature needs their boundary. Preserve the documented CLI, browser API and existing SQLite drafts during extraction. Start with import and ownership checks during review. Introduce an automated architecture check when a concrete dependency rule needs enforcement.

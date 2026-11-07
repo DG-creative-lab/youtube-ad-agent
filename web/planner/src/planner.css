@@ -70,7 +70,8 @@ button:disabled { opacity: .58; cursor: wait; }
 .package-buttons button:disabled { cursor: default; }
 .performance { margin-top: 25px; padding-top: 24px; border-top: 1px solid var(--line); }
 .performance-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-top: 17px; }
-.performance-controls label { display: grid; gap: 6px; font-size: .8rem; }
+.performance-controls label { display: grid; gap: 6px; font-size: .8rem; min-width: 0; max-width: 100%; }
+.inference-provenance { overflow-wrap: anywhere; }
 .performance-controls select { min-height: 44px; max-width: 100%; padding: 0 10px; font: inherit; background: #fff; color: inherit; border: 1px solid var(--line); }
 .performance-controls button { margin: 0; }
 .performance-error { margin-top: 10px; color: #882b25; font-size: .875rem; }

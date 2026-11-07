@@ -13,7 +13,8 @@ from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
-from campaign_agent.instruction_tests import InstructionTests
+from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests
+from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
@@ -50,27 +51,16 @@ class RecordedInference:
     def assess_instruction_test(self, context):
         original, revised = context["rows"]
         if any(row["arrivals"] < context["minimum_per_version"] for row in (original, revised)):
-            return {
-                "kind": "insufficient_evidence", "title": "Insufficient evidence",
-                "reason": "Collect at least 20 assigned visits for each version before considering another change. "
-                          "This is an illustrative POC threshold.",
-            }
+            return {"reason_code": "insufficient_visits"}
         if (revised["completion_rate"] <= original["completion_rate"]
                 and context["correction"] and context["correction"]["kind"] == "keep_takes"):
-            return {
-                "kind": "prepare_another_test", "title": "Consider another instruction test",
-                "reason": "The revised wording has no higher observed completion rate in these visits. "
-                          "Keep both recordings fixed and investigate another instruction change.",
-            }
-        return {
-            "kind": "keep_collecting", "title": "Keep collecting evidence",
-            "reason": "Review the observed completion rates alongside the buyer correction. "
-                      "Continue with the approved versions before deciding whether to make another change.",
-        }
+            return {"reason_code": "revised_not_higher"}
+        return {"reason_code": "continue_observation"}
 
 
 class AgentRuntime:
-    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR):
+    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR,
+                 openrouter_models=(), review_transport=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
@@ -78,6 +68,7 @@ class AgentRuntime:
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()
+        self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -94,6 +85,12 @@ class AgentRuntime:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_test_sources (
                     run_id TEXT PRIMARY KEY, source TEXT NOT NULL
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_review_inference (
+                    run_id TEXT PRIMARY KEY, settings TEXT NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'pending', receipt TEXT, error TEXT
                 )
             """)
 
@@ -145,11 +142,38 @@ class AgentRuntime:
             raise PermissionError("The run is unavailable to this operator.")
         return row
 
-    def start_instruction_review(self, test_id):
+    def start_instruction_review(self, test_id, *, mode="offline", model=None, operation_id=None):
+        self.operator.require_brand(LOCAL_BRAND)
+        if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
+            raise ValueError("Choose offline or OpenRouter reviews.")
+        if mode == "offline" and model is not None:
+            raise ValueError("Offline reviews do not use provider settings.")
+        settings = {"mode": "offline"}
+        if mode == "openrouter":
+            settings = self.openrouter.settings(model)
+            if operation_id is None:
+                raise ValueError("Use a valid review operation ID.")
+        if operation_id is not None:
+            if not isinstance(operation_id, str) or not RUN_ID.fullmatch(operation_id):
+                raise ValueError("Use a valid review operation ID.")
+            run_id = package_fingerprint({"scope": vars(LOCAL_BRAND), "actor": self.operator.id,
+                                          "request": REVIEW_TEST_REQUEST, "operation_id": operation_id})[:32]
+            with closing(sqlite3.connect(self.path)) as db:
+                row = db.execute(
+                    "SELECT s.source, i.settings FROM agent_test_sources s JOIN agent_review_inference i "
+                    "ON i.run_id = s.run_id WHERE s.run_id = ?", (run_id,),
+                ).fetchone()
+                if row:
+                    self._owned_run(db, run_id)
+                    if json.loads(row[0])["test_id"] != test_id or json.loads(row[1]) != settings:
+                        raise ValueError("This review operation was already used for a different request.")
+                    return run_id
         context = self.instruction_tests.review_context(test_id)
-        run_id = package_fingerprint({
-            "actor": self.operator.id, "request": REVIEW_TEST_REQUEST, "context": context,
-        })[:32]
+        if operation_id is None:
+            run_id = package_fingerprint({
+                "actor": self.operator.id, "request": REVIEW_TEST_REQUEST, "context": context,
+                "assessment_version": ASSESSMENT_VERSION,
+            })[:32]
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -158,6 +182,14 @@ class AgentRuntime:
             self._owned_run(db, run_id)
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?) ON CONFLICT DO NOTHING",
                        (run_id, json.dumps(context)))
+            existing = db.execute("SELECT settings FROM agent_review_inference WHERE run_id = ?", (run_id,)).fetchone()
+            if existing and json.loads(existing[0]) != settings:
+                raise ValueError("This review operation was already used for a different request.")
+            source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
+            if source["test_id"] != test_id:
+                raise ValueError("This review operation was already used for a different request.")
+            db.execute("INSERT INTO agent_review_inference (run_id, settings) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                       (run_id, json.dumps(settings)))
         return run_id
 
     def resume(self, run_id, max_steps=4):
@@ -165,6 +197,8 @@ class AgentRuntime:
             raise ValueError("The step budget must be between zero and four.")
         for _ in range(max_steps):
             self.operator.require_brand(LOCAL_BRAND)
+            if self._resume_openrouter_review(run_id):
+                continue
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 run = self._owned_run(db, run_id)
@@ -175,7 +209,7 @@ class AgentRuntime:
                     )
                 ]
                 if run[1] == "ready_for_review":
-                    return {"run_id": run_id, "request": run[0], "status": run[1], "steps": history}
+                    return self.read(run_id)
                 tool = self.model.next_tool(run[0], history)
                 if run[0] == REVIEW_TEST_REQUEST:
                     result = self._dispatch_instruction_review(db, run_id, tool, history)
@@ -198,7 +232,74 @@ class AgentRuntime:
             steps = [{"tool": tool, "result": json.loads(result)} for tool, result in db.execute(
                 "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
             )]
-            return {"run_id": run_id, "request": request, "status": status, "steps": steps}
+            inference = db.execute(
+                "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
+            ).fetchone()
+            result = {"run_id": run_id, "request": request, "status": status, "steps": steps}
+            if inference:
+                receipt = json.loads(inference[2]) if inference[2] else None
+                result["inference"] = {"settings": json.loads(inference[0]), "state": inference[1],
+                                       "receipt": receipt["inference"] if receipt else None, "error": inference[3]}
+            return result
+
+    def _resume_openrouter_review(self, run_id):
+        """Reserve a single request, call outside SQLite, and persist its receipt before the step."""
+        self.operator.require_brand(LOCAL_BRAND)
+        receipt = None
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            request, _ = self._owned_run(db, run_id)
+            row = db.execute(
+                "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
+            ).fetchone()
+            count = db.execute("SELECT COUNT(*) FROM agent_steps WHERE run_id = ?", (run_id,)).fetchone()[0]
+            if request != REVIEW_TEST_REQUEST or count != 1 or not row:
+                return False
+            settings = json.loads(row[0])
+            if settings["mode"] != "openrouter":
+                return False
+            context = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
+            self.instruction_tests.require_review_context(db, context)
+            if row[1] == "received":
+                receipt = json.loads(row[2])
+            elif row[1] == "pending":
+                self.openrouter.require_available(settings)
+                db.execute("UPDATE agent_review_inference SET state = 'requested' WHERE run_id = ?", (run_id,))
+            else:
+                raise ReviewInferenceError(row[3] or
+                    "This review's request is in progress or its outcome is unknown. Start a new review to retry.")
+        if receipt is None:
+            try:
+                receipt = self.openrouter.assess_instruction_test(context, settings)
+                receipt["inference"]["run_id"] = run_id
+            except ReviewInferenceError as exc:
+                with closing(sqlite3.connect(self.path)) as db, db:
+                    db.execute("UPDATE agent_review_inference SET state = 'failed', error = ? WHERE run_id = ?",
+                               (str(exc), run_id))
+                raise
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute("UPDATE agent_review_inference SET state = 'received', receipt = ? WHERE run_id = ?",
+                           (json.dumps(receipt), run_id))
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            self.operator.require_brand(LOCAL_BRAND)
+            self._owned_run(db, run_id)
+            if db.execute("SELECT 1 FROM agent_steps WHERE run_id = ? AND position = 1", (run_id,)).fetchone():
+                return True
+            self.instruction_tests.require_review_context(db, context)
+            usage = receipt["inference"]["usage"]
+            if ((usage["cost_usd"] is not None and usage["cost_usd"] > 0)
+                    or (usage["output_tokens"] is not None and usage["output_tokens"] > settings["max_output_tokens"])):
+                raise ReviewInferenceError("The provider reported usage beyond the review limits. Its receipt was retained.")
+            try:
+                assessment = self.instruction_tests.validate_assessment(context, receipt["assessment"])
+            except ValueError:
+                raise ReviewInferenceError(
+                    "The model assessment did not pass validation. Start a new review to retry."
+                ) from None
+            db.execute("INSERT INTO agent_steps VALUES (?, 1, 'assess_instruction_test', ?)",
+                       (run_id, json.dumps({"assessment": assessment, "inference": receipt["inference"]})))
+        return True
 
     def _dispatch_instruction_review(self, db, run_id, tool, history):
         expected = ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")
@@ -212,7 +313,16 @@ class AgentRuntime:
                 history[0]["result"], self.model.assess_instruction_test(history[0]["result"]),
             )
         if tool == "save_test_review":
-            return self.instruction_tests.save_review(db, history[0]["result"], history[1]["result"])
+            result = history[1]["result"]
+            inference = result.get("inference") if "assessment" in result else {
+                "mode": "offline", "model": "recorded", "prompt_version": "offline-review-v2",
+                "evidence_id": package_fingerprint(history[0]["result"]),
+                "run_id": run_id,
+                "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0},
+            }
+            return self.instruction_tests.save_review(
+                db, history[0]["result"], result.get("assessment", result), inference=inference,
+            )
         return {"campaign_id": context["campaign_id"], "revision": context["revision"], "ambiguous": [],
                 "message": "Instruction-test assessment saved."}
 

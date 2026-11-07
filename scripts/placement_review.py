@@ -20,6 +20,7 @@ if not __package__:
     sys.path.insert(0, str(ROOT))
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import caption_bytes, media_sha256, package_fingerprint
 from campaign_agent.placements import read_catalog, rule_assignment
@@ -65,7 +66,8 @@ def youtube_search(key, query, page):
         return json.load(response)
 
 
-def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT):
+def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
+          openrouter_review_models=()):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -79,7 +81,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     drafts = CampaignDrafts(draft_path, live)
-    agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir)
+    agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
+                                          openrouter_models=openrouter_review_models)
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
     instruction_tests = agent.instruction_tests if agent else None
@@ -233,9 +236,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
                 if self.path == "/api/agent/instruction-review":
-                    if set(data) != {"test_id"}:
+                    if set(data) not in ({"test_id"}, {"test_id", "mode", "operation_id"},
+                                         {"test_id", "mode", "model", "operation_id"}):
                         raise ValueError("Choose an instruction test.")
-                    run_id = agent.start_instruction_review(data["test_id"])
+                    run_id = agent.start_instruction_review(**data)
                     result = agent.read(run_id)
                 elif self.path == "/api/agent/next-test":
                     if set(data) != {"campaign_id", "revision", "fingerprint", "review_id"}:
@@ -255,6 +259,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         raise ValueError("Invalid agent request.")
             except PackageConflict as exc:
                 self.send(409, {"error": str(exc)})
+            except ReviewInferenceError as exc:
+                self.send(502, {"error": str(exc)})
             except ViewerNotFound as exc:
                 self.send(404, {"error": str(exc)})
             except StaleDraft:
@@ -389,6 +395,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     self.send(200, {
                         "live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS,
                         "demoRequest": DEMO_REQUEST,
+                        "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
                         "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
@@ -638,6 +645,8 @@ def main():
     web.add_argument("--viewer-port", type=int, default=DEFAULT_VIEWER_PORT,
                      help=f"Fixed port for viewer links (default: {DEFAULT_VIEWER_PORT}).")
     web.add_argument("--live-youtube", action="store_true", help="Use the existing YouTube Data key for public search.")
+    web.add_argument("--openrouter-review-model", action="append", default=[],
+                     help="Explicitly enable a :free model for reviews. One request per run, with a zero-price cap.")
     routing = commands.add_parser("assign", help="Propose creative assignments for an independently supplied catalog.")
     routing.add_argument("catalog", type=Path)
     routing.add_argument("--paid-jev-limit", type=int, help="Enable paid Jev requests. Maximum calls for this invocation.")
@@ -645,7 +654,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "serve":
-            serve(args.port, args.live_youtube, viewer_port=args.viewer_port)
+            serve(args.port, args.live_youtube, viewer_port=args.viewer_port,
+                  openrouter_review_models=args.openrouter_review_model)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
     except sqlite3.Error:

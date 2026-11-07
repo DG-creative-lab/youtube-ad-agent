@@ -1,4 +1,12 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
+
+export type ReviewSelection = {mode: "offline"; operation_id: string}
+  | {mode: "openrouter"; model: string; operation_id: string};
+type Inference = {
+  mode: string; model: string; response_model?: string | null; request_id?: string | null;
+  prompt_version: string; evidence_id: string;
+  usage: {input_tokens: number | null; output_tokens: number | null; cost_usd: number | null};
+};
 
 type Correction = {id: string; label: string; note: string};
 type Observation = {arm: string; arrivals: number; completions: number; completion_rate: number | null};
@@ -13,6 +21,8 @@ type Test = {
     created_at: string;
     evidence: Evidence;
     assessment: {kind: string; title: string; reason: string};
+    inference?: Inference;
+    assessment_verified?: boolean;
   } | null;
 };
 type Props = {
@@ -21,7 +31,8 @@ type Props = {
   fingerprint: string;
   viewerOrigin: string;
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
-  onReview: (testId: string) => void;
+  onReview: (testId: string, selection: ReviewSelection) => void;
+  models: string[];
   onPackageConflict: (message: string) => void;
 };
 
@@ -30,11 +41,14 @@ const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFr
 const label = (arm: string) => arm === "original" ? "Original instructions" : "Revised instructions";
 
 export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin, request,
-                                 onReview, onPackageConflict}: Props) {
+                                 onReview, onPackageConflict, models}: Props) {
   const [test, setTest] = useState<Test | null>(null);
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reviewMode, setReviewMode] = useState("offline");
+  const [model, setModel] = useState("");
+  const operation = useRef<string | null>(null);
   const query = new URLSearchParams({revision: String(revision), fingerprint}).toString();
 
   useEffect(() => {
@@ -66,6 +80,16 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
     }
   }
 
+  function review() {
+    if (!test || working || (reviewMode === "openrouter" && !model)) return;
+    operation.current ??= crypto.randomUUID().replaceAll("-", "");
+    if (reviewMode === "offline") {
+      onReview(test.id, {mode: "offline", operation_id: operation.current});
+    } else {
+      onReview(test.id, {mode: "openrouter", model, operation_id: operation.current});
+    }
+  }
+
   return (
     <section className="performance" aria-labelledby="run-instruction-test">
       <span className="label">04 / Test instructions</span>
@@ -94,8 +118,34 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
           </dl>
           <div className="package-buttons">
             <button onClick={() => void refresh()} disabled={working}>Refresh results</button>
-            <button onClick={() => onReview(test.id)} disabled={working}>Review instruction test</button>
           </div>
+          <div className="performance-controls">
+            <label>Review mode
+              <select value={reviewMode} onChange={event => {
+                setReviewMode(event.target.value);
+                operation.current = null;
+              }} disabled={working}>
+                <option value="offline">Offline</option>
+                <option value="openrouter" disabled={!models.length}>OpenRouter</option>
+              </select>
+            </label>
+            {reviewMode === "openrouter" && <label>Review model
+              <select value={model} onChange={event => {
+                setModel(event.target.value);
+                operation.current = null;
+              }} disabled={working} required>
+                <option value="">Choose a model</option>
+                {models.map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+            </label>}
+            <button onClick={review} disabled={working || (reviewMode === "openrouter" && !model)}>
+              Review instruction test
+            </button>
+          </div>
+          {reviewMode === "openrouter" && <p className="revision">
+            One request for this review · Up to 512 output tokens · Free model routes with a zero-price cap.
+            The model receives the two instructions, results and buyer correction.
+          </p>}
           {test.evidence.correction && <p className="revision">
             Current buyer correction · {test.evidence.correction.label}. {test.evidence.correction.note}
           </p>}
@@ -104,17 +154,35 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
               {test.needs_review ? "Saved assessment · Review again" : "Agent assessment"}
             </h3>
             {test.needs_review && <p className="revision">
-              Activity or the buyer correction has changed since this assessment. Review the test again to update it.
+              {test.review.assessment_verified === false
+                ? "This saved assessment needs verification against its evidence. Review the test again to update it."
+                : "Activity or the buyer correction has changed since this assessment. Review the test again to update it."}
             </p>}
             <h3>{test.review.assessment.title}</h3>
             <p className="revision">{test.review.assessment.reason}</p>
-            <p className="revision">Based on {test.review.evidence.rows.map(row =>
-              `${row.completions} of ${row.arrivals} completed for ${row.arm} instructions`).join(" and ")}.</p>
             {test.review.evidence.correction && <p className="revision">
               Buyer correction used · {test.review.evidence.correction.label}. {test.review.evidence.correction.note}
             </p>}
-            <p className="provenance">Saved {new Date(test.review.created_at).toLocaleString()} · Offline assessment ·
+            <p className="provenance">Saved {new Date(test.review.created_at).toLocaleString()} ·
+              {test.review.inference?.mode === "openrouter" ? ` OpenRouter · ${test.review.inference.model} · ` : " Offline assessment · "}
               Illustrative threshold of {test.review.evidence.minimum_per_version} assigned visits per version</p>
+            {test.review.inference && <details className="inference-provenance">
+              <summary>Review provenance and usage</summary>
+              <p className="revision">
+                {test.review.inference.usage.input_tokens ?? "Unknown"} input tokens ·
+                {" "}{test.review.inference.usage.output_tokens ?? "Unknown"} output tokens ·
+                {" "}{test.review.inference.usage.cost_usd === null ? "Cost unavailable"
+                  : `$${test.review.inference.usage.cost_usd} reported cost`}
+              </p>
+              <p className="revision">Prompt version · {test.review.inference.prompt_version}</p>
+              <p className="revision">Evidence reference · {test.review.inference.evidence_id}</p>
+              {test.review.inference.response_model && <p className="revision">
+                Reported model · {test.review.inference.response_model}
+              </p>}
+              {test.review.inference.request_id && <p className="revision">
+                Provider request · {test.review.inference.request_id}
+              </p>}
+            </details>}
           </section>}
         </>
       )}
