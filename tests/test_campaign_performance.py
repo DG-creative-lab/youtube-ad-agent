@@ -11,6 +11,7 @@ from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
+from campaign_agent.agent.run import AgentRuntime, RecordedInference
 from scripts.campaign_drafts import CampaignDrafts, PackageConflict
 
 
@@ -37,6 +38,130 @@ class CampaignPerformanceTests(unittest.TestCase):
             for kind in ("start", "finish"):
                 self.viewer.record(creative, visit, example, uuid4().hex, kind, take)
         self.viewer.record(creative, visit, example, uuid4().hex, "choose", "a")
+
+    def instruction_run(self):
+        approved = self.drafts.approve_package(self.campaign, 2, self.fingerprint)
+        content = package_fingerprint(approved["package"]["groups"][0]["content"])
+        for _ in range(3):
+            self.viewer.open_example(EXAMPLES[0].creative_ref, content_fingerprint=content)
+        initial = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
+        self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, initial["id"], "keep_takes", "Keep the approved audio.", uuid4().hex,
+        )
+        review = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
+        runtime = AgentRuntime(self.drafts.path, media_dir=self.drafts.media_dir)
+        run_id = runtime.start_next_test(self.campaign, 2, self.fingerprint, review["id"])
+        return runtime, review, run_id
+
+    def test_instruction_run_resumes_one_revision_and_preserves_source_and_content_attribution(self):
+        runtime, source, run_id = self.instruction_run()
+        runtime.resume(run_id, max_steps=2)
+        reopened = AgentRuntime(self.drafts.path, media_dir=self.drafts.media_dir)
+        self.assertEqual(reopened.start_next_test(self.campaign, 2, self.fingerprint, source["id"]), run_id)
+        save = reopened.drafts.save_instruction_test
+
+        def fail_after_save(*args):
+            save(*args)
+            raise sqlite3.OperationalError("Simulated lost transaction")
+
+        with patch.object(reopened.drafts, "save_instruction_test", side_effect=fail_after_save):
+            with self.assertRaises(sqlite3.OperationalError):
+                reopened.resume(run_id, max_steps=1)
+        self.assertIsNone(self.drafts.read(3))
+        self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
+        with sqlite3.connect(self.drafts.path) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM comparison_instruction_versions").fetchone()[0], 0)
+
+        result = reopened.resume(run_id)
+        self.assertEqual(result["status"], "ready_for_review")
+        self.assertEqual(result["steps"][-1]["result"]["revision"], 3)
+        self.assertEqual(reopened.start_next_test(self.campaign, 2, self.fingerprint, source["id"]), run_id)
+        self.assertEqual(reopened.resume(run_id), result)
+        self.assertIsNone(self.drafts.read(4))
+        original = self.drafts.read_approved_package(self.campaign, 2, self.fingerprint)["package"]
+        updated = self.drafts.review_package(self.campaign, 3)
+        self.assertIsNone(updated["approval"])
+        self.assertEqual(self.drafts.read(3)["placements"], self.drafts.read(2)["placements"])
+        old_content = original["groups"][0]["content"]
+        new_content = updated["package"]["groups"][0]["content"]
+        self.assertNotEqual(new_content["instruction"], old_content["instruction"])
+        self.assertEqual({**new_content, "instruction": old_content["instruction"]}, old_content)
+        test = updated["package"]["instruction_test"]
+        self.assertEqual(test["review_id"], source["id"])
+        self.assertEqual(test["correction"], source["proposal"]["correction"])
+        self.assertEqual(test["before"], old_content["instruction"])
+        self.assertEqual(test["after"], new_content["instruction"])
+        self.assertEqual(result["steps"][0]["result"]["review"], source)
+        self.assertEqual(self.drafts.comparison_content(EXAMPLES[0], package_fingerprint(new_content)), new_content)
+        self.assertEqual(self.drafts.comparison_content(EXAMPLES[0], package_fingerprint(old_content)), old_content)
+        with self.assertRaises(PackageConflict):
+            self.drafts.export_setup(self.campaign, 3, updated["fingerprint"])
+        self.drafts.approve_package(self.campaign, 3, updated["fingerprint"])
+        fresh = self.performance.review(self.campaign, 3, updated["fingerprint"], "balanced")
+        self.assertEqual(fresh["local_viewer_activity"]["rows"][0]["arrivals"], 0)
+        for _ in range(3):
+            self.viewer.open_example(EXAMPLES[0].creative_ref, content_fingerprint=package_fingerprint(new_content))
+        fresh = self.performance.review(self.campaign, 3, updated["fingerprint"], "balanced")
+        self.assertEqual(fresh["proposal"]["correction"], source["proposal"]["correction"])
+        (self.drafts.media_dir / EXAMPLES[0].takes[1][2]).write_bytes(b"Newly prepared media")
+        changed_content = self.drafts.review_package(self.campaign, 3)["package"]["groups"][0]["content"]
+        self.assertEqual(self.drafts.comparison_content(EXAMPLES[0], package_fingerprint(changed_content)), changed_content)
+
+    def test_instruction_run_rejects_a_replaced_correction_and_an_unsupported_test(self):
+        runtime, source, run_id = self.instruction_run()
+        runtime.resume(run_id, max_steps=2)
+        self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, source["id"], "keep_comparison", "", uuid4().hex,
+        )
+        with self.assertRaisesRegex(PackageConflict, "correction changed"):
+            runtime.resume(run_id)
+        self.assertIsNone(self.drafts.read(3))
+        self.assertEqual(len(runtime.read(run_id)["steps"]), 2)
+        updated = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
+        with self.assertRaisesRegex(ValueError, "instruction tests"):
+            runtime.start_next_test(self.campaign, 2, self.fingerprint, updated["id"])
+        with self.assertRaises(ValueError):
+            runtime.start_next_test("another-campaign", 2, self.fingerprint, source["id"])
+
+    def test_instruction_run_rechecks_media_and_draft_at_save(self):
+        runtime, _, run_id = self.instruction_run()
+        runtime.resume(run_id, max_steps=2)
+        take = self.drafts.media_dir / EXAMPLES[0].takes[1][2]
+        original = take.read_bytes()
+        take.write_bytes(b"Changed during preparation")
+        with self.assertRaises(PackageConflict):
+            runtime.resume(run_id)
+        self.assertIsNone(self.drafts.read(3))
+        take.write_bytes(original)
+        self.drafts.save({"campaign_id": self.campaign, "revision": 2,
+                          "placements": [{**row, "title": row["title"] + " edited"}
+                                         for row in self.drafts.read()["placements"]]})
+        with self.assertRaises(PackageConflict):
+            runtime.resume(run_id)
+        self.assertNotIn("instruction_test", self.drafts.read(3))
+        self.assertIsNone(self.drafts.read(4))
+
+    def test_instruction_run_validates_model_tools_and_content(self):
+        class InvalidInstructions(RecordedInference):
+            def revise_instructions(self, context):
+                return {"instruction": "Untrusted structured output"}
+
+        class InvalidTool(RecordedInference):
+            def next_tool(self, request, history):
+                return "save_instruction_test"
+
+        runtime, _, run_id = self.instruction_run()
+        runtime.model = InvalidTool()
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            runtime.resume(run_id)
+        self.assertEqual(runtime.read(run_id)["steps"], [])
+        runtime.model = InvalidInstructions()
+        with self.assertRaisesRegex(ValueError, "revised comparison instructions"):
+            runtime.resume(run_id)
+        self.assertIsNone(self.drafts.read(3))
+        self.assertEqual(len(runtime.read(run_id)["steps"]), 1)
+        runtime.model = RecordedInference()
+        self.assertEqual(runtime.resume(run_id)["status"], "ready_for_review")
 
     def test_review_keeps_sample_coverage_separate_and_requires_approval(self):
         with self.assertRaisesRegex(PackageConflict, "Approve this revision"):

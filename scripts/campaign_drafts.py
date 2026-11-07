@@ -9,7 +9,7 @@ import sqlite3
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
-from campaign_agent.handoff import MEDIA_DIR, package_blockers, package_fingerprint, sample_package
+from campaign_agent.handoff import MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -84,6 +84,14 @@ class CampaignDrafts:
                 )
             """)
             if not live:
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS comparison_instruction_versions (
+                        client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                        creative_version TEXT NOT NULL, comparison_version TEXT NOT NULL,
+                        instruction_id TEXT NOT NULL, instruction TEXT NOT NULL,
+                        PRIMARY KEY (client_id, brand_id, creative_version, comparison_version, instruction_id)
+                    )
+                """)
                 db.execute("""
                     CREATE TABLE IF NOT EXISTS campaign_package_approvals (
                         client_id TEXT NOT NULL,
@@ -264,6 +272,62 @@ class CampaignDrafts:
                 ).fetchone()[0]
                 for entry in entries
             }
+
+    def comparison_content(self, example, fingerprint):
+        """Verify a content reference using current media and immutable instruction versions."""
+        content = example_content(example, self.media_dir)
+        if self.live or package_fingerprint(content) == fingerprint:
+            return content
+        with closing(sqlite3.connect(self.path)) as db:
+            rows = db.execute(
+                "SELECT instruction FROM comparison_instruction_versions WHERE client_id = ? AND brand_id = ? "
+                "AND creative_version = ? AND comparison_version = ?",
+                (example.scope.client_id, example.scope.brand_id, example.creative_ref, example.ref),
+            ).fetchall()
+        for instruction, in rows:
+            variant = {**content, "instruction": instruction}
+            if package_fingerprint(variant) == fingerprint:
+                return variant
+        return content
+
+    @staticmethod
+    def validate_instruction(instruction, original):
+        if (not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 500
+                or instruction.strip() == original):
+            raise ValueError("Provide revised comparison instructions of up to 500 characters.")
+        return instruction.strip()
+
+    def save_instruction_test(self, db, package, review, correction, instruction):
+        """Persist one instruction change in the caller's validated review transaction."""
+        self._package_scope(package["campaign_id"], package["revision"])
+        group = next(group for group in package["groups"]
+                     if group["creative_version"] == review["proposal"]["creative_version"])
+        instruction = self.validate_instruction(instruction, group["content"]["instruction"])
+        current = self._read(db)
+        if current["revision"] != package["revision"]:
+            raise StaleDraft(current)
+        test = {
+            "review_id": review["id"], "source_revision": package["revision"],
+            "source_fingerprint": review["fingerprint"], "correction": correction,
+            "creative_version": group["creative_version"],
+            "before": group["content"]["instruction"], "after": instruction,
+            "original_viewer_path": group["viewer_path"],
+            "reason": review["proposal"]["reason"], "measure": review["proposal"]["measure"],
+        }
+        saved = {
+            **current, "revision": current["revision"] + 1,
+            "comparison_instructions": {**current.get("comparison_instructions", {}),
+                                        group["creative_version"]: instruction},
+            "instruction_test": test,
+        }
+        db.executemany(
+            "INSERT INTO comparison_instruction_versions VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            [(LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, group["creative_version"], group["comparison_version"],
+              package_fingerprint({"instruction": text}), text) for text in (test["before"], instruction)],
+        )
+        db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
+                   (self.campaign_id, saved["revision"], json.dumps(saved)))
+        return saved
 
     def save(self, payload, *, connection=None):
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:

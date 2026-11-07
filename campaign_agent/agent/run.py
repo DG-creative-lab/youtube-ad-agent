@@ -10,30 +10,46 @@ from uuid import uuid4
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
 from campaign_agent.placements import read_catalog, rule_assignment
+from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
+from campaign_agent.measurement import ViewerMeasurement
+from campaign_agent.performance import CampaignPerformance
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
+NEXT_TEST_REQUEST = "Prepare revised comparison instructions."
 RUN_ID = re.compile(r"[0-9a-f]{32}")
 
 
 class ModelInference(Protocol):
     def next_tool(self, request: str, history: list[dict]) -> str: ...
+    def revise_instructions(self, context: dict) -> str: ...
 
 
 class RecordedInference:
     """A fixed recording for the authored demo request."""
     def next_tool(self, request, history):
+        if request == NEXT_TEST_REQUEST:
+            return ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")[len(history)]
         if request != DEMO_REQUEST:
             raise ValueError("The offline recording supports the documented demo request only.")
         return ("load_context", "propose_placements", "save_draft", "finish")[len(history)]
 
+    def revise_instructions(self, context):
+        """Authored offline responses. Evidence and corrections are supplied as data."""
+        options = (
+            "Play Take A and Take B all the way through. Then choose the delivery that best fits this scene.",
+            "Listen to each take in full. Compare their delivery, then choose the one that best fits this scene.",
+        )
+        return next(text for text in options if text != context["comparison"]["instruction"])
+
 
 class AgentRuntime:
-    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None):
+    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
-        self.drafts = CampaignDrafts(self.path, live=False, operator=operator)
+        self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
+        self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
         self.model = model or RecordedInference()
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""
@@ -46,6 +62,11 @@ class AgentRuntime:
                 CREATE TABLE IF NOT EXISTS agent_steps (
                     run_id TEXT NOT NULL, position INTEGER NOT NULL, tool TEXT NOT NULL,
                     result TEXT NOT NULL, PRIMARY KEY (run_id, position)
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_test_sources (
+                    run_id TEXT PRIMARY KEY, source TEXT NOT NULL
                 )
             """)
 
@@ -61,6 +82,30 @@ class AgentRuntime:
                        (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
                         self.operator.id, request, "running"))
             self._owned_run(db, run_id)
+        return run_id
+
+    def start_next_test(self, campaign_id, revision, fingerprint, review_id):
+        self.drafts._package_scope(campaign_id, revision)
+        if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+               for value in (fingerprint, review_id)):
+            raise ValueError("Choose a valid performance review.")
+        source = {"campaign_id": campaign_id, "revision": revision,
+                  "fingerprint": fingerprint, "review_id": review_id}
+        run_id = package_fingerprint({
+            "client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id,
+            "actor": self.operator.id, "request": NEXT_TEST_REQUEST, "source": source,
+        })[:32]
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()
+            if existing is not None:
+                self._owned_run(db, run_id)
+                return run_id
+            self.performance.instruction_test_context(db, **source)
+            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?)",
+                       (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
+                        self.operator.id, NEXT_TEST_REQUEST, "running"))
+            db.execute("INSERT INTO agent_test_sources VALUES (?, ?)", (run_id, json.dumps(source)))
         return run_id
 
     def _owned_run(self, db, run_id):
@@ -88,12 +133,15 @@ class AgentRuntime:
                     )
                 ]
                 if run[1] == "ready_for_review":
-                    return {"run_id": run_id, "status": run[1], "steps": history}
+                    return {"run_id": run_id, "request": run[0], "status": run[1], "steps": history}
                 tool = self.model.next_tool(run[0], history)
-                result = self._dispatch(db, tool, history)
+                if run[0] == NEXT_TEST_REQUEST:
+                    result = self._dispatch_next_test(db, run_id, tool, history)
+                else:
+                    result = self._dispatch(db, tool, history)
                 db.execute("INSERT INTO agent_steps VALUES (?, ?, ?, ?)",
                            (run_id, len(history), tool, json.dumps(result)))
-                if tool == "finish":
+                if tool in {"finish", "finish_test"}:
                     db.execute("UPDATE agent_runs SET status = ? WHERE id = ?",
                                ("ready_for_review", run_id))
         return self.read(run_id)
@@ -102,11 +150,31 @@ class AgentRuntime:
         self.operator.require_brand(LOCAL_BRAND)
         with closing(sqlite3.connect(self.path)) as db:
             db.execute("BEGIN")
-            _, status = self._owned_run(db, run_id)
+            request, status = self._owned_run(db, run_id)
             steps = [{"tool": tool, "result": json.loads(result)} for tool, result in db.execute(
                 "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
             )]
-            return {"run_id": run_id, "status": status, "steps": steps}
+            return {"run_id": run_id, "request": request, "status": status, "steps": steps}
+
+    def _dispatch_next_test(self, db, run_id, tool, history):
+        expected = ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")
+        if len(history) >= len(expected) or tool != expected[len(history)]:
+            raise ValueError("The requested tool is unavailable at this step.")
+        source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
+        if tool == "load_test_context":
+            return self.performance.instruction_test_context(db, **source)
+        if tool == "draft_instructions":
+            self.performance.instruction_test_context(db, **source)
+            context = history[0]["result"]
+            instruction = self.drafts.validate_instruction(
+                self.model.revise_instructions(context), context["comparison"]["instruction"],
+            )
+            return {"instruction": instruction}
+        if tool == "save_instruction_test":
+            return self.performance.save_instruction_test(db, source, history[1]["result"]["instruction"])
+        draft = history[2]["result"]
+        return {"campaign_id": draft["campaign_id"], "revision": draft["revision"], "ambiguous": [],
+                "message": "Revised comparison instructions prepared for approval."}
 
     def _dispatch(self, db, tool, history):
         # Each decision is constrained to the next capability in this recorded workflow.

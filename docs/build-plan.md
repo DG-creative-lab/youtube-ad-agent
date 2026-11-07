@@ -18,6 +18,10 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 | **4. Close the loop · 12 Nov** | Add a sample `CampaignReporting` adapter. Save delivery and local demo events as observations. Compute completion per tagged arrival for each eligible creative version. Store a buyer correction and a scoped finding or hypothesis. Have a new run retrieve both and propose the next test. | Run the review twice with different evidence. Low delivery leads to a delivery check. Sufficient arrivals with low completion can lead to a demo test. A partial report leaves unsupported breakdowns unknown. The next brief references the correction and the specific observations that influenced it. |
 | **5. Verify and package · 13 and 16 Nov** | Freeze the working path on Friday. Run the walkthrough on a fresh local database, then use Monday for fixes, the recording and setup notes. Show where product approval ends and manual Google Ads setup begins. Include the actual results of any optional runtime or sandbox checks. | A reviewer can follow the documented setup, play both viewer paths and reproduce the two runs without credentials. Every part of the walkthrough identifies its evidence source and shows which capability was exercised. |
 
+## Current follow-up slice
+
+The current follow-up slice closes the loop from a corrected review to another draft. **Prepare next test** runs the Python agent with authored offline responses for instruction tests supported by **Keep both takes unchanged**. Save the source review, correction and original wording with the new revision. Compare the wording in the planner, approve the revised package and open its content-specific viewer link. Retain the original comparison and its activity. Replay or resume the same preparation run without creating another revision, and reject an unfinished save if the source package or correction changes.
+
 ## First implementation slice
 
 Build this slice in Python and SQLite with the existing browser screen. React and TypeScript are for the fuller planner. Use the same backend API for both. The viewer comparison uses plain HTML, CSS and JavaScript.

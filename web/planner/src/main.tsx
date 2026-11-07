@@ -11,6 +11,11 @@ type Draft = {
   revision: number;
   brief: {title: string; contexts: Record<string, Context>};
   placements: Placement[];
+  instruction_test?: {
+    review_id: string; source_revision: number; creative_version: string;
+    before: string; after: string; reason: string; measure: string;
+    original_viewer_path: string; correction: {label: string; note: string};
+  };
 };
 type PackageReview = {
   package: {
@@ -34,6 +39,7 @@ type Mode = {
 type RunResult = {revision: number; ambiguous: Placement[]};
 type Run = {
   run_id: string;
+  request: string;
   status: "running" | "ready_for_review";
   steps: {tool: string; result: unknown}[];
 };
@@ -43,6 +49,12 @@ const stepLabels = {
   propose_placements: "Classify sample placements",
   save_draft: "Save draft revision",
   finish: "Prepare for review",
+};
+const nextTestStepLabels = {
+  load_test_context: "Load review evidence and buyer correction",
+  draft_instructions: "Draft revised comparison instructions",
+  save_instruction_test: "Save the next test draft",
+  finish_test: "Prepare for approval",
 };
 const runKey = "campaign-planner:last-run";
 const operatorKey = "placement-review:operator";
@@ -204,22 +216,41 @@ function App() {
     }
   }
 
-  async function prepare() {
+  async function prepare(nextTestReviewId?: string) {
     if (!mode || mode.live || busy || packageAction) return;
-    const id = !stale && run?.status !== "ready_for_review" && pendingId
+    if (nextTestReviewId && (!activePackage || needsLatest)) return;
+    const id = !nextTestReviewId && !stale && run?.status !== "ready_for_review" && pendingId
       ? pendingId
       : crypto.randomUUID().replaceAll("-", "");
-    setPendingId(id);
-    sessionStorage.setItem(runKey, id);
+    if (!nextTestReviewId) {
+      setPendingId(id);
+      sessionStorage.setItem(runKey, id);
+    }
     setBusy(true);
     setError("");
     setStale(false);
     if (id !== run?.run_id) setRun(null);
     try {
-      let current = await request<Run>("/api/agent/run", {run_id: id, request: mode.demoRequest});
+      let current: Run;
+      if (nextTestReviewId && activePackage) {
+        current = await request<Run>("/api/agent/next-test", {
+          campaign_id: activePackage.package.campaign_id, revision: activePackage.package.revision,
+          fingerprint: activePackage.fingerprint, review_id: nextTestReviewId,
+        });
+      } else if (id === pendingId && !stale) {
+        current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(id))
+          .catch(failure => {
+            if (!(failure instanceof RequestError && failure.status === 404)) throw failure;
+            return request<Run>("/api/agent/run", {run_id: id, request: mode.demoRequest});
+          });
+      } else {
+        current = await request<Run>("/api/agent/run", {run_id: id, request: mode.demoRequest});
+      }
+      setPendingId(current.run_id);
+      sessionStorage.setItem(runKey, current.run_id);
       for (let step = current.steps.length; current.status === "running" && step < 4; step++) {
         setRun(current);
-        current = await request<Run>("/api/agent/run", {run_id: id});
+        current = await request<Run>("/api/agent/run", {run_id: current.run_id});
       }
       const result = review(current);
       if (result) setDraft(await request<Draft>("/api/campaign?revision=" + result.revision));
@@ -233,6 +264,7 @@ function App() {
   }
 
   const result = review(run);
+  const activitySteps = run?.request === "Prepare revised comparison instructions." ? nextTestStepLabels : stepLabels;
   const completed = new Set(run?.steps.map(step => step.tool));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";
   const home = page === "/";
@@ -310,9 +342,9 @@ function App() {
                   <span className="label">01 / Prepare</span>
                   <h2 id="request-heading">Campaign request</h2>
                   {mode && <p>{mode.live ? "Recorded preparation is available in sample mode." : mode.demoRequest}</p>}
-                  {mode && !mode.live && <button onClick={prepare} disabled={busy || !!packageAction}>{action}</button>}
+                  {mode && !mode.live && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
                   {busy && <p className="compact-progress" role="status">
-                    {Object.entries(stepLabels).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
+                    {Object.entries(activitySteps).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
                   </p>}
                   {!mode && !error && <p role="status">Loading the workspace…</p>}
                   {error && <p className="error" role="alert">{error}</p>}
@@ -321,6 +353,23 @@ function App() {
                   <span className="label">02 / Review</span>
                   <h2 id="draft-heading">Campaign draft</h2>
                   {draft && <p className="revision">Revision {draft.revision} · {draft.placements.length} placements</p>}
+                  {draft?.instruction_test && <section className="context" aria-labelledby="instruction-test-heading">
+                    <h3 id="instruction-test-heading">Revised comparison instructions</h3>
+                    <p className="revision">Prepared from revision {draft.instruction_test.source_revision},
+                      {" review "}{draft.instruction_test.review_id.slice(0, 8)}.</p>
+                    <p className="revision">{draft.instruction_test.reason}</p>
+                    <dl className="setup-details">
+                      <div><dt>Original</dt><dd>{draft.instruction_test.before}</dd></div>
+                      <div><dt>Proposed</dt><dd>{draft.instruction_test.after}</dd></div>
+                      <div><dt>Buyer correction</dt><dd>{draft.instruction_test.correction.label}.
+                        {draft.instruction_test.correction.note && ` ${draft.instruction_test.correction.note}`}</dd></div>
+                      <div><dt>Measure</dt><dd>{draft.instruction_test.measure}</dd></div>
+                    </dl>
+                    {mode && <a className="text-action" href={mode.viewerOrigin + draft.instruction_test.original_viewer_path}>
+                      Open original comparison <span aria-hidden="true">↗</span>
+                    </a>}
+                    <p className="provenance">Draft wording · Recorded model response</p>
+                  </section>}
                   {activePackage && <dl className="setup-details">
                     {Object.entries(activePackage.package.proposed_setup).map(([label, value]) => (
                       <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
@@ -401,6 +450,7 @@ function App() {
                   <PerformanceReview key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
+                    onPrepareNextTest={reviewId => void prepare(reviewId)}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);
@@ -415,7 +465,7 @@ function App() {
                     : busy ? "Preparing the campaign" : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
                 </p>
                 <ol>
-                  {Object.entries(stepLabels).map(([tool, label], index) => (
+                  {Object.entries(activitySteps).map(([tool, label], index) => (
                     <li key={tool} className={completed.has(tool) ? "done" : ""}>
                       <span className="step-number" aria-hidden="true">{completed.has(tool) ? "✓" : index + 1}</span>
                       {label}
