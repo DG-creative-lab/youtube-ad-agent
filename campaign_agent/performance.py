@@ -9,6 +9,7 @@ import sqlite3
 
 from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
+from scripts.campaign_drafts import PackageConflict
 
 
 DELIVERY_FIXTURE = Path(__file__).resolve().parents[1] / "examples/tts-performance/delivery.json"
@@ -282,6 +283,35 @@ class CampaignPerformance:
             created_at = db.execute("SELECT created_at FROM campaign_performance_reviews WHERE id = ?",
                                     (review_id,)).fetchone()[0]
         return {"id": review_id, "created_at": created_at, **evidence}
+
+    def instruction_test_context(self, db, campaign_id, revision, fingerprint, review_id):
+        approved = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
+        row = db.execute(
+            "SELECT created_at, snapshot FROM campaign_performance_reviews "
+            "WHERE id = ? AND client_id = ? AND brand_id = ? AND campaign_id = ? "
+            "AND revision = ? AND fingerprint = ? "
+            "AND json_extract(snapshot, '$.local_viewer_activity.attribution') = ?",
+            (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint,
+             VIEWER_ATTRIBUTION),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Choose a review for this approved package.")
+        review = {"id": review_id, "created_at": row[0], **json.loads(row[1])}
+        correction = self._latest_correction(db, review, approved["package"])
+        if correction != review["proposal"].get("correction"):
+            raise PackageConflict("The buyer correction changed. Run another review before preparing a test.")
+        if (review["proposal"]["kind"] != "comparison_test"
+                or not correction or correction["kind"] != "keep_takes"):
+            raise ValueError("This preparation supports instruction tests with a keep-takes correction.")
+        group = comparison_group(approved["package"], review["proposal"]["creative_version"])
+        return {"package": approved["package"], "review": review, "correction": correction,
+                "comparison": group["content"]}
+
+    def save_instruction_test(self, db, source, instruction):
+        context = self.instruction_test_context(db, **source)
+        return self.drafts.save_instruction_test(
+            db, context["package"], context["review"], context["correction"], instruction,
+        )
 
     def read(self, campaign_id, revision, fingerprint):
         response = {

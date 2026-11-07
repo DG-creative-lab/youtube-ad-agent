@@ -21,7 +21,7 @@ if not __package__:
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import caption_bytes, example_content, media_sha256, package_fingerprint
+from campaign_agent.handoff import caption_bytes, media_sha256, package_fingerprint
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
@@ -79,7 +79,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     drafts = CampaignDrafts(draft_path, live)
-    agent = None if live else AgentRuntime(draft_path)
+    agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir)
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
     operator_token = secrets.token_urlsafe(32)
@@ -125,7 +125,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 else:
                     self.send(404, {"error": "Not found."})
                 return
-            if self.path == "/api/agent/run":
+            if self.path in {"/api/agent/run", "/api/agent/next-test"}:
                 self.post_agent()
                 return
             if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
@@ -226,22 +226,32 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             try:
                 data = json.loads(self.rfile.read(int(length)))
-                run_id = data.get("run_id") if isinstance(data, dict) else None
-                if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
-                    raise ValueError("Invalid run ID.")
-                if set(data) == {"run_id", "request"}:
-                    agent.start(data["request"], run_id=run_id)
-                    result = agent.read(run_id)
-                elif set(data) == {"run_id"}:
-                    result = agent.resume(run_id, max_steps=1)
-                else:
+                if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
+                if self.path == "/api/agent/next-test":
+                    if set(data) != {"campaign_id", "revision", "fingerprint", "review_id"}:
+                        raise ValueError("Choose a valid performance review.")
+                    run_id = agent.start_next_test(**data)
+                    result = agent.read(run_id)
+                else:
+                    run_id = data.get("run_id")
+                    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+                        raise ValueError("Invalid run ID.")
+                    if set(data) == {"run_id", "request"}:
+                        agent.start(data["request"], run_id=run_id)
+                        result = agent.read(run_id)
+                    elif set(data) == {"run_id"}:
+                        result = agent.resume(run_id, max_steps=1)
+                    else:
+                        raise ValueError("Invalid agent request.")
+            except PackageConflict as exc:
+                self.send(409, {"error": str(exc)})
             except StaleDraft:
                 self.send(409, {"error": "The draft changed during preparation. Start a new run from the latest revision."})
             except PermissionError as exc:
                 self.send(403, {"error": str(exc)})
-            except (ValueError, RecursionError):
-                self.send(400, {"error": "The recorded agent supports the sample campaign request only."})
+            except (ValueError, RecursionError) as exc:
+                self.send(400, {"error": str(exc)})
             except (sqlite3.Error, OSError):
                 self.send(503, {"error": "Could not complete this step. Try resuming the run."})
             else:
@@ -306,7 +316,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             for item in viewer.examples.values():
                 if item.scope != origin.scope or item.ref not in references:
                     continue
-                content = example_content(item, drafts.media_dir)
+                content = drafts.comparison_content(item, references[item.ref])
                 if (package_fingerprint(content) == references[item.ref]
                         and all(take["sha256"] for take in content["takes"])):
                     verified[item.ref] = content
@@ -320,6 +330,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             )
             content = verified[selected_ref]
             comparison = result["example"]
+            comparison["instruction"] = content["instruction"]
             for take, reviewed in zip(comparison["takes"], content["takes"]):
                 take["url"] += "?sha256=" + reviewed["sha256"]
             comparison["captions"] += "?sha256=" + content["captions_sha256"]

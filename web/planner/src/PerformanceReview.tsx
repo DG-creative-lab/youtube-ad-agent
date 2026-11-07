@@ -46,12 +46,14 @@ type Props = {
   groups: {creative_version: string; title: string}[];
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
   onPackageConflict: (message: string) => void;
+  onPrepareNextTest: (reviewId: string) => void;
 };
 
 const endpoint = "/api/campaign/performance";
 const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1});
 
-export function PerformanceReview({campaignId, revision, fingerprint, groups, request, onPackageConflict}: Props) {
+export function PerformanceReview({campaignId, revision, fingerprint, groups, request, onPackageConflict,
+                                   onPrepareNextTest}: Props) {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [scenario, setScenario] = useState("");
   const [result, setResult] = useState<PerformanceResult | null>(null);
@@ -205,6 +207,10 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
               </p>
             )}
             <p className="provenance">Offline review · Illustrative decision rules</p>
+            {proposal.correction?.kind === "keep_takes" && <button
+              onClick={() => result && onPrepareNextTest(result.id)} disabled={busy || saving || needsRerun}>
+              Prepare next test
+            </button>}
           </section>
           {proposal.kind === "comparison_test" && (
             <section aria-labelledby="buyer-correction">

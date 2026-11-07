@@ -24,6 +24,10 @@ After approval, choose a sample delivery scenario and click **Review performance
 
 When the review proposes a comparison test, use **Buyer correction** to specify what must stay fixed. Save it and run another review to see how the proposal changes. The constraint applies within that campaign. **Keep both takes unchanged** carries over to instruction edits when the takes and their comparison context match. **Keep the entire comparison unchanged** applies to the full comparison. The optional note records the reason.
 
+After a review uses **Keep both takes unchanged**, choose **Prepare next test**. The offline agent loads that review and correction, drafts revised comparison instructions, and saves a new campaign revision for approval. The workspace shows the original and proposed wording and links to the original comparison. The revised comparison has its own content fingerprint and viewer activity. The recordings are reused. The new package needs approval before export.
+
+Preparation resumes through **Resume preparation** after a refresh or interrupted request. Starting again from the same source review reuses its run. A changed package or buyer correction requires a fresh review before an unfinished run can save its draft. Wording comes from labelled, authored offline responses.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.
@@ -61,7 +65,7 @@ The planner link contains a private token for the current server process. Keep t
 
 Run `python3 -m campaign_agent.agent` to prepare the fictional Text to Speech campaign from the recorded demo request. The command prints a run ID before it starts and returns the saved draft revision and ambiguous catalog entries. Use `python3 -m campaign_agent.agent --resume RUN_ID` to continue an interrupted run. The planner opens the saved sample draft for review.
 
-The recorded decisions support the included demo request and local fictional catalog. The run preserves existing placements and stops if the draft changes while it is preparing. Campaign approval, export of a complete package, and live model inference are later steps.
+The recorded decisions support the included demo request, local fictional catalog and instruction-test workflow. The run preserves existing placements and stops if the draft changes while it is preparing. Approve and export the resulting package through the planner.
 
 ## Engineering checks
 

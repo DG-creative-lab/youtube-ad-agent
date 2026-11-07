@@ -47,6 +47,7 @@ def sample_package(draft, media_dir):
     for context, brief in draft["brief"]["contexts"].items():
         example = examples[brief["destination_ref"] + "-v1"]
         content = example_content(example, media_dir)
+        content["instruction"] = draft.get("comparison_instructions", {}).get(example.creative_ref, example.instruction)
         preview_hash = content["preview_sha256"]
         groups.append({
             "context": context,
@@ -84,6 +85,7 @@ def sample_package(draft, media_dir):
             "schedule": "Unscheduled",
         },
         "groups": groups,
+        **({"instruction_test": draft["instruction_test"]} if "instruction_test" in draft else {}),
     }
 
 
