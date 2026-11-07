@@ -105,31 +105,37 @@ class ViewerMeasurement:
         return observations
 
     def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
-                     content_fingerprint=None, origin_unavailable=False):
-        origin, target = self.resolve(creative_ref, example_ref)
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            if visit_id is None:
-                visit_id = uuid4().hex
-                attribution = None if origin_unavailable else content_fingerprint
-                db.execute(
-                    "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint) "
-                    "VALUES (?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution),
+                     content_fingerprint=None, origin_unavailable=False, connection=None):
+        if connection is None:
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                return self.open_example(
+                    creative_ref, example_ref, visit_id, content_fingerprint=content_fingerprint,
+                    origin_unavailable=origin_unavailable, connection=db,
                 )
-            else:
-                attribution = self.require_visit(db, origin, visit_id)
-                # A visit with unknown content can resume, but later verification cannot attribute its old activity.
-                if attribution is not None:
-                    if attribution != content_fingerprint:
-                        raise ViewerNotFound("This visit is unavailable.")
-                    if origin_unavailable:
-                        db.execute("UPDATE viewer_visits SET content_fingerprint = NULL WHERE id = ?", (visit_id,))
+        origin, target = self.resolve(creative_ref, example_ref)
+        db = connection
+        if visit_id is None:
+            visit_id = uuid4().hex
+            attribution = None if origin_unavailable else content_fingerprint
             db.execute(
-                "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) "
-                "VALUES (?, ?, ?, 'arrival', '') ON CONFLICT (visit_id, event_id) DO NOTHING",
-                (visit_id, f"arrival:{target.ref}", target.ref),
+                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint) "
+                "VALUES (?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution),
             )
-            state = self.state(db, visit_id, target.ref)
+        else:
+            attribution = self.require_visit(db, origin, visit_id)
+            # A visit with unknown content can resume, but later verification cannot attribute its old activity.
+            if attribution is not None:
+                if attribution != content_fingerprint:
+                    raise ViewerNotFound("This visit is unavailable.")
+                if origin_unavailable:
+                    db.execute("UPDATE viewer_visits SET content_fingerprint = NULL WHERE id = ?", (visit_id,))
+        db.execute(
+            "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) "
+            "VALUES (?, ?, ?, 'arrival', '') ON CONFLICT (visit_id, event_id) DO NOTHING",
+            (visit_id, f"arrival:{target.ref}", target.ref),
+        )
+        state = self.state(db, visit_id, target.ref)
         return {
             "visit_id": visit_id,
             "example": {

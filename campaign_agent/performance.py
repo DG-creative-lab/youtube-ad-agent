@@ -194,6 +194,13 @@ class CampaignPerformance:
               comparison_identity(group))).fetchone()
         return self._correction_record(row) if row else None
 
+    def correction_for_comparison(self, db, package, creative):
+        self.drafts._package_scope(package["campaign_id"], package["revision"])
+        return self._latest_correction(db, {
+            "campaign_id": package["campaign_id"],
+            "proposal": {"kind": "comparison_test", "creative_version": creative},
+        }, package)
+
     @staticmethod
     def _correction_record(row):
         correction_id, kind, note, review_id, actor, created_at = row

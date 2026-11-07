@@ -52,6 +52,7 @@
 const el = (id) => document.getElementById(id);
 const defaultCreative = "editing-voiceover-v1";
 const query = new URLSearchParams(location.search);
+const testId = query.get("test");
 const content = query.get("content");
 const reviewed = query.getAll("reviewed");
 const references = reviewed.length ? Object.fromEntries(reviewed.map(value => value.split(":"))) : null;
@@ -74,7 +75,27 @@ async function post(action, payload) {
   return data;
 }
 
-function storageKey() { return "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : ""); }
+function storageKey() {
+  return testId ? "viewer:test:" + testId
+    : "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : "");
+}
+
+async function participantReference() {
+  const key = "instruction-test:participant:" + testId;
+  function getOrCreate() {
+    try {
+      let participant = localStorage.getItem(key);
+      if (!participant || !/^[0-9a-f]{32}$/.test(participant)) {
+        participant = crypto.randomUUID().replaceAll("-", "");
+        localStorage.setItem(key, participant);
+      }
+      return participant;
+    } catch {
+      throw new Error("Allow browser storage to keep the same test version when you return.");
+    }
+  }
+  return navigator.locks ? navigator.locks.request(key, getOrCreate) : getOrCreate();
+}
 
 function persistVisit() {
   sessionStorage.setItem(storageKey(), JSON.stringify({visit, example: current.ref, queue}));
@@ -176,6 +197,7 @@ function render(data) {
   el("player").firstElementChild?.pause();
   el("player").replaceChildren();
   current = data.example;
+  if (data.creative_ref) creative = data.creative_ref;
   visit = data.visit_id;
   state = data;
   chosenTake = current.takes.find((take) => take.id === state.choice);
@@ -200,7 +222,10 @@ function render(data) {
   showState();
 }
 
-function openExample(example = null, id = null) {
+async function openExample(example = null, id = null) {
+  if (testId) {
+    return post("test/open", {test_id: testId, participant_id: await participantReference()});
+  }
   return post("open", {creative_ref: creative, example_ref: example, visit_id: id,
                        ...(content && {content}), ...(references && {references})});
 }
@@ -234,13 +259,13 @@ el("example").onchange = async () => {
         await flushEvents();
         return;
       } catch (error) {
-        if (error.status !== 404) throw error;
+        if (error.status !== 404 || testId) throw error;
       }
     }
     try {
       render(await openExample());
     } catch (error) {
-      if (error.status !== 404 || creative === defaultCreative || content) throw error;
+      if (error.status !== 404 || creative === defaultCreative || content || testId) throw error;
       creative = defaultCreative;
       render(await openExample());
       history.replaceState(null, "", "/viewer");

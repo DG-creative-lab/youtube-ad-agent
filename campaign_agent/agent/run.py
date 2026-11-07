@@ -13,21 +13,26 @@ from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
+from campaign_agent.instruction_tests import InstructionTests
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
 NEXT_TEST_REQUEST = "Prepare revised comparison instructions."
+REVIEW_TEST_REQUEST = "Review the original and revised instruction test."
 RUN_ID = re.compile(r"[0-9a-f]{32}")
 
 
 class ModelInference(Protocol):
     def next_tool(self, request: str, history: list[dict]) -> str: ...
     def revise_instructions(self, context: dict) -> str: ...
+    def assess_instruction_test(self, context: dict) -> dict: ...
 
 
 class RecordedInference:
     """A fixed recording for the authored demo request."""
     def next_tool(self, request, history):
+        if request == REVIEW_TEST_REQUEST:
+            return ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")[len(history)]
         if request == NEXT_TEST_REQUEST:
             return ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")[len(history)]
         if request != DEMO_REQUEST:
@@ -42,6 +47,27 @@ class RecordedInference:
         )
         return next(text for text in options if text != context["comparison"]["instruction"])
 
+    def assess_instruction_test(self, context):
+        original, revised = context["rows"]
+        if any(row["arrivals"] < context["minimum_per_version"] for row in (original, revised)):
+            return {
+                "kind": "insufficient_evidence", "title": "Insufficient evidence",
+                "reason": "Collect at least 20 assigned visits for each version before considering another change. "
+                          "This is an illustrative POC threshold.",
+            }
+        if (revised["completion_rate"] <= original["completion_rate"]
+                and context["correction"] and context["correction"]["kind"] == "keep_takes"):
+            return {
+                "kind": "prepare_another_test", "title": "Consider another instruction test",
+                "reason": "The revised wording has no higher observed completion rate in these visits. "
+                          "Keep both recordings fixed and investigate another instruction change.",
+            }
+        return {
+            "kind": "keep_collecting", "title": "Keep collecting evidence",
+            "reason": "Review the observed completion rates alongside the buyer correction. "
+                      "Continue with the approved versions before deciding whether to make another change.",
+        }
+
 
 class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR):
@@ -50,6 +76,7 @@ class AgentRuntime:
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
+        self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""
@@ -118,6 +145,21 @@ class AgentRuntime:
             raise PermissionError("The run is unavailable to this operator.")
         return row
 
+    def start_instruction_review(self, test_id):
+        context = self.instruction_tests.review_context(test_id)
+        run_id = package_fingerprint({
+            "actor": self.operator.id, "request": REVIEW_TEST_REQUEST, "context": context,
+        })[:32]
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                       (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
+                        self.operator.id, REVIEW_TEST_REQUEST, "running"))
+            self._owned_run(db, run_id)
+            db.execute("INSERT INTO agent_test_sources VALUES (?, ?) ON CONFLICT DO NOTHING",
+                       (run_id, json.dumps(context)))
+        return run_id
+
     def resume(self, run_id, max_steps=4):
         if type(max_steps) is not int or not 0 <= max_steps <= 4:
             raise ValueError("The step budget must be between zero and four.")
@@ -135,13 +177,15 @@ class AgentRuntime:
                 if run[1] == "ready_for_review":
                     return {"run_id": run_id, "request": run[0], "status": run[1], "steps": history}
                 tool = self.model.next_tool(run[0], history)
-                if run[0] == NEXT_TEST_REQUEST:
+                if run[0] == REVIEW_TEST_REQUEST:
+                    result = self._dispatch_instruction_review(db, run_id, tool, history)
+                elif run[0] == NEXT_TEST_REQUEST:
                     result = self._dispatch_next_test(db, run_id, tool, history)
                 else:
                     result = self._dispatch(db, tool, history)
                 db.execute("INSERT INTO agent_steps VALUES (?, ?, ?, ?)",
                            (run_id, len(history), tool, json.dumps(result)))
-                if tool in {"finish", "finish_test"}:
+                if tool in {"finish", "finish_test", "finish_test_review"}:
                     db.execute("UPDATE agent_runs SET status = ? WHERE id = ?",
                                ("ready_for_review", run_id))
         return self.read(run_id)
@@ -155,6 +199,22 @@ class AgentRuntime:
                 "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
             )]
             return {"run_id": run_id, "request": request, "status": status, "steps": steps}
+
+    def _dispatch_instruction_review(self, db, run_id, tool, history):
+        expected = ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")
+        if len(history) >= len(expected) or tool != expected[len(history)]:
+            raise ValueError("The requested tool is unavailable at this step.")
+        context = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
+        if tool == "load_test_evidence":
+            return context
+        if tool == "assess_instruction_test":
+            return self.instruction_tests.validate_assessment(
+                history[0]["result"], self.model.assess_instruction_test(history[0]["result"]),
+            )
+        if tool == "save_test_review":
+            return self.instruction_tests.save_review(db, history[0]["result"], history[1]["result"])
+        return {"campaign_id": context["campaign_id"], "revision": context["revision"], "ambiguous": [],
+                "message": "Instruction-test assessment saved."}
 
     def _dispatch_next_test(self, db, run_id, tool, history):
         expected = ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")

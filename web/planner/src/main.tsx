@@ -2,6 +2,7 @@ import {useEffect, useState} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
+import {InstructionTest} from "./InstructionTest";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -56,6 +57,13 @@ const nextTestStepLabels = {
   save_instruction_test: "Save the next test draft",
   finish_test: "Prepare for approval",
 };
+const instructionReviewStepLabels = {
+  load_test_evidence: "Load results for both instruction versions",
+  assess_instruction_test: "Assess results and buyer correction",
+  save_test_review: "Save the test assessment",
+  finish_test_review: "Prepare the assessment for review",
+};
+type Preparation = {kind: "next_test"; reviewId: string} | {kind: "instruction_review"; testId: string};
 const runKey = "campaign-planner:last-run";
 const operatorKey = "placement-review:operator";
 type Page = "/" | "/campaign";
@@ -216,13 +224,13 @@ function App() {
     }
   }
 
-  async function prepare(nextTestReviewId?: string) {
+  async function prepare(source?: Preparation) {
     if (!mode || mode.live || busy || packageAction) return;
-    if (nextTestReviewId && (!activePackage || needsLatest)) return;
-    const id = !nextTestReviewId && !stale && run?.status !== "ready_for_review" && pendingId
+    if (source && (!activePackage || needsLatest)) return;
+    const id = !source && !stale && run?.status !== "ready_for_review" && pendingId
       ? pendingId
       : crypto.randomUUID().replaceAll("-", "");
-    if (!nextTestReviewId) {
+    if (!source) {
       setPendingId(id);
       sessionStorage.setItem(runKey, id);
     }
@@ -232,10 +240,12 @@ function App() {
     if (id !== run?.run_id) setRun(null);
     try {
       let current: Run;
-      if (nextTestReviewId && activePackage) {
+      if (source?.kind === "instruction_review") {
+        current = await request<Run>("/api/agent/instruction-review", {test_id: source.testId});
+      } else if (source?.kind === "next_test" && activePackage) {
         current = await request<Run>("/api/agent/next-test", {
           campaign_id: activePackage.package.campaign_id, revision: activePackage.package.revision,
-          fingerprint: activePackage.fingerprint, review_id: nextTestReviewId,
+          fingerprint: activePackage.fingerprint, review_id: source.reviewId,
         });
       } else if (id === pendingId && !stale) {
         current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(id))
@@ -264,7 +274,9 @@ function App() {
   }
 
   const result = review(run);
-  const activitySteps = run?.request === "Prepare revised comparison instructions." ? nextTestStepLabels : stepLabels;
+  const reviewingTest = run?.request === "Review the original and revised instruction test.";
+  const activitySteps = reviewingTest ? instructionReviewStepLabels
+    : run?.request === "Prepare revised comparison instructions." ? nextTestStepLabels : stepLabels;
   const completed = new Set(run?.steps.map(step => step.tool));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";
   const home = page === "/";
@@ -450,7 +462,17 @@ function App() {
                   <PerformanceReview key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
-                    onPrepareNextTest={reviewId => void prepare(reviewId)}
+                    onPrepareNextTest={reviewId => void prepare({kind: "next_test", reviewId})}
+                    onPackageConflict={message => {
+                      setPackageChanged(true);
+                      setPackageError(message);
+                    }} />
+                )}
+                {draft?.instruction_test && activePackage?.approval && !needsLatest && !busy && mode && (
+                  <InstructionTest key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
+                    revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
+                    viewerOrigin={mode.viewerOrigin} request={request}
+                    onReview={testId => void prepare({kind: "instruction_review", testId})}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);
@@ -461,8 +483,10 @@ function App() {
                 <span className="label">Run details</span>
                 <h2>Agent activity</h2>
                 <p role="status" className="run-status">
-                  {result ? (result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
-                    : busy ? "Preparing the campaign" : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
+                  {result ? (reviewingTest ? "Test assessment saved"
+                    : result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
+                    : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
+                    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
                 </p>
                 <ol>
                   {Object.entries(activitySteps).map(([tool, label], index) => (

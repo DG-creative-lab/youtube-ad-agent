@@ -82,6 +82,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir)
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
+    instruction_tests = agent.instruction_tests if agent else None
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -120,16 +121,16 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if not self.check_host():
                 return
             if self.server is viewer_server:
-                if self.path in {"/api/viewer/open", "/api/viewer/event"}:
+                if self.path in {"/api/viewer/open", "/api/viewer/event", "/api/viewer/test/open"}:
                     self.post_viewer()
                 else:
                     self.send(404, {"error": "Not found."})
                 return
-            if self.path in {"/api/agent/run", "/api/agent/next-test"}:
+            if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review"}:
                 self.post_agent()
                 return
             if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
-                             "/api/campaign/correction"}:
+                             "/api/campaign/correction", "/api/campaign/instruction-test"}:
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -181,6 +182,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 fields = {"campaign_id", "revision", "fingerprint"}
                 is_performance = self.path.endswith("/performance")
                 is_correction = self.path.endswith("/correction")
+                is_instruction_test = self.path.endswith("/instruction-test")
                 if is_performance:
                     fields.add("scenario")
                 if is_correction:
@@ -192,7 +194,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         or (is_correction and (not isinstance(data["review_id"], str)
                             or not re.fullmatch(r"[0-9a-f]{64}", data["review_id"])))):
                     raise ValueError("Send a valid package reference.")
-                if is_correction:
+                if is_instruction_test:
+                    command = instruction_tests.start
+                elif is_correction:
                     command = performance.save_correction
                 elif is_performance:
                     command = performance.review
@@ -228,7 +232,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 data = json.loads(self.rfile.read(int(length)))
                 if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
-                if self.path == "/api/agent/next-test":
+                if self.path == "/api/agent/instruction-review":
+                    if set(data) != {"test_id"}:
+                        raise ValueError("Choose an instruction test.")
+                    run_id = agent.start_instruction_review(data["test_id"])
+                    result = agent.read(run_id)
+                elif self.path == "/api/agent/next-test":
                     if set(data) != {"campaign_id", "revision", "fingerprint", "review_id"}:
                         raise ValueError("Choose a valid performance review.")
                     run_id = agent.start_next_test(**data)
@@ -246,6 +255,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         raise ValueError("Invalid agent request.")
             except PackageConflict as exc:
                 self.send(409, {"error": str(exc)})
+            except ViewerNotFound as exc:
+                self.send(404, {"error": str(exc)})
             except StaleDraft:
                 self.send(409, {"error": "The draft changed during preparation. Start a new run from the latest revision."})
             except PermissionError as exc:
@@ -271,7 +282,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 data = json.loads(self.rfile.read(int(length)))
                 if not isinstance(data, dict):
                     raise ValueError("Invalid comparison request.")
-                if self.path == "/api/viewer/open":
+                if self.path == "/api/viewer/test/open":
+                    if instruction_tests is None or set(data) != {"test_id", "participant_id"}:
+                        raise ValueError("Choose a valid instruction test.")
+                    result = instruction_tests.open(**data)
+                elif self.path == "/api/viewer/open":
                     content = data.pop("content", None)
                     references = data.pop("references", None)
                     if (set(data) != {"creative_ref", "example_ref", "visit_id"}
@@ -403,6 +418,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if self.check_operator():
                     self.read_performance(url.query)
                 return
+            if url.path == "/api/campaign/instruction-test":
+                if self.check_operator():
+                    self.read_performance(url.query, instruction_test=True)
+                return
             if url.path != "/api/search":
                 self.send(404, {"error": "Not found."})
                 return
@@ -473,7 +492,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             headers.append(("Content-Range", f"bytes {start}-{end}/{size}"))
             self.send(206, data[start:end + 1], content_type, headers)
 
-        def read_performance(self, query):
+        def read_performance(self, query, *, instruction_test=False):
             if performance is None:
                 self.send(404, {"error": "Performance review is available in sample mode."})
                 return
@@ -485,7 +504,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Choose an approved package to review."})
                 return
             try:
-                result = performance.read(drafts.campaign_id, int(revision), fingerprint)
+                command = instruction_tests.read if instruction_test else performance.read
+                result = command(drafts.campaign_id, int(revision), fingerprint)
             except sqlite3.Error:
                 self.send(503, {"error": "Could not load performance review. Try again."})
             else:
