@@ -3,6 +3,7 @@ import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
 import {InstructionTest} from "./InstructionTest";
+import type {ReviewSelection} from "./InstructionTest";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -35,6 +36,7 @@ type Mode = {
   live: boolean;
   demoRequest: string;
   viewerOrigin: string;
+  openrouterReviewModels: string[];
   examples: {creative: string; ref: string; title: string}[];
 };
 type RunResult = {revision: number; ambiguous: Placement[]};
@@ -63,7 +65,8 @@ const instructionReviewStepLabels = {
   save_test_review: "Save the test assessment",
   finish_test_review: "Prepare the assessment for review",
 };
-type Preparation = {kind: "next_test"; reviewId: string} | {kind: "instruction_review"; testId: string};
+type Preparation = {kind: "next_test"; reviewId: string}
+  | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
 const runKey = "campaign-planner:last-run";
 const operatorKey = "placement-review:operator";
 type Page = "/" | "/campaign";
@@ -241,7 +244,10 @@ function App() {
     try {
       let current: Run;
       if (source?.kind === "instruction_review") {
-        current = await request<Run>("/api/agent/instruction-review", {test_id: source.testId});
+        current = await request<Run>("/api/agent/instruction-review", {
+          test_id: source.testId,
+          ...source.selection,
+        });
       } else if (source?.kind === "next_test" && activePackage) {
         current = await request<Run>("/api/agent/next-test", {
           campaign_id: activePackage.package.campaign_id, revision: activePackage.package.revision,
@@ -472,7 +478,8 @@ function App() {
                   <InstructionTest key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     viewerOrigin={mode.viewerOrigin} request={request}
-                    onReview={testId => void prepare({kind: "instruction_review", testId})}
+                    models={mode.openrouterReviewModels ?? []}
+                    onReview={(testId, selection) => void prepare({kind: "instruction_review", testId, selection})}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);

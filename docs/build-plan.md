@@ -22,6 +22,8 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 
 **Prepare next test** drafts revised instructions from a corrected review. After approval, **Run instruction test** pins the exact original and revised content and creates one viewer link. Persist each browser's random assignment with its visit so refreshes and restarts preserve its version and progress. Count only assigned visits in the experiment's results. **Review instruction test** runs the Python agent with authored offline responses to assess both versions and the current buyer correction, retaining the evidence used. Mark saved assessments when new activity or a correction warrants another review. The first rules use an illustrative minimum of 20 assigned visits per version before proposing another instruction change.
 
+The next inference slice adds an explicit OpenRouter mode for these assessments. Reviews start in offline mode. A server allowlist permits selected `:free` models under a zero-price route filter, a one-request allowance and a 512-token output limit. Pin model settings and evidence on each run, reserve the allowance before dispatch, call outside SQLite write transactions and persist the provider receipt before accepting the agent step. Retain model, prompt, evidence and usage provenance with the assessment. Verify with simulated responses before separately authorized live verification.
+
 ## First implementation slice
 
 Build this slice in Python and SQLite with the existing browser screen. React and TypeScript are for the fuller planner. Use the same backend API for both. The viewer comparison uses plain HTML, CSS and JavaScript.
