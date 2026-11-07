@@ -110,6 +110,144 @@ class CampaignPerformanceTests(unittest.TestCase):
         latest = self.performance.review(self.campaign, 2, fingerprint, "balanced")
         self.assertEqual(latest["local_viewer_activity"]["rows"][0]["arrivals"], 1)
 
+    def test_saved_correction_changes_the_next_comparison_test_and_preserves_evidence(self):
+        approved = self.drafts.approve_package(self.campaign, 2, self.fingerprint)
+        creative = EXAMPLES[0].creative_ref
+        content = package_fingerprint(approved["package"]["groups"][0]["content"])
+        for _ in range(3):
+            self.viewer.open_example(creative, content_fingerprint=content)
+        original = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
+        self.assertEqual(original["proposal"]["title"], "Test a shorter second take")
+        with self.assertRaisesRegex(ValueError, "review for this approved package"):
+            self.performance.save_correction(self.campaign, 2, self.fingerprint, "f" * 64, "keep_takes", "", uuid4().hex)
+        original_operation = uuid4().hex
+        saved = self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_takes", "Keep approved narration.", original_operation,
+        )
+        reopened = CampaignPerformance(self.drafts, self.viewer)
+        pending = reopened.read(self.campaign, 2, self.fingerprint)
+        self.assertEqual(pending["review"], original)
+        self.assertEqual(pending["correction"], saved)
+
+        next_review = reopened.review(self.campaign, 2, self.fingerprint, "balanced")
+        self.assertEqual(next_review["proposal"]["title"], "Test clearer comparison instructions")
+        self.assertEqual(next_review["proposal"]["correction"], saved)
+        self.assertEqual(next_review["proposal"]["evidence"], ["local_viewer_activity"])
+        self.assertEqual(next_review["local_viewer_activity"], original["local_viewer_activity"])
+        self.assertEqual(saved["review_id"], original["id"])
+
+        later = reopened.save_correction(
+            self.campaign, 2, self.fingerprint, next_review["id"], "keep_comparison", "", uuid4().hex,
+        )
+        self.assertEqual(reopened.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_takes", "Keep approved narration.", original_operation,
+        ), later)
+        with self.assertRaisesRegex(ValueError, "different save"):
+            reopened.save_correction(
+                self.campaign, 2, self.fingerprint, original["id"], "keep_comparison", "", original_operation,
+            )
+        adjusted = reopened.review(self.campaign, 2, self.fingerprint, "balanced")
+        self.assertEqual(adjusted["proposal"]["title"], "Test how the ad sets up the comparison")
+        self.assertEqual(adjusted["proposal"]["correction"], later)
+        limited = reopened.review(self.campaign, 2, self.fingerprint, "limited")
+        self.assertEqual(limited["proposal"]["kind"], "delivery_check")
+        self.assertNotIn("correction", limited["proposal"])
+        restored = reopened.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_takes", "Keep approved narration.", uuid4().hex,
+        )
+        self.assertNotEqual(restored["id"], saved["id"])
+        self.assertEqual(restored["kind"], saved["kind"])
+        revised = reopened.review(self.campaign, 2, self.fingerprint, "balanced")
+        self.assertEqual(revised["proposal"]["correction"], restored)
+        self.assertEqual(revised["proposal"]["title"], "Test clearer comparison instructions")
+
+        take = self.drafts.media_dir / EXAMPLES[0].takes[1][2]
+        original_take = take.read_bytes()
+        take.write_bytes(b"Changed second take")
+        changed = self.drafts.review_package(self.campaign, 2)["fingerprint"]
+        approved = self.drafts.approve_package(self.campaign, 2, changed)
+        content = package_fingerprint(approved["package"]["groups"][0]["content"])
+        for _ in range(3):
+            self.viewer.open_example(creative, content_fingerprint=content)
+        fresh = reopened.review(self.campaign, 2, changed, "balanced")
+        self.assertEqual(fresh["proposal"]["title"], "Test a shorter second take")
+        self.assertNotIn("correction", fresh["proposal"])
+        with self.assertRaisesRegex(ValueError, "review for this approved package"):
+            reopened.save_correction(self.campaign, 2, changed, original["id"], "keep_takes", "", uuid4().hex)
+
+        changed_correction = reopened.save_correction(
+            self.campaign, 2, changed, fresh["id"], "keep_comparison", "", uuid4().hex,
+        )
+        self.assertEqual(changed_correction["kind"], "keep_comparison")
+        take.write_bytes(original_take)
+        self.assertEqual(reopened.read(self.campaign, 2, self.fingerprint)["correction"], restored)
+        self.assertEqual(
+            reopened.review(self.campaign, 2, self.fingerprint, "balanced")["proposal"]["correction"], restored,
+        )
+
+    def test_existing_correction_survives_a_separate_ad_preview_change(self):
+        audiobook = EXAMPLES[1]
+
+        def approve_and_review():
+            fingerprint = self.drafts.review_package(self.campaign, 2)["fingerprint"]
+            approved = self.drafts.approve_package(self.campaign, 2, fingerprint)
+            content = package_fingerprint(approved["package"]["groups"][1]["content"])
+            for _ in range(3):
+                self.viewer.open_example(audiobook.creative_ref, content_fingerprint=content)
+            return self.performance.review(self.campaign, 2, fingerprint, "balanced")
+
+        original = approve_and_review()
+        correction = self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_comparison", "", uuid4().hex,
+        )
+        with sqlite3.connect(self.drafts.path) as db:
+            db.execute("ALTER TABLE campaign_buyer_corrections DROP COLUMN comparison_identity")
+        (self.drafts.media_dir / audiobook.preview).write_bytes(b"Changed only the ad preview")
+        self.performance = CampaignPerformance(self.drafts, self.viewer)
+        updated = approve_and_review()
+        self.assertNotEqual(updated["fingerprint"], original["fingerprint"])
+        self.assertEqual(updated["proposal"]["correction"], correction)
+        self.assertEqual(updated["proposal"]["title"], "Test how the ad sets up the comparison")
+
+    def test_instruction_edit_preserves_the_take_constraint_only_until_it_is_superseded(self):
+        editing, audiobook = EXAMPLES
+
+        def approve_and_review():
+            fingerprint = self.drafts.review_package(self.campaign, 2)["fingerprint"]
+            approved = self.drafts.approve_package(self.campaign, 2, fingerprint)
+            content = package_fingerprint(approved["package"]["groups"][0]["content"])
+            for _ in range(3):
+                self.viewer.open_example(editing.creative_ref, content_fingerprint=content)
+            return self.performance.review(self.campaign, 2, fingerprint, "balanced")
+
+        original = approve_and_review()
+        correction = self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_takes", "", uuid4().hex,
+        )
+        with sqlite3.connect(self.drafts.path) as db:
+            db.execute("ALTER TABLE campaign_buyer_corrections DROP COLUMN takes_identity")
+        self.performance = CampaignPerformance(self.drafts, self.viewer)
+        with patch("campaign_agent.handoff.EXAMPLES", (replace(editing, instruction="Listen to both takes."), audiobook)):
+            updated = approve_and_review()
+        self.assertNotEqual(updated["fingerprint"], original["fingerprint"])
+        self.assertEqual(updated["proposal"].get("correction"), correction)
+        self.assertEqual(updated["proposal"]["title"], "Test clearer comparison instructions")
+
+        replacement = self.performance.save_correction(
+            self.campaign, 2, self.fingerprint, original["id"], "keep_comparison", "", uuid4().hex,
+        )
+        self.assertEqual(replacement["kind"], "keep_comparison")
+        with sqlite3.connect(self.drafts.path) as db:
+            # Older keep-comparison records had no takes identity even with all columns present.
+            db.execute("UPDATE campaign_buyer_corrections SET takes_identity = NULL WHERE id = ?", (replacement["id"],))
+        self.performance = CampaignPerformance(self.drafts, self.viewer)
+        with patch("campaign_agent.handoff.EXAMPLES", (replace(editing, instruction="Listen to both takes."), audiobook)):
+            refreshed = approve_and_review()
+            current = self.performance.read(self.campaign, 2, refreshed["fingerprint"])
+        self.assertNotIn("correction", refreshed["proposal"])
+        self.assertEqual(refreshed["proposal"]["title"], "Test a shorter second take")
+        self.assertIsNone(current["correction"])
+
     def test_older_review_without_content_attribution_is_not_restored(self):
         self.drafts.approve_package(self.campaign, 2, self.fingerprint)
         review = self.performance.review(self.campaign, 2, self.fingerprint, "balanced")
