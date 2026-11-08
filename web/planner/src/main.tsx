@@ -14,7 +14,7 @@ type Draft = {
   brief: {title: string; contexts: Record<string, Context>};
   placements: Placement[];
   instruction_test?: {
-    review_id: string; source_revision: number; creative_version: string;
+    review_id: string; source_revision: number; creative_version: string; source_test_id?: string;
     before: string; after: string; reason: string; measure: string;
     original_viewer_path: string; correction: {label: string; note: string};
     inference?: {mode: string; model: string; prompt_version: string; evidence_id: string;
@@ -42,11 +42,11 @@ type Mode = {
   openrouterDraftModels: string[];
   examples: {creative: string; ref: string; title: string}[];
 };
-type RunResult = {revision: number; ambiguous: Placement[]};
+type RunResult = {revision: number; ambiguous: Placement[]; outcome?: string; message?: string};
 type Run = {
   run_id: string;
   request: string;
-  status: "running" | "ready_for_review";
+  status: "running" | "ready_for_review" | "waiting_for_evidence";
   steps: {tool: string; result: unknown}[];
   inference?: {settings: {mode: string; model?: string}};
 };
@@ -70,6 +70,7 @@ const instructionReviewStepLabels = {
   finish_test_review: "Prepare the assessment for review",
 };
 type Preparation = {kind: "next_test"; reviewId: string; selection: ReviewSelection}
+  | {kind: "experiment_next_test"; testId: string; reviewId: string; selection: ReviewSelection}
   | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
 const runKey = "campaign-planner:last-run";
 const pendingStartKey = "campaign-planner:pending-start";
@@ -104,7 +105,7 @@ async function request<T>(path: string, body?: Record<string, string | number>):
 }
 
 function review(run: Run | null): RunResult | null {
-  return run?.status === "ready_for_review" ? run.steps.at(-1)?.result as RunResult : null;
+  return run && run.status !== "running" ? run.steps.at(-1)?.result as RunResult : null;
 }
 
 function App() {
@@ -248,7 +249,11 @@ function App() {
     try {
       let current: Run;
       let start: {path: string; body: Record<string, string | number>} | null = null;
-      if (source?.kind === "instruction_review") {
+      if (source?.kind === "experiment_next_test") {
+        start = {path: "/api/agent/experiment-next-test", body: {
+          test_id: source.testId, review_id: source.reviewId, ...source.selection,
+        }};
+      } else if (source?.kind === "instruction_review") {
         start = {path: "/api/agent/instruction-review", body: {
           test_id: source.testId,
           ...source.selection,
@@ -305,8 +310,11 @@ function App() {
   }
 
   const result = review(run);
+  const waiting = run?.status === "waiting_for_evidence";
+  const waitPlanned = (run?.steps[0]?.result as {next_action?: string} | undefined)?.next_action === "wait";
   const reviewingTest = run?.request === "Review the original and revised instruction test.";
   const activitySteps = reviewingTest ? instructionReviewStepLabels
+    : waitPlanned ? {load_test_context: "Load experiment assessment and buyer correction", wait_for_evidence: "Wait for more evidence"}
     : run?.request === "Prepare revised comparison instructions." ? nextTestStepLabels : stepLabels;
   const completed = new Set(run?.steps.map(step => step.tool));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";
@@ -385,8 +393,9 @@ function App() {
                 <section className="request" aria-labelledby="request-heading">
                   <span className="label">01 / Prepare</span>
                   <h2 id="request-heading">Campaign request</h2>
-                  {mode && <p>{mode.live ? "Recorded preparation is available in sample mode." : mode.demoRequest}</p>}
+                  {mode && <p>{mode.live ? "Recorded preparation is available in sample mode." : run?.request ?? mode.demoRequest}</p>}
                   {mode && !mode.live && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
+                  {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
                   {busy && <p className="compact-progress" role="status">
                     {Object.entries(activitySteps).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
                   </p>}
@@ -401,6 +410,10 @@ function App() {
                     <h3 id="instruction-test-heading">Revised comparison instructions</h3>
                     <p className="revision">Prepared from revision {draft.instruction_test.source_revision},
                       {" review "}{draft.instruction_test.review_id.slice(0, 8)}.</p>
+                    {draft.instruction_test.source_test_id && <p className="revision">
+                      Based on experiment {draft.instruction_test.source_test_id.slice(0, 8)}.
+                      The current approved comparison is the baseline; this does not declare a winning version.
+                    </p>}
                     <p className="revision">{draft.instruction_test.reason}</p>
                     <dl className="setup-details">
                       <div><dt>Original</dt><dd>{draft.instruction_test.before}</dd></div>
@@ -500,7 +513,7 @@ function App() {
                   {draft && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
                 {activePackage?.approval && !needsLatest && !busy && (
-                  <PerformanceReview key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
+                  <PerformanceReview key={`performance:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
                     draftModels={mode?.openrouterDraftModels ?? []}
@@ -511,10 +524,12 @@ function App() {
                     }} />
                 )}
                 {draft?.instruction_test && activePackage?.approval && !needsLatest && !busy && mode && (
-                  <InstructionTest key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
+                  <InstructionTest key={`instructions:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     viewerOrigin={mode.viewerOrigin} request={request}
                     models={mode.openrouterReviewModels ?? []}
+                    draftModels={mode.openrouterDraftModels ?? []}
+                    onPrepareNextTest={(testId, reviewId, selection) => void prepare({kind: "experiment_next_test", testId, reviewId, selection})}
                     onReview={(testId, selection) => void prepare({kind: "instruction_review", testId, selection})}
                     onPackageConflict={message => {
                       setPackageChanged(true);
@@ -526,7 +541,7 @@ function App() {
                 <span className="label">Run details</span>
                 <h2>Agent activity</h2>
                 <p role="status" className="run-status">
-                  {result ? (reviewingTest ? "Test assessment saved"
+                  {waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
                     : result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
                     : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
                     : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
@@ -545,7 +560,8 @@ function App() {
                     <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>
                   </details>
                 )}
-                <p className="provenance">{run?.inference?.settings.mode === "openrouter"
+                <p className="provenance">{waiting ? "No draft or drafting inference requested"
+                  : run?.inference?.settings.mode === "openrouter"
                   ? `OpenRouter inference · ${run.inference.settings.model} · Fictional placements`
                   : "Recorded model decisions · Fictional catalog"}</p>
               </aside>

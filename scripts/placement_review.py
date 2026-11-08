@@ -130,7 +130,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 else:
                     self.send(404, {"error": "Not found."})
                 return
-            if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review"}:
+            if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review",
+                             "/api/agent/experiment-next-test"}:
                 self.post_agent()
                 return
             if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
@@ -236,7 +237,14 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 data = json.loads(self.rfile.read(int(length)))
                 if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
-                if self.path == "/api/agent/instruction-review":
+                if self.path == "/api/agent/experiment-next-test":
+                    fields = {"test_id", "review_id"}
+                    if set(data) not in (fields, fields | {"mode", "operation_id"},
+                                         fields | {"mode", "model", "operation_id"}):
+                        raise ValueError("Choose a saved instruction-test assessment.")
+                    run_id = agent.start_experiment_next_test(**data)
+                    result = agent.read(run_id)
+                elif self.path == "/api/agent/instruction-review":
                     if set(data) not in ({"test_id"}, {"test_id", "mode", "operation_id"},
                                          {"test_id", "mode", "model", "operation_id"}):
                         raise ValueError("Choose an instruction test.")

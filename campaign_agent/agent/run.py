@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
 from campaign_agent.creatives import render_instruction_choices
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
+from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
@@ -37,6 +37,8 @@ class RecordedInference:
         if request == REVIEW_TEST_REQUEST:
             return ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")[len(history)]
         if request == NEXT_TEST_REQUEST:
+            if history and history[0]["result"].get("next_action") == "wait":
+                return "wait_for_evidence"
             return ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")[len(history)]
         if request != DEMO_REQUEST:
             raise ValueError("The offline recording supports the documented demo request only.")
@@ -119,6 +121,22 @@ class AgentRuntime:
             raise ValueError("Choose a valid performance review.")
         source = {"campaign_id": campaign_id, "revision": revision,
                   "fingerprint": fingerprint, "review_id": review_id}
+        return self._start_test_preparation(source, mode=mode, model=model, operation_id=operation_id)
+
+    def start_experiment_next_test(self, test_id, review_id, *, mode="offline", model=None, operation_id=None):
+        if (not isinstance(test_id, str) or not RUN_ID.fullmatch(test_id)
+                or not isinstance(review_id, str) or not re.fullmatch(r"[0-9a-f]{64}", review_id)):
+            raise ValueError("Choose a valid instruction-test assessment.")
+        return self._start_test_preparation({"test_id": test_id, "review_id": review_id},
+                                            mode=mode, model=model, operation_id=operation_id)
+
+    def _next_test_context(self, db, source):
+        if "test_id" in source:
+            return self.instruction_tests.next_test_context(db, **source)
+        return self.performance.instruction_test_context(db, **source)
+
+    def _start_test_preparation(self, source, *, mode, model, operation_id):
+        self.operator.require_brand(LOCAL_BRAND)
         if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
             raise ValueError("Choose offline or OpenRouter drafting.")
         if mode == "offline" and model is not None:
@@ -144,7 +162,7 @@ class AgentRuntime:
                 if json.loads(existing[0]) != source or (json.loads(saved[0]) if saved else {"mode": "offline"}) != settings:
                     raise ValueError("This drafting operation was already used for a different request.")
                 return run_id
-            self.performance.instruction_test_context(db, **source)
+            self._next_test_context(db, source)
             db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?)",
                        (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
                         self.operator.id, NEXT_TEST_REQUEST, "running"))
@@ -229,7 +247,7 @@ class AgentRuntime:
                         "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
                     )
                 ]
-                if run[1] == "ready_for_review":
+                if run[1] in {"ready_for_review", "waiting_for_evidence"}:
                     return self.read(run_id)
                 tool = self.model.next_tool(run[0], history)
                 if run[0] == REVIEW_TEST_REQUEST:
@@ -240,9 +258,9 @@ class AgentRuntime:
                     result = self._dispatch(db, tool, history)
                 db.execute("INSERT INTO agent_steps VALUES (?, ?, ?, ?)",
                            (run_id, len(history), tool, json.dumps(result)))
-                if tool in {"finish", "finish_test", "finish_test_review"}:
+                if tool in {"finish", "finish_test", "finish_test_review", "wait_for_evidence"}:
                     db.execute("UPDATE agent_runs SET status = ? WHERE id = ?",
-                               ("ready_for_review", run_id))
+                               ("waiting_for_evidence" if tool == "wait_for_evidence" else "ready_for_review", run_id))
         return self.read(run_id)
 
     def read(self, run_id):
@@ -281,6 +299,8 @@ class AgentRuntime:
                 return False
             source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
             context = self._inference_context(db, request, source)
+            if request == NEXT_TEST_REQUEST and context.get("next_action") == "wait":
+                return False
             adapter = self.openrouter if request == REVIEW_TEST_REQUEST else self.openrouter_drafts
             if row[1] == "received":
                 receipt = json.loads(row[2])
@@ -338,7 +358,7 @@ class AgentRuntime:
         if request == REVIEW_TEST_REQUEST:
             self.instruction_tests.require_review_context(db, source)
             return source
-        return self.performance.instruction_test_context(db, **source)
+        return self._next_test_context(db, source)
 
     def _dispatch_instruction_review(self, db, run_id, tool, history):
         expected = ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")
@@ -367,13 +387,22 @@ class AgentRuntime:
 
     def _dispatch_next_test(self, db, run_id, tool, history):
         expected = ("load_test_context", "draft_instructions", "save_instruction_test", "finish_test")
+        if history and history[0]["result"].get("next_action") == "wait":
+            expected = ("load_test_context", "wait_for_evidence")
         if len(history) >= len(expected) or tool != expected[len(history)]:
             raise ValueError("The requested tool is unavailable at this step.")
         source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
         if tool == "load_test_context":
-            return self.performance.instruction_test_context(db, **source)
+            return self._next_test_context(db, source)
+        if tool == "wait_for_evidence":
+            context = self._next_test_context(db, source)
+            if context["next_action"] != "wait":
+                raise PackageConflict("The assessment changed. Start from a current review.")
+            return {"campaign_id": context["package"]["campaign_id"], "revision": context["package"]["revision"],
+                    "ambiguous": [], "outcome": "waiting", "review_id": source["review_id"],
+                    "message": context["experiment_review"]["assessment"]["reason"]}
         if tool == "draft_instructions":
-            self.performance.instruction_test_context(db, **source)
+            self._next_test_context(db, source)
             context = history[0]["result"]
             instruction = self.drafts.validate_instruction(
                 self.model.revise_instructions(context), context["comparison"]["instruction"],
@@ -381,8 +410,8 @@ class AgentRuntime:
             return {"instruction": instruction}
         if tool == "save_instruction_test":
             result = history[1]["result"]
-            return self.performance.save_instruction_test(db, source, result["instruction"],
-                                                          inference=result.get("inference"))
+            save = self.instruction_tests.save_next_test if "test_id" in source else self.performance.save_instruction_test
+            return save(db, source, result["instruction"], inference=result.get("inference"))
         draft = history[2]["result"]
         return {"campaign_id": draft["campaign_id"], "revision": draft["revision"], "ambiguous": [],
                 "message": "Revised comparison instructions prepared for approval."}

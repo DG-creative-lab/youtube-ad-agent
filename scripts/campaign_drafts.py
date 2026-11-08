@@ -318,6 +318,8 @@ class CampaignDrafts:
             "original_viewer_path": group["viewer_path"],
             "reason": review["proposal"]["reason"], "measure": review["proposal"]["measure"],
         }
+        if "test_id" in review:
+            test.update(source_test_id=review["test_id"], review_type="instruction_test")
         if inference is not None:
             test["inference"] = inference
         saved = {
