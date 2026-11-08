@@ -64,44 +64,47 @@ class ViewerMeasurement:
             raise ViewerNotFound("This visit is unavailable.")
         return visit[0]
 
-    def summarize(self, scope, comparisons):
+    def summarize(self, scope, comparisons, *, connection=None):
         """Count tagged visits and intended-example outcomes in one local snapshot."""
-        with closing(self.connect()) as db:
-            db.execute("BEGIN")
-            observations = []
-            for creative_ref, example_ref, fingerprint in comparisons:
-                origin, example = self.resolve(creative_ref, example_ref)
-                if origin.scope != scope or origin.ref != example.ref:
-                    raise ViewerNotFound("This comparison is unavailable.")
-                arrivals, opened, completed = db.execute("""
-                    SELECT COUNT(*),
-                        COUNT(CASE WHEN EXISTS (
-                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
-                                AND e.kind = 'arrival' AND e.example_ref = ?
-                        ) THEN 1 END),
-                        COUNT(CASE WHEN EXISTS (
-                            SELECT 1 FROM viewer_completions c WHERE c.visit_id = v.id AND c.example_ref = ?
-                        ) THEN 1 END)
-                    FROM viewer_visits v
-                    WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
-                        AND EXISTS (
-                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
-                        )
-                """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint)).fetchone()
-                unattributed, = db.execute("""
-                    SELECT COUNT(*) FROM viewer_visits v
-                    WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ?
-                        AND v.content_fingerprint IS NULL
-                        AND EXISTS (
-                            SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
-                        )
-                """, (scope.client_id, scope.brand_id, creative_ref)).fetchone()
-                observations.append({
-                    "creative_version": creative_ref, "comparison_version": example_ref,
-                    "comparison_fingerprint": fingerprint, "unattributed_arrivals": unattributed,
-                    "arrivals": arrivals, "intended_opens": opened, "completions": completed,
-                    "completion_rate": completed / arrivals if arrivals else None,
-                })
+        if connection is None:
+            with closing(self.connect()) as db:
+                db.execute("BEGIN")
+                return self.summarize(scope, comparisons, connection=db)
+        db = connection
+        observations = []
+        for creative_ref, example_ref, fingerprint in comparisons:
+            origin, example = self.resolve(creative_ref, example_ref)
+            if origin.scope != scope or origin.ref != example.ref:
+                raise ViewerNotFound("This comparison is unavailable.")
+            arrivals, opened, completed = db.execute("""
+                SELECT COUNT(*),
+                    COUNT(CASE WHEN EXISTS (
+                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
+                            AND e.kind = 'arrival' AND e.example_ref = ?
+                    ) THEN 1 END),
+                    COUNT(CASE WHEN EXISTS (
+                        SELECT 1 FROM viewer_completions c WHERE c.visit_id = v.id AND c.example_ref = ?
+                    ) THEN 1 END)
+                FROM viewer_visits v
+                WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
+                    AND EXISTS (
+                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
+                    )
+            """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint)).fetchone()
+            unattributed, = db.execute("""
+                SELECT COUNT(*) FROM viewer_visits v
+                WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ?
+                    AND v.content_fingerprint IS NULL
+                    AND EXISTS (
+                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
+                    )
+            """, (scope.client_id, scope.brand_id, creative_ref)).fetchone()
+            observations.append({
+                "creative_version": creative_ref, "comparison_version": example_ref,
+                "comparison_fingerprint": fingerprint, "unattributed_arrivals": unattributed,
+                "arrivals": arrivals, "intended_opens": opened, "completions": completed,
+                "completion_rate": completed / arrivals if arrivals else None,
+            })
         return observations
 
     def open_example(self, creative_ref, example_ref=None, visit_id=None, *,

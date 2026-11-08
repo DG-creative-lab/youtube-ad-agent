@@ -2,7 +2,8 @@ import {useEffect, useState} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
-import {AgentComposer} from "./AgentComposer";
+import {AgentComposer, draftPermissionLabels} from "./AgentComposer";
+import type {DraftPermission} from "./AgentComposer";
 import {CampaignChat} from "./CampaignChat";
 import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
@@ -21,8 +22,8 @@ type Draft = {
     review_id: string; source_revision: number; creative_version: string; source_test_id?: string;
     before: string; after: string; reason: string; measure: string;
     original_viewer_path: string; correction: {label: string; note: string};
-    inference?: {mode: string; model: string; prompt_version: string; evidence_id: string;
-      usage: {input_tokens: number | null; output_tokens: number | null; cost_usd: number | null}};
+    inference?: {mode: string; model: string; prompt_version?: string; evidence_id: string;
+      usage: {input_tokens: number | null; output_tokens: number | null; cost_usd: number | null} | null};
   };
 };
 type PackageReview = {
@@ -53,7 +54,7 @@ type Run = {
   request: string;
   status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
   result?: RunResult | null;
-  planner?: {session_id: string; settings: {mode: string; model: string}; max_turns: number; turns: unknown[]; routing: {classifier: string}};
+  planner?: {session_id: string; settings: {mode: string; model: string}; draft_permission?: DraftPermission; max_turns: number; turns: unknown[]; routing: {classifier: string}};
   steps: {tool: string; result: unknown}[];
   inference?: {settings: {mode: string; model?: string}};
 };
@@ -76,7 +77,7 @@ const instructionReviewStepLabels = {
   save_test_review: "Save the test assessment",
   finish_test_review: "Prepare the assessment for review",
 };
-type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string; afterMessage: number}
+type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string; afterMessage: number; draftPermission: DraftPermission}
   | {kind: "next_test"; reviewId: string; selection: ReviewSelection}
   | {kind: "experiment_next_test"; testId: string; reviewId: string; selection: ReviewSelection}
   | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
@@ -125,6 +126,7 @@ function App() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [messageText, setMessageText] = useState("");
+  const [draftPermission, setDraftPermission] = useState<DraftPermission>("none");
   const [draft, setDraft] = useState<Draft>();
   const [run, setRun] = useState<Run | null>(null);
   const [pendingId, setPendingId] = useState(() => sessionStorage.getItem(runKey));
@@ -292,6 +294,7 @@ function App() {
         start = {path: "/api/agent/placements", body: {
           request: source.request, model: source.model, session_id: source.sessionId,
           run_id: id, catalog_id: source.catalogId, after_message: source.afterMessage,
+          draft_permission: source.draftPermission,
         }};
       } else if (source?.kind === "experiment_next_test") {
         start = {path: "/api/agent/experiment-next-test", body: {
@@ -382,6 +385,7 @@ function App() {
     sessionStorage.removeItem(runKey);
     sessionStorage.removeItem(pendingStartKey);
     setConversation(null);
+    setDraftPermission("none");
     setRun(null);
     setPendingId(null);
     if (!preserveText) setMessageText("");
@@ -402,6 +406,7 @@ function App() {
       const latest = chat.latest_run_id
         ? await request<Run>("/api/agent/run?id=" + encodeURIComponent(chat.latest_run_id)) : null;
       setConversation(chat);
+      setDraftPermission("none");
       setDraft(currentDraft);
       setConversationId(id);
       setMainModel(chat.settings.model);
@@ -431,25 +436,27 @@ function App() {
   function chooseModel(value: string) {
     newConversation(value, true);
   }
-  async function startPlacement(request: string, catalogId: string) {
+  async function startPlacement(request: string, catalogId: string, permission: DraftPermission) {
     sessionStorage.setItem("campaign-planner:conversation", conversationId);
     navigate("/campaign");
     const pending = sessionStorage.getItem(pendingStartKey);
     if (pending) {
       const saved = JSON.parse(pending);
       if (saved.path === "/api/agent/placements" && saved.body.session_id === conversationId
-          && saved.body.request === request && saved.body.catalog_id === catalogId && saved.body.model === mainModel) {
+          && saved.body.request === request && saved.body.catalog_id === catalogId && saved.body.model === mainModel
+          && (saved.body.draft_permission ?? "none") === permission) {
         return prepare();
       }
     }
     return prepare({kind: "placement_request", request, model: mainModel, sessionId: conversationId, catalogId,
-                    afterMessage: conversation?.latest_message ?? 0});
+                    afterMessage: conversation?.latest_message ?? 0, draftPermission: permission});
   }
   const inheritedModel = mode?.agentPlanner?.models.find(item => item.id === mainModel)?.mode === "openrouter"
     ? {mode: "openrouter" as const, model: mainModel} : {mode: "offline" as const};
   const composer = mode?.agentPlanner && <AgentComposer options={mode.agentPlanner} model={mainModel}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
     followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
+    draftPermission={draftPermission} onDraftPermission={setDraftPermission}
     onModel={chooseModel} onSubmit={startPlacement} busy={busy || !!packageAction} request={request}
     onCatalogs={catalogs => setMode(current => current?.agentPlanner
       ? {...current, agentPlanner: {...current.agentPlanner, catalogs}} : current)} />;
@@ -487,7 +494,7 @@ function App() {
     } else {
       const sessionId = newConversation("simulated");
       void prepare({kind: "placement_request", request: mode.demoRequest, model: "simulated", sessionId,
-                    catalogId: placementCatalog || mode.agentPlanner?.catalogs[0]?.id || "", afterMessage: 0});
+                    catalogId: placementCatalog || mode.agentPlanner?.catalogs[0]?.id || "", afterMessage: 0, draftPermission: "placements"});
     }
   }
 
@@ -520,7 +527,7 @@ function App() {
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
           {mode && <span className="mode">{mode.live ? "Live catalog"
-            : run?.planner ? "Agent placement planning" : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
+            : run?.planner ? "Campaign agent" : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
         </div>
         {home ? (
           <div className="home">
@@ -588,12 +595,13 @@ function App() {
                     </a>}
                     <p className="provenance">{draft.instruction_test.inference?.mode === "openrouter"
                       ? `Draft wording · OpenRouter · ${draft.instruction_test.inference.model}`
+                      : draft.instruction_test.inference?.mode === "simulated" ? "Draft wording · Simulated main model"
                       : "Draft wording · Recorded model response"}</p>
                     {draft.instruction_test.inference && <details className="evidence">
                       <summary>Draft inference details</summary>
-                      <p className="revision">Prompt {draft.instruction_test.inference.prompt_version} · Evidence {draft.instruction_test.inference.evidence_id.slice(0, 12)}</p>
-                      <p className="revision">Tokens: {draft.instruction_test.inference.usage.input_tokens ?? "unknown"} input,
-                        {" "}{draft.instruction_test.inference.usage.output_tokens ?? "unknown"} output · Reported cost: {draft.instruction_test.inference.usage.cost_usd === null
+                      <p className="revision">Prompt {draft.instruction_test.inference.prompt_version ?? "unavailable"} · Evidence {draft.instruction_test.inference.evidence_id.slice(0, 12)}</p>
+                      <p className="revision">Tokens: {draft.instruction_test.inference.usage?.input_tokens ?? "unknown"} input,
+                        {" "}{draft.instruction_test.inference.usage?.output_tokens ?? "unknown"} output · Reported cost: {draft.instruction_test.inference.usage?.cost_usd == null
                           ? "unknown" : `$${draft.instruction_test.inference.usage.cost_usd}`}</p>
                     </details>}
                   </section>}
@@ -708,6 +716,7 @@ function App() {
                     : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
                 </p>
                 {run?.planner ? <><p className="revision">Main model · {run.planner.settings.model}<br />
+                  Allowed changes · {draftPermissionLabels[run.planner.draft_permission ?? "none"]}<br />
                   Automatic specialist · {run.planner.routing.classifier}<br />
                   {run.planner.turns.length} of {run.planner.max_turns} model turns</p>
                   <ol>{run.steps.map((step, index) => <li key={index} className="done">

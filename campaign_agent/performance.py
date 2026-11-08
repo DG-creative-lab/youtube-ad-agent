@@ -254,7 +254,7 @@ class CampaignPerformance:
                   group["comparison_version"]))
             return self._latest_correction(db, evidence, package)
 
-    def review(self, campaign_id, revision, fingerprint, scenario):
+    def capture_review(self, campaign_id, revision, fingerprint, scenario):
         package = self.drafts.export_setup(campaign_id, revision, fingerprint)
         comparisons = [
             (group["creative_version"], group["comparison_version"], package_fingerprint(group["content"]))
@@ -270,26 +270,50 @@ class CampaignPerformance:
                                       "attribution": VIEWER_ATTRIBUTION},
             "proposal": propose_next_test(delivery, activity),
         }
+        return evidence
+
+    def require_current_activity(self, db, evidence, package):
+        comparisons = [(group['creative_version'], group['comparison_version'], package_fingerprint(group['content']))
+                       for group in package['groups']]
+        if self.viewer.summarize(LOCAL_BRAND, comparisons, connection=db) != evidence['local_viewer_activity']['rows']:
+            raise PackageConflict('Viewer activity changed. Review performance again before preparing a test.')
+
+    def save_review(self, db, evidence):
+        campaign_id, revision, fingerprint = (evidence[key] for key in ('campaign_id', 'revision', 'fingerprint'))
+        package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
+        self.require_current_activity(db, evidence, package)
+        evidence = {**evidence, 'proposal': propose_next_test(evidence['sample_delivery'], evidence['local_viewer_activity']['rows'])}
+        correction = self._latest_correction(db, evidence, package)
+        if correction:
+            evidence['proposal'] = apply_correction(evidence['proposal'], correction)
+        review_id = package_fingerprint({'client': LOCAL_BRAND.client_id, 'brand': LOCAL_BRAND.brand_id, 'evidence': evidence})
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            'INSERT INTO campaign_performance_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            'ON CONFLICT(id) DO UPDATE SET last_requested_at = excluded.last_requested_at',
+            (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint,
+             now, now, json.dumps(evidence)))
+        created_at = db.execute('SELECT created_at FROM campaign_performance_reviews WHERE id=?', (review_id,)).fetchone()[0]
+        return {'id': review_id, 'created_at': created_at, **evidence}
+
+    def review(self, campaign_id, revision, fingerprint, scenario):
+        evidence = self.capture_review(campaign_id, revision, fingerprint, scenario)
         with closing(sqlite3.connect(self.drafts.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
-            correction = self._latest_correction(db, evidence, package)
-            if correction:
-                evidence["proposal"] = apply_correction(evidence["proposal"], correction)
-            review_id = package_fingerprint({
-                "client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id, "evidence": evidence,
-            })
-            snapshot = json.dumps(evidence)
-            now = datetime.now(timezone.utc).isoformat()
-            db.execute(
-                "INSERT INTO campaign_performance_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET last_requested_at = excluded.last_requested_at",
-                (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision,
-                 fingerprint, now, now, snapshot),
-            )
-            created_at = db.execute("SELECT created_at FROM campaign_performance_reviews WHERE id = ?",
-                                    (review_id,)).fetchone()[0]
-        return {"id": review_id, "created_at": created_at, **evidence}
+            db.execute('BEGIN IMMEDIATE')
+            return self.save_review(db, evidence)
+
+    def saved_review(self, db, campaign_id, revision, fingerprint, review_id=None):
+        """Read a verified-content review within the caller's transaction and campaign scope."""
+        self.drafts._package_scope(campaign_id, revision)
+        query = ("SELECT id,created_at,snapshot FROM campaign_performance_reviews "
+                 "WHERE client_id=? AND brand_id=? AND campaign_id=? AND revision=? AND fingerprint=? "
+                 "AND json_extract(snapshot, '$.local_viewer_activity.attribution')=?")
+        values = [LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint, VIEWER_ATTRIBUTION]
+        if review_id is not None:
+            query += ' AND id=?'
+            values.append(review_id)
+        row = db.execute(query + ' ORDER BY last_requested_at DESC,id DESC LIMIT 1', values).fetchone()
+        return {'id': row[0], 'created_at': row[1], **json.loads(row[2])} if row else None
 
     def instruction_test_context(self, db, campaign_id, revision, fingerprint, review_id):
         approved = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
