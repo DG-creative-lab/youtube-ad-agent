@@ -67,7 +67,7 @@ def youtube_search(key, query, page):
 
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=(), openrouter_draft_models=()):
+          openrouter_review_models=(), openrouter_draft_models=(), main_models=()):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -82,8 +82,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     drafts = CampaignDrafts(draft_path, live)
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
-                                          openrouter_models=openrouter_review_models,
-                                          openrouter_draft_models=openrouter_draft_models)
+                                          openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
+                                          openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
+                                          main_models=main_models)
+    if agent:
+        for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
+            agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
     instruction_tests = agent.instruction_tests if agent else None
@@ -131,8 +135,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     self.send(404, {"error": "Not found."})
                 return
             if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review",
-                             "/api/agent/experiment-next-test"}:
+                             "/api/agent/experiment-next-test", "/api/agent/placements"}:
                 self.post_agent()
+                return
+            if self.path == "/api/agent/catalog":
+                self.post_catalog()
                 return
             if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
                              "/api/campaign/correction", "/api/campaign/instruction-test"}:
@@ -219,6 +226,26 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             else:
                 self.send(200, result)
 
+        def post_catalog(self):
+            if not self.check_operator():
+                return
+            if self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}" or agent is None:
+                self.send(403, {"error": "Import catalogs from the local planner."})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if self.headers.get_content_type() != "application/json" or not 0 < length <= 800_000:
+                    raise ValueError("Import a JSON catalog of up to 800,000 bytes.")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict) or set(payload) != {"label", "rows"}:
+                    raise ValueError("Supply a catalog label and rows.")
+                catalog_id = agent.planner.catalogs.register(**payload)
+                self.send(200, {"id": catalog_id, "catalogs": agent.planner.catalogs.list()})
+            except (ValueError, TypeError, RecursionError):
+                self.send(400, {"error": "Use a named catalog of 1–200 permitted rows with source references."})
+            except sqlite3.Error:
+                self.send(503, {"error": "Could not save the catalog."})
+
         def post_agent(self):
             if not self.check_operator():
                 return
@@ -237,7 +264,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 data = json.loads(self.rfile.read(int(length)))
                 if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
-                if self.path == "/api/agent/experiment-next-test":
+                if self.path == "/api/agent/placements":
+                    if set(data) != {"request", "model", "session_id", "run_id", "catalog_id"}:
+                        raise ValueError("Supply a request, main model, conversation and catalog.")
+                    run_id = agent.planner.start(**data)
+                    result = agent.read(run_id)
+                elif self.path == "/api/agent/experiment-next-test":
                     fields = {"test_id", "review_id"}
                     if set(data) not in (fields, fields | {"mode", "operation_id"},
                                          fields | {"mode", "model", "operation_id"}):
@@ -408,6 +440,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "demoRequest": DEMO_REQUEST,
                         "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
                         "openrouterDraftModels": list(agent.openrouter_drafts.models) if agent else [],
+                        "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,
                         "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
@@ -661,6 +694,8 @@ def main():
                      help="Explicitly enable a :free model for reviews. One request per run, with a zero-price cap.")
     web.add_argument("--openrouter-draft-model", action="append", default=[],
                      help="Explicitly enable a :free model for next-test drafting. One request per run, with a zero-price cap.")
+    web.add_argument("--agent-model", action="append", default=[],
+                     help="Enable a tool-capable :free main model. No live calls occur until explicitly selected.")
     routing = commands.add_parser("assign", help="Propose creative assignments for an independently supplied catalog.")
     routing.add_argument("catalog", type=Path)
     routing.add_argument("--paid-jev-limit", type=int, help="Enable paid Jev requests. Maximum calls for this invocation.")
@@ -670,7 +705,7 @@ def main():
         if args.command == "serve":
             serve(args.port, args.live_youtube, viewer_port=args.viewer_port,
                   openrouter_review_models=args.openrouter_review_model,
-                  openrouter_draft_models=args.openrouter_draft_model)
+                  openrouter_draft_models=args.openrouter_draft_model, main_models=args.agent_model)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
     except sqlite3.Error:

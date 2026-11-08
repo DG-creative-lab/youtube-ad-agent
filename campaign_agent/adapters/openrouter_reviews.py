@@ -77,17 +77,29 @@ class OpenRouterInference:
     def complete(self, context, settings, evidence, *, system, schema, name, output_key):
         self.require_available(settings)
         body = {
-            "model": settings["model"], "stream": False, "max_tokens": MAX_OUTPUT_TOKENS,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
-            ],
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)}],
             "response_format": {"type": "json_schema", "json_schema": {
-                "name": name, "strict": True, "schema": schema,
-            }},
-            "provider": {"require_parameters": True, "allow_fallbacks": False,
-                         "max_price": {"prompt": 0, "completion": 0, "request": 0}},
+                "name": name, "strict": True, "schema": schema}},
         }
+        receipt = self.chat(context, settings, body)
+        output = None
+        message = receipt.pop("message")
+        finish_reason = receipt.pop("finish_reason")
+        if (finish_reason == "stop" and isinstance(message, dict) and not message.get("refusal") and not message.get("tool_calls")
+                and isinstance(message.get("content"), str)):
+            try:
+                output = parse_json(message["content"])
+            except (ValueError, RecursionError):
+                pass
+        return {output_key: output, **receipt}
+
+    def chat(self, context, settings, body):
+        self.require_available(settings)
+        body = {**body, "model": settings["model"], "stream": False,
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "provider": {"require_parameters": True, "allow_fallbacks": False,
+                             "max_price": {"prompt": 0, "completion": 0, "request": 0}}}
         encoded = json.dumps(body).encode()
         if len(encoded) > 32_000:
             raise ReviewInferenceError("The inference input exceeds the configured request limit.")
@@ -115,19 +127,14 @@ class OpenRouterInference:
                 "response_model": self._identifier(data.get("model")),
                 "usage": {**tokens, "cost_usd": cost},
             }
-            assessment = None
+            message, finish_reason = None, None
             choices = data.get("choices")
             if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict):
                 choice = choices[0]
-                message = choice.get("message")
-                if (choice.get("finish_reason") == "stop" and isinstance(message, dict)
-                        and not message.get("refusal") and not message.get("tool_calls")
-                        and isinstance(message.get("content"), str)):
-                    try:
-                        assessment = parse_json(message["content"])
-                    except (ValueError, RecursionError):
-                        pass
-            return {output_key: assessment, "inference": metadata}
+                if choice.get("finish_reason") in {"stop", "tool_calls"}:
+                    message = choice.get("message")
+                    finish_reason = choice.get("finish_reason")
+            return {"message": message, "finish_reason": finish_reason, "inference": metadata}
         except HTTPError as exc:
             exc.close()
             raise ReviewInferenceError(f"OpenRouter returned HTTP {exc.code}. Start a new operation to retry.") from None

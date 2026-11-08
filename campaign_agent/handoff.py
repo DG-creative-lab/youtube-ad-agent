@@ -62,7 +62,9 @@ def sample_package(draft, media_dir):
             "content": content,
             "placements": [
                 {"demo_id": row["id"], "title": row["title"], "source": row["source"],
-                 "label": "Fictional placement"}
+                 "label": "Catalog candidate · inventory unverified" if row["source"] in {"licensed", "creator_supplied"} else "Fictional placement",
+                 **({"catalog_ref": row["catalog_ref"]} if "catalog_ref" in row else {}),
+                 **({"source_reference": row["source_reference"]} if "source_reference" in row else {})}
                 for row in draft["placements"] if row["creative"] == context
             ],
         })
@@ -74,7 +76,8 @@ def sample_package(draft, media_dir):
     return {
         "campaign_id": draft["campaign_id"],
         "revision": draft["revision"],
-        "data_label": "Fictional placements for an offline sample",
+        "data_label": ("Catalog candidates · inventory unverified" if any(row["source"] in {"licensed", "creator_supplied"}
+                       for row in draft["placements"]) else "Fictional placements for an offline sample"),
         "title": draft["brief"]["title"],
         "brief": {"id": draft["brief"]["id"], "revision": draft["brief"]["revision"]},
         "policy": {"id": draft["policy"]["id"], "revision": draft["policy"]["revision"]},
