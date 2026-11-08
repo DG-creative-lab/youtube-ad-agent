@@ -266,7 +266,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     raise ValueError("Invalid agent request.")
                 if self.path == "/api/agent/placements":
                     fields = {"request", "model", "session_id", "run_id", "catalog_id"}
-                    if set(data) not in (fields, fields | {"after_message"}):
+                    if not fields <= set(data) or set(data) - fields - {'after_message', 'draft_permission'}:
                         raise ValueError("Supply a request, main model, conversation and catalog.")
                     run_id = agent.planner.start(**data)
                     result = agent.read(run_id)

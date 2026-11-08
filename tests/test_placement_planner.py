@@ -43,7 +43,7 @@ class PlacementPlannerTests(unittest.TestCase):
 
     def start(self, runtime=None, model='simulated', catalog=None, session=None, run_id=None):
         return (runtime or self.runtime).planner.start('Find placements for the saved campaign.', model,
-            session or self.session, run_id or uuid4().hex, catalog or self.catalog)
+            session or self.session, run_id or uuid4().hex, catalog or self.catalog, draft_permission='placements')
 
     def finish(self, run_id, runtime=None):
         runtime = runtime or self.runtime
@@ -77,9 +77,9 @@ class PlacementPlannerTests(unittest.TestCase):
         self.assertEqual(second['planner']['settings']['model'], 'simulated-inspect')
         self.assertEqual(second['planner']['routing']['classifier'], 'simulated_decision')
 
-    def send_message(self, text, *, runtime=None, catalog=None, after=None, run_id=None):
+    def send_message(self, text, *, runtime=None, catalog=None, after=None, run_id=None, draft_permission='none'):
         return (runtime or self.runtime).planner.start(text, 'simulated', self.session,
-            run_id or uuid4().hex, catalog or self.catalog, after_message=after)
+            run_id or uuid4().hex, catalog or self.catalog, after_message=after, draft_permission=draft_permission)
 
     def test_conversation_clarification_followups_and_read_only_reply_survive_reopen(self):
         first = self.send_message('Help me', after=0)
@@ -87,14 +87,14 @@ class PlacementPlannerTests(unittest.TestCase):
         transcript = self.reopen().planner.conversations.read(self.session)
         self.assertEqual([item['role'] for item in transcript['messages']], ['user', 'assistant'])
         self.assertIn('Should I focus', transcript['messages'][-1]['content'])
-        second = self.send_message('Audiobook production, please.', after=transcript['latest_message'])
+        second = self.send_message('Audiobook production, please.', after=transcript['latest_message'], draft_permission='placements')
         self.assertEqual(self.finish(second)['result']['revision'], 2)
         self.assertEqual([row['id'] for row in self.runtime.drafts.read()['placements']], ['SAMPLE00002'])
         extra = [{**row, 'video_id': row['video_id'].replace('0000', '0001')} for row in CATALOG]
         catalog = self.runtime.planner.catalogs.register('More tutorials', extra)
         current = self.runtime.planner.conversations.read(self.session)
         third = self.send_message('More like that, keeping the existing selections.', catalog=catalog,
-                                  after=current['latest_message'])
+                                  after=current['latest_message'], draft_permission='placements')
         self.assertEqual(self.finish(third)['result']['revision'], 3)
         self.assertEqual([row['id'] for row in self.runtime.drafts.read()['placements']], ['SAMPLE00002', 'SAMPLE00012'])
         before = self.runtime.planner.conversations.read(self.session)['latest_message']
@@ -184,7 +184,7 @@ class PlacementPlannerTests(unittest.TestCase):
             return self.reply(*calls.pop(0))
         runtime = self.reopen(main_models=[MODEL], main_transport=transport)
         with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'authored-key'}):
-            run_id = runtime.planner.start('😀' * 1500, MODEL, self.session, uuid4().hex, catalog)
+            run_id = runtime.planner.start('😀' * 1500, MODEL, self.session, uuid4().hex, catalog, draft_permission='placements')
             result = self.finish(run_id, runtime)
         self.assertEqual(len(requests), 3)
         self.assertTrue(all(len(encoded) <= 32_000 for encoded in requests))
@@ -272,7 +272,7 @@ class PlacementPlannerTests(unittest.TestCase):
     def test_followup_supersedes_inflight_work_and_late_result_cannot_save(self):
         simulator = Mock(wraps=SimulatedPlanner())
         runtime = self.reopen(planner_simulator=simulator)
-        first = self.send_message('Find placements', runtime=runtime, after=0)
+        first = self.send_message('Find placements', runtime=runtime, after=0, draft_permission='placements')
         self.runtime.resume(first, max_steps=2)
         next_run = uuid4().hex
         def late(context, history, settings):
@@ -291,7 +291,7 @@ class PlacementPlannerTests(unittest.TestCase):
     def test_reply_and_draft_commit_together_and_retry_reuses_receipt(self):
         simulator = Mock(wraps=SimulatedPlanner())
         runtime = self.reopen(planner_simulator=simulator)
-        run_id = self.send_message('Find placements', runtime=runtime, after=0)
+        run_id = self.send_message('Find placements', runtime=runtime, after=0, draft_permission='placements')
         runtime.resume(run_id, max_steps=2)
         finish = runtime.planner.conversations.finish
         def interrupted(*args):
@@ -310,7 +310,7 @@ class PlacementPlannerTests(unittest.TestCase):
         self.assertEqual(reopened.drafts.read()['revision'], 2)
 
     def test_legacy_runs_become_a_transcript_once_and_openrouter_receives_dialogue(self):
-        self.finish(self.send_message('Find placements ' + 'with permitted sources ' * 30))
+        self.finish(self.send_message('Find placements ' + 'with permitted sources ' * 30, draft_permission='placements'))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('DROP TABLE planner_messages')
         reopened = self.reopen()

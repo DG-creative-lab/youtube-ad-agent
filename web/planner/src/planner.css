@@ -167,6 +167,10 @@ details li + li { margin-top: 8px; }
 .message-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 15px; font-size: .82rem; }
 .message-heading span { color: var(--muted); font-size: .72rem; }
 .request .message p { white-space: pre-wrap; color: #171717; margin-top: 10px; line-height: 1.6; }
+.chat-evidence h3 { margin-top: 14px; font-size: .84rem; }
+.chat-evidence ul { display: grid; gap: 8px; padding-left: 18px; }
+.request .chat-evidence p { font-size: .78rem; color: var(--muted); }
+.review-reference { overflow-wrap: anywhere; }
 .chat-progress { border-top: 1px solid var(--line); padding-top: 12px; }
 textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #4f6d43; outline-offset: 3px; }
 @media (max-width: 590px) {

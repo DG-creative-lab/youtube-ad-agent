@@ -1,7 +1,10 @@
 """Application-owned chat wording for campaign facts and supported next actions."""
 
 REPLY_VERSION = 1
-TOPICS = ('campaign_summary', 'capabilities', 'approval_and_launch')
+TOPICS = ('campaign_summary', 'capabilities', 'approval_and_launch', 'performance_review')
+WORKFLOW_CODES = ('approval_required', 'waiting_for_evidence', 'correction_required', 'comparison_fixed',
+                  'instruction_test_prepared', 'review_refresh_required', 'experiment_review_required',
+                  'instruction_draft_not_authorized', 'placement_draft_not_authorized')
 QUESTIONS = {
     'choose_context': 'Should I focus on video editing, audiobook production, or both?',
     'supply_catalog': 'No unambiguous placements were found. Can you supply a more relevant catalog?',
@@ -15,7 +18,7 @@ def reply(topic, draft, *, approved=False):
         text = f"Revision {draft['revision']} has {len(draft['placements'])} saved placements. "
         text += 'You can ask me to find more placements for video editing or audiobook production.'
     elif topic == 'capabilities':
-        text = 'I can inspect your source catalog, classify videos for the two campaign contexts, add placements to the draft, and explain its saved state.'
+        text = 'I can inspect catalogs, add classified placements, review sample delivery with recorded viewer activity, and prepare instruction-only tests from eligible evidence and a saved keep-takes correction.'
     elif topic == 'approval_and_launch':
         text = ('The current package has a saved approval in this app.' if approved
                 else 'The current package has no matching approval in this app.')
@@ -38,6 +41,6 @@ def verified_result(result, status):
     """Retain old records, but never publish their unverified text as an agent reply."""
     if (status in {'answered', 'needs_input'} and
             (result.get('reply_version') != REPLY_VERSION
-             or result.get('reply_code') not in (*TOPICS, *QUESTIONS, 'turn_limit'))):
+             or result.get('reply_code') not in (*TOPICS, *QUESTIONS, *WORKFLOW_CODES, 'turn_limit'))):
         return {**result, 'message': LEGACY_NOTICE, 'needs_verification': True}
     return result

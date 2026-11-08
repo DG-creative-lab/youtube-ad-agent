@@ -1,5 +1,10 @@
 import {useId, useRef, useState} from "react";
 
+export type DraftPermission = "none" | "placements" | "instruction_test";
+export const draftPermissionLabels: Record<DraftPermission, string> = {
+  none: "Review only", placements: "Placement draft", instruction_test: "Instruction-test draft",
+};
+
 export type PlannerOptions = {
   models: {id: string; label: string; mode: string}[];
   default: string;
@@ -10,7 +15,7 @@ type Props = {
   options: PlannerOptions;
   model: string;
   onModel: (model: string) => void;
-  onSubmit: (request: string, catalog: string) => Promise<boolean>;
+  onSubmit: (request: string, catalog: string, draftPermission: DraftPermission) => Promise<boolean>;
   onCatalogs: (catalogs: PlannerOptions["catalogs"]) => void;
   catalogId: string;
   onCatalogId: (id: string) => void;
@@ -18,13 +23,16 @@ type Props = {
   followup: boolean;
   text: string;
   onText: (text: string) => void;
+  draftPermission: DraftPermission;
+  onDraftPermission: (permission: DraftPermission) => void;
   request: <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
 };
 
-export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText, request}: Props) {
+export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText,
+  draftPermission, onDraftPermission, request}: Props) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
-  const [panel, setPanel] = useState<"model" | "catalog" | "import" | null>(null);
+  const [panel, setPanel] = useState<"model" | "catalog" | "import" | "permission" | null>(null);
   const panelId = useId();
   const modelButton = useRef<HTMLButtonElement>(null);
   const chosen = catalogId || options.catalogs[0]?.id || "";
@@ -54,7 +62,7 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
     if (panel === "model" && !event.currentTarget.contains(event.relatedTarget)) setPanel(null);
   }} onSubmit={event => {
     event.preventDefault();
-    void onSubmit(text, chosen).then(sent => {if (sent) onText("");});
+    void onSubmit(text, chosen, draftPermission).then(sent => {if (sent) {onText(""); onDraftPermission("none");}});
   }}>
     <div className="composer-input">
       <label className="sr-only" htmlFor={`${panelId}-message`}>{followup ? "Your message" : "Campaign request"}</label>
@@ -90,6 +98,10 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
       </div>}
     </div>
     <div className="composer-pills" aria-label="Message options">
+      <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "permission"}
+        aria-controls={`${panelId}-permission`} onClick={() => setPanel(panel === "permission" ? null : "permission")}>
+        Changes · {draftPermissionLabels[draftPermission]}
+      </button>
       <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "catalog"}
         aria-controls={`${panelId}-catalog`} onClick={() => setPanel(panel === "catalog" ? null : "catalog")}>
         <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
@@ -102,6 +114,15 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
       </button>
       <span className="catalog-caption" title={selectedCatalog?.label}>{selectedCatalog?.label}</span>
     </div>
+    {panel === "permission" && <section id={`${panelId}-permission`} className="composer-panel" aria-label="Draft permissions">
+      <label>Allowed draft changes
+        <select value={draftPermission} disabled={disabled}
+          onChange={event => onDraftPermission(event.target.value as DraftPermission)}>
+          {Object.entries(draftPermissionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+      <p>Applies only to this request. Review only allows no campaign draft changes. Approval, export and launch are separate actions.</p>
+    </section>}
     {panel === "catalog" && <section id={`${panelId}-catalog`} className="composer-panel" aria-label="Catalog options">
       <label>Catalog
         <select value={chosen} onChange={event => onCatalogId(event.target.value)} disabled={disabled}>

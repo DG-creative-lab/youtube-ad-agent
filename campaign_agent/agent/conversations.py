@@ -14,7 +14,11 @@ MAX_CONTEXT_BYTES = 8_000
 def bounded_context(messages):
     """Keep a whole-message suffix, accounting for JSON nested in the provider's JSON body."""
     kept = []
-    for message in reversed(messages):
+    for saved in reversed(messages):
+        # Transcript inspectors retain full evidence; dialogue carries its reference and reloads current facts through tools.
+        message = {key: value for key, value in saved.items() if key != 'review'}
+        if saved.get('review'):
+            message['review_id'] = saved['review']['id']
         candidate = [message, *kept]
         if len(json.dumps(json.dumps(candidate)).encode()) > MAX_CONTEXT_BYTES:
             break
@@ -72,6 +76,11 @@ class CampaignConversations:
                 message['content'] = result['message']
                 if result.get('needs_verification'):
                     message['kind'] = 'needs_verification'
+            if message['role'] == 'assistant':
+                result = json.loads(row[8] or '{}')
+                if result.get('reply_version') == 1 and result.get('performance_review'):
+                    message['review'] = result['performance_review']
+                    message['review_needs_refresh'] = result.get('review_needs_refresh', False)
             messages.append(message)
         return messages
 

@@ -52,6 +52,12 @@ class InstructionTests:
         return package_fingerprint({"scope": vars(LOCAL_BRAND), "campaign": campaign_id,
                                     "revision": revision, "fingerprint": fingerprint})[:32]
 
+    def started_for_package(self, db, package):
+        self.drafts._package_scope(package['campaign_id'], package['revision'])
+        test_id = self.test_id(package['campaign_id'], package['revision'], package_fingerprint(package))
+        return test_id if db.execute('SELECT 1 FROM instruction_tests WHERE id=? AND client_id=? AND brand_id=?',
+                                     (test_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone() else None
+
     def _test(self, db, test_id):
         if not isinstance(test_id, str) or not re.fullmatch(r"[0-9a-f]{32}", test_id):
             raise ValueError("Choose a valid instruction test.")

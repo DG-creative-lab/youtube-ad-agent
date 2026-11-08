@@ -1,4 +1,4 @@
-"""Durable, bounded main-model loop over the placement application commands."""
+"""Durable, bounded main-model loop over campaign application commands."""
 from contextlib import closing
 import json
 import re
@@ -12,6 +12,8 @@ from scripts.campaign_drafts import PackageConflict
 from .planning_models import OpenRouterPlanner, SimulatedPlanner
 from .conversations import CampaignConversations
 from .replies import REPLY_VERSION, clarification, reply, verified_result
+from .review_tools import CampaignReviewTools
+from .draft_permissions import DRAFT_PERMISSIONS, permits
 
 
 ID = re.compile(r'[0-9a-f]{32}')
@@ -26,6 +28,7 @@ class PlacementAgent:
         self.remote = OpenRouterPlanner(models, transport=transport)
         self.simulator = simulator or SimulatedPlanner()
         self.classifier = classifier or SimulatedClassifier()
+        self.review_tools = CampaignReviewTools(self)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS planner_sessions (
@@ -59,13 +62,15 @@ class PlacementAgent:
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
 
-    def start(self, request, model, session_id, run_id, catalog_id, after_message=None):
+    def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none'):
         self.owner.operator.require_brand(LOCAL_BRAND)
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
                 or not isinstance(request, str) or not request.strip() or len(request) > 1500):
             raise ValueError('Supply a request and valid session, run and catalog references.')
         if after_message is not None and (type(after_message) is not int or not 0 <= after_message < 2**63):
             raise ValueError('Supply a valid conversation message reference.')
+        if not isinstance(draft_permission, str) or draft_permission not in DRAFT_PERMISSIONS:
+            raise ValueError('Choose a valid draft permission for this request.')
         settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -78,6 +83,8 @@ class PlacementAgent:
                     raise ValueError('This run ID belongs to a different request.')
                 if source.get('after_message') != after_message:
                     raise ValueError('This run ID belongs to a different conversation turn.')
+                if source.get('draft_permission', 'none') != draft_permission:
+                    raise ValueError('This run ID has different draft authority. Send a new request to change it.')
                 return run_id
             expected = (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.owner.operator.id, json.dumps(settings))
             self.catalogs.read(db, catalog_id)
@@ -86,7 +93,9 @@ class PlacementAgent:
                                                           catalog_id, current['revision'], after_message)
             context = {'request': request, 'session_id': session_id, 'catalog_id': catalog_id,
                        'revision': current['revision'], 'settings': settings,
+                       'draft_permission': draft_permission,
                        'conversation': previous, 'conversation_truncated': truncated, 'after_message': after_message,
+                       **self.review_tools.pin(db, current),
                        'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
             db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
                        (*expected[:3], model))
@@ -105,7 +114,7 @@ class PlacementAgent:
         if self.conversations.session(db, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
         if self.drafts._read(db)['revision'] != source['revision']:
-            raise PackageConflict('The campaign changed. Start a new placement request from the latest revision.')
+            raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
         return source
 
     def _history(self, db, run_id):
@@ -166,6 +175,12 @@ class PlacementAgent:
                     return self.read(run_id)
                 source = self._context(db, run_id)
                 history = self._history(db, run_id)
+                if any(step['tool'] == 'review_performance' and 'id' in step['result'] for step in history):
+                    try:
+                        self.review_tools.latest(db, source, history)
+                    except PackageConflict:
+                        self._finish(db, run_id, self.review_tools.refresh_outcome(source, history), 'needs_input')
+                        continue
                 position = len(history)
                 row = db.execute('SELECT state,receipt,error FROM planner_turns WHERE run_id=? AND position=?',
                                  (run_id, position)).fetchone()
@@ -201,6 +216,13 @@ class PlacementAgent:
             classified = None
             if receipt['tool'] == 'classify_catalog' and not receipt['arguments']:
                 classified = self._classify(run_id)
+            captured_review = None
+            if receipt['tool'] == 'review_performance' and not receipt['arguments']:
+                with closing(sqlite3.connect(self.path)) as db:
+                    source = self._context(db, run_id)
+                    approved = self.review_tools.approved(db, source)
+                if approved is not None:
+                    captured_review = self.review_tools.capture(source)
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 _, status = self.owner._owned_run(db, run_id)
@@ -212,7 +234,12 @@ class PlacementAgent:
                 history = self._history(db, run_id)
                 db.execute('SAVEPOINT planner_tool')
                 try:
-                    result, status = self._tool(db, run_id, source, history, receipt, classified)
+                    result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
+                except PackageConflict:
+                    db.execute('ROLLBACK TO planner_tool')
+                    if receipt['tool'] not in {'review_performance', 'prepare_next_test', 'respond'}:
+                        raise
+                    result, status = self.review_tools.refresh_outcome(source, history), 'needs_input'
                 except (ValueError, TypeError):
                     db.execute('ROLLBACK TO planner_tool')
                     result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
@@ -224,14 +251,17 @@ class PlacementAgent:
                                       'message': 'The turn allowance is exhausted. Start a new request with more context.',
                                       'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
                 if status != 'running':
-                    db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
-                    db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(result), run_id))
-                    self.conversations.finish(db, run_id, result, status)
+                    self._finish(db, run_id, result, status)
         return self.read(run_id)
 
-    def _tool(self, db, run_id, source, history, call, classified):
+    def _finish(self, db, run_id, result, status):
+        db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
+        db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(result), run_id))
+        self.conversations.finish(db, run_id, result, status)
+
+    def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
         name, args = call['tool'], call['arguments']
-        if name in {'read_campaign', 'inspect_catalog', 'classify_catalog'} and args:
+        if name in {'read_campaign', 'inspect_catalog', 'classify_catalog', 'review_performance'} and args:
             raise ValueError('Unexpected fields')
         if name == 'read_campaign':
             draft = self.drafts._read(db)
@@ -239,6 +269,9 @@ class PlacementAgent:
             corrections = [self.owner.performance.correction_for_comparison(db, package, group['creative_version'])
                            for group in package['groups']]
             return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
+                    'draft_permission': source.get('draft_permission', 'none'),
+                    'package_approved': self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None,
+                    'reporting_scenario': source.get('reporting_scenario', 'balanced'),
                     'placements': [{key: row[key] for key in ('id', 'creative', 'source')} for row in draft['placements'][:30]],
                     'placement_count': len(draft['placements']), 'buyer_corrections': [item for item in corrections if item]}, 'running'
         if name == 'inspect_catalog':
@@ -247,7 +280,13 @@ class PlacementAgent:
                     'total': len(rows), 'shown': min(10, len(rows))}, 'running'
         if name == 'classify_catalog':
             return classified, 'running'
+        if name == 'review_performance':
+            return self.review_tools.review(db, source, captured_review)
+        if name == 'prepare_next_test':
+            return self.review_tools.prepare(db, run_id, source, history, call)
         if name == 'save_placement_draft' and set(args) in ({'video_ids'}, {'contexts'}):
+            if not permits(source, name):
+                return self.review_tools.outcome(source['revision'], None, 'placement_draft_not_authorized'), 'needs_input'
             classification = next((step['result'] for step in reversed(history)
                                    if step['tool'] == 'classify_catalog' and 'error' not in step['result']), None)
             if classification is None:
@@ -270,6 +309,8 @@ class PlacementAgent:
         if name == 'ask_clarification' and set(args) == {'reason'}:
             return clarification(args['reason'], source['revision']), 'needs_input'
         if name == 'respond' and set(args) == {'topic'}:
+            if args['topic'] == 'performance_review':
+                return self.review_tools.explain(db, source, history)
             draft = self.drafts._read(db)
             approved = False
             if args['topic'] == 'approval_and_launch':
@@ -288,4 +329,5 @@ class PlacementAgent:
             return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(db, run_id),
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
+                                'draft_permission': source.get('draft_permission', 'none'),
                                 'routing': source['routing'], 'max_turns': source['max_turns'], 'turns': turns}}
