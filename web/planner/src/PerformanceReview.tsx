@@ -48,14 +48,14 @@ type Props = {
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
   onPackageConflict: (message: string) => void;
   onPrepareNextTest: (reviewId: string, selection: ReviewSelection) => void;
-  draftModels: string[];
+  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
 };
 
 const endpoint = "/api/campaign/performance";
 const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1});
 
 export function PerformanceReview({campaignId, revision, fingerprint, groups, request, onPackageConflict,
-                                   onPrepareNextTest, draftModels}: Props) {
+                                   onPrepareNextTest, mainModel}: Props) {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [scenario, setScenario] = useState("");
   const [result, setResult] = useState<PerformanceResult | null>(null);
@@ -67,14 +67,11 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const correctionOperation = useRef<string | null>(null);
-  const [draftMode, setDraftMode] = useState("offline");
-  const [draftModel, setDraftModel] = useState("");
 
   function prepareNextTest() {
-    if (!result || (draftMode === "openrouter" && !draftModel)) return;
+    if (!result) return;
     const operation_id = crypto.randomUUID().replaceAll("-", "");
-    onPrepareNextTest(result.id, draftMode === "offline" ? {mode: "offline", operation_id}
-      : {mode: "openrouter", model: draftModel, operation_id});
+    onPrepareNextTest(result.id, {...mainModel, operation_id});
   }
 
   useEffect(() => {
@@ -219,20 +216,9 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
             )}
             <p className="provenance">Offline review · Illustrative decision rules</p>
             {proposal.correction?.kind === "keep_takes" && <div className="performance-controls">
-              <label>Draft mode
-                <select value={draftMode} onChange={event => setDraftMode(event.target.value)} disabled={busy || saving}>
-                  <option value="offline">Offline</option>
-                  <option value="openrouter" disabled={!draftModels.length}>OpenRouter</option>
-                </select>
-              </label>
-              {draftMode === "openrouter" && <label>Draft model
-                <select value={draftModel} onChange={event => setDraftModel(event.target.value)} disabled={busy || saving}>
-                  <option value="">Choose a model</option>
-                  {draftModels.map(id => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </label>}
+              <p className="revision">Main model · {mainModel.mode === "offline" ? "Recorded offline response" : mainModel.model}</p>
               <button onClick={prepareNextTest}
-                disabled={busy || saving || needsRerun || (draftMode === "openrouter" && !draftModel)}>
+                disabled={busy || saving || needsRerun}>
                 Prepare next test
               </button>
             </div>}

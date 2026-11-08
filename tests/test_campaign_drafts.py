@@ -71,7 +71,7 @@ class CampaignDraftTests(unittest.TestCase):
         for invalid in ({**payload, "campaign_id": "tts-sample"}, {**payload, "placements": [EDITING]}):
             with self.assertRaises(ValueError):
                 catalog.save(invalid)
-        self.assertEqual(catalog.save(payload)["placements"], [licensed])
+        self.assertEqual(catalog.save(payload)["placements"], [{**licensed, "source_reference": "Creator handoff 17"}])
         self.assertEqual(self.drafts.read()["placements"], [EDITING])
 
     def test_browser_labels_cannot_register_or_replace_catalog_evidence(self):

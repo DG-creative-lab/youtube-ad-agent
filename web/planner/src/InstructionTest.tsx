@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from "react";
+import {useEffect, useState} from "react";
 
 export type ReviewSelection = {mode: "offline"; operation_id: string}
   | {mode: "openrouter"; model: string; operation_id: string};
@@ -33,8 +33,7 @@ type Props = {
   viewerOrigin: string;
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
   onReview: (testId: string, selection: ReviewSelection) => void;
-  models: string[];
-  draftModels: string[];
+  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
   onPrepareNextTest: (testId: string, reviewId: string, selection: ReviewSelection) => void;
   onPackageConflict: (message: string) => void;
 };
@@ -44,16 +43,11 @@ const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFr
 const label = (arm: string) => arm === "original" ? "Original instructions" : "Revised instructions";
 
 export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin, request,
-                                 onReview, onPackageConflict, models, draftModels, onPrepareNextTest}: Props) {
+                                 onReview, onPackageConflict, mainModel, onPrepareNextTest}: Props) {
   const [test, setTest] = useState<Test | null>(null);
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [reviewMode, setReviewMode] = useState("offline");
-  const [model, setModel] = useState("");
-  const [draftMode, setDraftMode] = useState("offline");
-  const [draftModel, setDraftModel] = useState("");
-  const operation = useRef<string | null>(null);
   const query = new URLSearchParams({revision: String(revision), fingerprint}).toString();
 
   useEffect(() => {
@@ -86,21 +80,15 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
   }
 
   function review() {
-    if (!test || working || (reviewMode === "openrouter" && !model)) return;
-    operation.current ??= crypto.randomUUID().replaceAll("-", "");
-    if (reviewMode === "offline") {
-      onReview(test.id, {mode: "offline", operation_id: operation.current});
-    } else {
-      onReview(test.id, {mode: "openrouter", model, operation_id: operation.current});
-    }
+    if (!test || working) return;
+    onReview(test.id, {...mainModel, operation_id: crypto.randomUUID().replaceAll("-", "")});
   }
 
   const canDraft = test?.review?.assessment.kind === "prepare_another_test";
   function planNextStep() {
     if (!test?.review || test.needs_review || working) return;
     const operation_id = crypto.randomUUID().replaceAll("-", "");
-    const selection: ReviewSelection = canDraft && draftMode === "openrouter"
-      ? {mode: "openrouter", model: draftModel, operation_id} : {mode: "offline", operation_id};
+    const selection: ReviewSelection = canDraft ? {...mainModel, operation_id} : {mode: "offline", operation_id};
     onPrepareNextTest(test.id, test.review.id, selection);
   }
 
@@ -134,29 +122,12 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
             <button onClick={() => void refresh()} disabled={working}>Refresh results</button>
           </div>
           <div className="performance-controls">
-            <label>Review mode
-              <select value={reviewMode} onChange={event => {
-                setReviewMode(event.target.value);
-                operation.current = null;
-              }} disabled={working}>
-                <option value="offline">Offline</option>
-                <option value="openrouter" disabled={!models.length}>OpenRouter</option>
-              </select>
-            </label>
-            {reviewMode === "openrouter" && <label>Review model
-              <select value={model} onChange={event => {
-                setModel(event.target.value);
-                operation.current = null;
-              }} disabled={working} required>
-                <option value="">Choose a model</option>
-                {models.map(id => <option key={id} value={id}>{id}</option>)}
-              </select>
-            </label>}
-            <button onClick={review} disabled={working || (reviewMode === "openrouter" && !model)}>
+            <p className="revision">Main model · {mainModel.mode === "offline" ? "Recorded offline response" : mainModel.model}</p>
+            <button onClick={review} disabled={working}>
               Review instruction test
             </button>
           </div>
-          {reviewMode === "openrouter" && <p className="revision">
+          {mainModel.mode === "openrouter" && <p className="revision">
             One request for this review · Up to 512 output tokens · Free model routes with a zero-price cap.
             The model receives the two instructions, results and buyer correction.
           </p>}
@@ -175,19 +146,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
             <h3>{test.review.assessment.title}</h3>
             <p className="revision">{test.review.assessment.reason}</p>
             {!test.needs_review && <div className="performance-controls">
-              {canDraft && <label>Next draft mode
-                <select value={draftMode} onChange={event => setDraftMode(event.target.value)} disabled={working}>
-                  <option value="offline">Offline</option>
-                  <option value="openrouter" disabled={!draftModels.length}>OpenRouter</option>
-                </select>
-              </label>}
-              {canDraft && draftMode === "openrouter" && <label>Next draft model
-                <select value={draftModel} onChange={event => setDraftModel(event.target.value)} disabled={working}>
-                  <option value="">Choose a model</option>
-                  {draftModels.map(id => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </label>}
-              <button onClick={planNextStep} disabled={working || (canDraft && draftMode === "openrouter" && !draftModel)}>
+              <button onClick={planNextStep} disabled={working}>
                 Plan next step
               </button>
             </div>}

@@ -120,6 +120,26 @@ class CampaignDrafts:
                         UNIQUE (video_id, title, source, source_reference)
                     )
                 """)
+            db.execute("""CREATE TABLE IF NOT EXISTS placement_catalog_entries (
+                ref TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                campaign_id TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, source TEXT NOT NULL,
+                source_reference TEXT)
+            """)
+            columns = {column[1] for column in db.execute("PRAGMA table_info(placement_catalog_entries)")}
+            if "source_reference" not in columns:
+                db.execute("ALTER TABLE placement_catalog_entries ADD COLUMN source_reference TEXT")
+                if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='placement_catalogs'").fetchone():
+                    # Recover only from the original immutable scoped catalog, never from a model or title match.
+                    for client, brand, campaign, snapshot in db.execute(
+                            "SELECT client_id,brand_id,campaign_id,snapshot FROM placement_catalogs"):
+                        rows = json.loads(snapshot)
+                        identity = {"scope": {"client_id": client, "brand_id": brand}, "campaign": campaign, "rows": rows}
+                        for row in rows:
+                            ref = package_fingerprint({**identity, "video": row["video_id"]})[:32]
+                            db.execute("UPDATE placement_catalog_entries SET source_reference=? WHERE ref=? "
+                                       "AND client_id=? AND brand_id=? AND campaign_id=? AND video_id=? AND title=? AND source=?",
+                                       (row["source_reference"], ref, client, brand, campaign,
+                                        row["video_id"], row["description"], row["source"]))
             seed = {
                 "campaign_id": self.campaign_id,
                 "revision": 1,
@@ -163,6 +183,7 @@ class CampaignDrafts:
         draft = latest if latest["revision"] == revision else self._read(db, revision)
         if draft is None:
             raise ValueError("Campaign revision unavailable.")
+        draft = {**draft, "placements": self._validate_placements(db, draft["placements"], draft["brief"]["contexts"])}
         package = sample_package(draft, self.media_dir)
         fingerprint = package_fingerprint(package)
         key = (*scope, revision, fingerprint)
@@ -372,32 +393,36 @@ class CampaignDrafts:
         return saved
 
     def _validate_placements(self, db, rows, contexts):
-        seen = set()
-        fields = ("id", "title", "creative", "source")
-        live = self.live
-        if live:
-            fields += ("catalog_ref",)
+        seen, result = set(), []
         for row in rows:
-            if not isinstance(row, dict) or set(row) != set(fields):
-                raise ValueError("Live placements need a registered catalog reference." if live
-                                 else "Each placement needs a video ID, title, context and source.")
-            video_id, title = row["id"], row["title"]
-            context, source = row["creative"], row["source"]
-            if not isinstance(source, str) or source not in self.sources:
-                raise ValueError("Only sample or independently supplied placements can be saved in this mode.")
-            if (not isinstance(video_id, str) or not VIDEO_ID.fullmatch(video_id) or video_id in seen
+            fields = ("id", "title", "creative", "source")
+            if not isinstance(row, dict):
+                raise ValueError("Each placement needs a video ID, title, context and source.")
+            registered = "catalog_ref" in row
+            if self.live or registered:
+                fields += ("catalog_ref",)
+            if set(row) not in (set(fields), set(fields) | ({"source_reference"} if registered else set())):
+                raise ValueError("Use the required placement fields and registered catalog reference.")
+            video_id, title, context, source = (row[key] for key in ("id", "title", "creative", "source"))
+            if (not isinstance(source, str) or source not in self.sources | (CATALOG_SOURCES if registered else set())
+                    or not isinstance(video_id, str) or not VIDEO_ID.fullmatch(video_id) or video_id in seen
                     or not isinstance(context, str) or context not in contexts
                     or not isinstance(title, str) or not title.strip() or len(title) > 3000):
-                raise ValueError("Use unique video IDs, known contexts and titles of up to 3000 characters.")
-            if live:
-                ref = row["catalog_ref"]
-                entry = None
+                raise ValueError("Use unique catalog video IDs, known contexts and permitted sources.")
+            if self.live or registered:
+                ref, entry = row["catalog_ref"], None
                 if isinstance(ref, str) and re.fullmatch(r"[0-9a-f]{32}", ref):
-                    entry = db.execute(
-                        "SELECT video_id, title, source FROM catalog_entries WHERE ref = ?", (ref,),
-                    ).fetchone()
-                if entry != (video_id, title, source):
+                    if self.live:
+                        entry = db.execute("SELECT video_id,title,source,source_reference FROM catalog_entries WHERE ref=?", (ref,)).fetchone()
+                    else:
+                        entry = db.execute("SELECT video_id,title,source,source_reference FROM placement_catalog_entries "
+                                           "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
+                                           (ref, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.campaign_id)).fetchone()
+                if (entry is None or entry[:3] != (video_id, title, source)
+                        or not isinstance(entry[3], str) or not entry[3].strip()
+                        or ("source_reference" in row and row["source_reference"] != entry[3])):
                     raise ValueError("The placement does not match a registered catalog entry.")
             seen.add(video_id)
-        # Canonical field order allows browser snapshots to compare consistently.
-        return [{key: row[key] for key in fields} for row in rows]
+            result.append({**{key: row[key] for key in fields},
+                           **({"source_reference": entry[3]} if self.live or registered else {})})
+        return result

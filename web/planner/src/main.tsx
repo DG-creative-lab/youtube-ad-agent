@@ -2,6 +2,8 @@ import {useEffect, useState} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
+import {AgentComposer} from "./AgentComposer";
+import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
 import type {ReviewSelection} from "./InstructionTest";
 import "./planner.css";
@@ -40,13 +42,16 @@ type Mode = {
   viewerOrigin: string;
   openrouterReviewModels: string[];
   openrouterDraftModels: string[];
+  agentPlanner?: PlannerOptions;
   examples: {creative: string; ref: string; title: string}[];
 };
 type RunResult = {revision: number; ambiguous: Placement[]; outcome?: string; message?: string};
 type Run = {
   run_id: string;
   request: string;
-  status: "running" | "ready_for_review" | "waiting_for_evidence";
+  status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input";
+  result?: RunResult | null;
+  planner?: {settings: {mode: string; model: string}; max_turns: number; turns: unknown[]; routing: {classifier: string}};
   steps: {tool: string; result: unknown}[];
   inference?: {settings: {mode: string; model?: string}};
 };
@@ -69,7 +74,8 @@ const instructionReviewStepLabels = {
   save_test_review: "Save the test assessment",
   finish_test_review: "Prepare the assessment for review",
 };
-type Preparation = {kind: "next_test"; reviewId: string; selection: ReviewSelection}
+type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string}
+  | {kind: "next_test"; reviewId: string; selection: ReviewSelection}
   | {kind: "experiment_next_test"; testId: string; reviewId: string; selection: ReviewSelection}
   | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
 const runKey = "campaign-planner:last-run";
@@ -89,7 +95,7 @@ class RequestError extends Error {
   }
 }
 
-async function request<T>(path: string, body?: Record<string, string | number>): Promise<T> {
+async function request<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const response = await fetch(path, {
     method: body ? "POST" : "GET",
     headers: {
@@ -105,12 +111,15 @@ async function request<T>(path: string, body?: Record<string, string | number>):
 }
 
 function review(run: Run | null): RunResult | null {
-  return run && run.status !== "running" ? run.steps.at(-1)?.result as RunResult : null;
+  return run && run.status !== "running" ? run.result ?? run.steps.at(-1)?.result as RunResult : null;
 }
 
 function App() {
   const [page, setPage] = useState(currentPage);
   const [mode, setMode] = useState<Mode>();
+  const [mainModel, setMainModel] = useState("");
+  const [placementCatalog, setPlacementCatalog] = useState(() => sessionStorage.getItem("campaign-planner:catalog") ?? "");
+  const [conversationId, setConversationId] = useState(() => sessionStorage.getItem("campaign-planner:conversation") || crypto.randomUUID().replaceAll("-", ""));
   const [draft, setDraft] = useState<Draft>();
   const [run, setRun] = useState<Run | null>(null);
   const [pendingId, setPendingId] = useState(() => sessionStorage.getItem(runKey));
@@ -144,6 +153,19 @@ function App() {
           request<Draft>("/api/campaign"),
         ]);
         setDraft(currentDraft);
+        const savedModel = sessionStorage.getItem("campaign-planner:model");
+        const selectedModel = workspace.agentPlanner?.models.some(item => item.id === savedModel)
+          ? savedModel! : workspace.agentPlanner?.default ?? "simulated";
+        if (savedModel && selectedModel !== savedModel) {
+          const nextConversation = crypto.randomUUID().replaceAll("-", "");
+          setConversationId(nextConversation);
+          sessionStorage.setItem("campaign-planner:conversation", nextConversation);
+        }
+        setMainModel(selectedModel);
+        sessionStorage.setItem("campaign-planner:model", selectedModel);
+        if (!workspace.agentPlanner?.catalogs.some(item => item.id === placementCatalog)) {
+          setPlacementCatalog(workspace.agentPlanner?.catalogs[0]?.id ?? "");
+        }
         const savedId = sessionStorage.getItem(runKey);
         try {
           if (workspace.live || !savedId) return;
@@ -235,7 +257,7 @@ function App() {
 
   async function prepare(source?: Preparation) {
     if (!mode || mode.live || busy || packageAction) return;
-    if (source && (!activePackage || needsLatest)) return;
+    if (source && source.kind !== "placement_request" && (!activePackage || needsLatest)) return;
     const id = !source && !stale && run?.status !== "ready_for_review" && pendingId
       ? pendingId
       : crypto.randomUUID().replaceAll("-", "");
@@ -249,7 +271,12 @@ function App() {
     try {
       let current: Run;
       let start: {path: string; body: Record<string, string | number>} | null = null;
-      if (source?.kind === "experiment_next_test") {
+      if (source?.kind === "placement_request") {
+        start = {path: "/api/agent/placements", body: {
+          request: source.request, model: source.model, session_id: source.sessionId,
+          run_id: id, catalog_id: source.catalogId,
+        }};
+      } else if (source?.kind === "experiment_next_test") {
         start = {path: "/api/agent/experiment-next-test", body: {
           test_id: source.testId, review_id: source.reviewId, ...source.selection,
         }};
@@ -286,7 +313,7 @@ function App() {
       }
       setPendingId(current.run_id);
       sessionStorage.setItem(runKey, current.run_id);
-      for (let step = current.steps.length; current.status === "running" && step < 4; step++) {
+      for (let step = current.steps.length; current.status === "running" && step < 12; step++) {
         setRun(current);
         current = await request<Run>("/api/agent/run", {run_id: current.run_id});
       }
@@ -309,6 +336,25 @@ function App() {
     }
   }
 
+  function chooseModel(value: string) {
+    setMainModel(value);
+    sessionStorage.setItem("campaign-planner:model", value);
+    const id = crypto.randomUUID().replaceAll("-", "");
+    setConversationId(id);
+    sessionStorage.setItem("campaign-planner:conversation", id);
+  }
+  function startPlacement(request: string, catalogId: string) {
+    sessionStorage.setItem("campaign-planner:conversation", conversationId);
+    navigate("/campaign");
+    void prepare({kind: "placement_request", request, model: mainModel, sessionId: conversationId, catalogId});
+  }
+  const inheritedModel = mode?.agentPlanner?.models.find(item => item.id === mainModel)?.mode === "openrouter"
+    ? {mode: "openrouter" as const, model: mainModel} : {mode: "offline" as const};
+  const composer = mode?.agentPlanner && <AgentComposer options={mode.agentPlanner} model={mainModel}
+    catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
+    onModel={chooseModel} onSubmit={startPlacement} busy={busy || !!packageAction} request={request}
+    onCatalogs={catalogs => setMode(current => current?.agentPlanner
+      ? {...current, agentPlanner: {...current.agentPlanner, catalogs}} : current)} />;
   const result = review(run);
   const waiting = run?.status === "waiting_for_evidence";
   const waitPlanned = (run?.steps[0]?.result as {next_action?: string} | undefined)?.next_action === "wait";
@@ -358,13 +404,15 @@ function App() {
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
           {mode && <span className="mode">{mode.live ? "Live catalog"
-            : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
+            : run?.planner ? "Agent placement planning" : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
         </div>
         {home ? (
           <div className="home">
             <section className="intake" aria-labelledby="page-heading">
               <h1 id="page-heading" tabIndex={-1}>What would you like to prepare?</h1>
-              <p className="intake-intro">Start with a campaign request and review the draft your agent prepares.</p>
+              <p className="intake-intro">Describe the campaign task. Your agent chooses tools and prepares a draft for review.</p>
+              {composer}
+              {error && mode && <p className="error" role="alert">{error}</p>}
               {mode && !mode.live && (
                 <>
                   <div className="sample-request">
@@ -394,7 +442,9 @@ function App() {
                   <span className="label">01 / Prepare</span>
                   <h2 id="request-heading">Campaign request</h2>
                   {mode && <p>{mode.live ? "Recorded preparation is available in sample mode." : run?.request ?? mode.demoRequest}</p>}
-                  {mode && !mode.live && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
+                  {composer}
+                  {mode && !mode.live && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
+                  {run?.status === "needs_input" && <p className="revision" role="status">Agent question · {result?.message}</p>}
                   {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
                   {busy && <p className="compact-progress" role="status">
                     {Object.entries(activitySteps).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
@@ -481,7 +531,8 @@ function App() {
                       <>
                         <p className="revision" role="status">
                           {activePackage.approval ? `Revision ${draft.revision} approved` :
-                            "Ready for approval · Fictional placements"}
+                            draft.placements.some(row => ["creator_supplied", "licensed"].includes(row.source))
+                              ? "Ready for approval · Catalog candidates" : "Ready for approval · Fictional placements"}
                         </p>
                         <div className="package-buttons">
                           {!activePackage.approval && <button onClick={() => changePackage("approve")}
@@ -516,7 +567,7 @@ function App() {
                   <PerformanceReview key={`performance:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
-                    draftModels={mode?.openrouterDraftModels ?? []}
+                    mainModel={inheritedModel}
                     onPrepareNextTest={(reviewId, selection) => void prepare({kind: "next_test", reviewId, selection})}
                     onPackageConflict={message => {
                       setPackageChanged(true);
@@ -527,8 +578,7 @@ function App() {
                   <InstructionTest key={`instructions:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     viewerOrigin={mode.viewerOrigin} request={request}
-                    models={mode.openrouterReviewModels ?? []}
-                    draftModels={mode.openrouterDraftModels ?? []}
+                    mainModel={inheritedModel}
                     onPrepareNextTest={(testId, reviewId, selection) => void prepare({kind: "experiment_next_test", testId, reviewId, selection})}
                     onReview={(testId, selection) => void prepare({kind: "instruction_review", testId, selection})}
                     onPackageConflict={message => {
@@ -541,26 +591,34 @@ function App() {
                 <span className="label">Run details</span>
                 <h2>Agent activity</h2>
                 <p role="status" className="run-status">
-                  {waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
+                  {run?.status === "needs_input" ? "Agent needs input" : waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
                     : result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
                     : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
                     : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
                 </p>
-                <ol>
+                {run?.planner ? <><p className="revision">Main model · {run.planner.settings.model}<br />
+                  Automatic specialist · {run.planner.routing.classifier}<br />
+                  {run.planner.turns.length} of {run.planner.max_turns} model turns</p>
+                  <ol>{run.steps.map((step, index) => <li key={index} className="done">
+                    <span className="step-number" aria-hidden="true">✓</span>{step.tool.replaceAll("_", " ")}
+                    {(step.result as {error?: string}).error && <span> · Tool rejected</span>}
+                  </li>)}</ol>
+                </> : <ol>
                   {Object.entries(activitySteps).map(([tool, label], index) => (
                     <li key={tool} className={completed.has(tool) ? "done" : ""}>
                       <span className="step-number" aria-hidden="true">{completed.has(tool) ? "✓" : index + 1}</span>
                       {label}
                     </li>
                   ))}
-                </ol>
+                </ol>}
                 {result && result.ambiguous.length > 0 && (
                   <details>
                     <summary>{result.ambiguous.length} entries held for review</summary>
                     <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>
                   </details>
                 )}
-                <p className="provenance">{waiting ? "No draft or drafting inference requested"
+                <p className="provenance">{run?.planner ? `${run.planner.settings.mode === "simulated" ? "Simulated main model" : "OpenRouter main model"} · Simulated specialist responses`
+                  : waiting ? "No draft or drafting inference requested"
                   : run?.inference?.settings.mode === "openrouter"
                   ? `OpenRouter inference · ${run.inference.settings.model} · Fictional placements`
                   : "Recorded model decisions · Fictional catalog"}</p>

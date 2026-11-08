@@ -117,3 +117,12 @@ details li + li { margin-top: 8px; }
   .placements li { grid-template-columns: 1fr; gap: 2px; }
 }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+.agent-composer { margin: 24px 0; max-width: 760px; }
+.agent-composer > label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
+.agent-composer textarea { width: 100%; box-sizing: border-box; min-height: 100px; padding: 14px; font: inherit; font-weight: 400; border: 1px solid var(--line, #deddd9); background: #fff; color: inherit; resize: vertical; }
+.agent-composer .performance-controls { margin-top: 12px; }
+.agent-composer select { max-width: 100%; }
+.catalog-import { margin-top: 16px; padding: 12px 0; border-top: 1px solid #deddd9; }
+.catalog-import summary { cursor: pointer; font-size: 14px; }
+.catalog-import input { display: block; max-width: 100%; margin-top: 8px; }

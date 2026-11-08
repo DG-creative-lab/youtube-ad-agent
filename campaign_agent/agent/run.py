@@ -17,6 +17,7 @@ from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests
 from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
+from .planner import PlacementAgent
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
@@ -64,7 +65,8 @@ class RecordedInference:
 
 class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR,
-                 openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None):
+                 openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
+                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
@@ -98,6 +100,9 @@ class AgentRuntime:
                     state TEXT NOT NULL DEFAULT 'pending', receipt TEXT, error TEXT
                 )
             """)
+
+        self.planner = PlacementAgent(self, main_models, transport=main_transport,
+                                      simulator=planner_simulator, classifier=placement_classifier)
 
     def start(self, request, *, run_id=None):
         if request != DEMO_REQUEST:
@@ -234,6 +239,8 @@ class AgentRuntime:
     def resume(self, run_id, max_steps=4):
         if type(max_steps) is not int or not 0 <= max_steps <= 4:
             raise ValueError("The step budget must be between zero and four.")
+        if self.planner.owns(run_id):
+            return self.planner.resume(run_id, max_steps=max_steps)
         for _ in range(max_steps):
             self.operator.require_brand(LOCAL_BRAND)
             if self._resume_openrouter(run_id):
@@ -264,6 +271,8 @@ class AgentRuntime:
         return self.read(run_id)
 
     def read(self, run_id):
+        if self.planner.owns(run_id):
+            return self.planner.read(run_id)
         self.operator.require_brand(LOCAL_BRAND)
         with closing(sqlite3.connect(self.path)) as db:
             db.execute("BEGIN")
