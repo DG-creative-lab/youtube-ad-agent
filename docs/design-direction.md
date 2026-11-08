@@ -25,4 +25,6 @@ Use flat sections, aligned columns and generous separation between decisions. Ke
 
 ## First application and review
 
+The chat composer is one rounded input surface with the model menu and send control inside its footer. Keep source selection and import behind small labelled pills below it. Reveal one options panel at a time, retain typed text when changing models, and keep model/specialist details in the model menu or activity inspector. Preserve visible offline/live provenance. Keep the conversation readable and the current campaign draft distinct from historical message revisions. Menus and panels support keyboard use, Escape and reduced motion.
+
 Apply the visual foundations to the placement workspace and comparison page as those slices are built. Keep palette, type and focus in shared CSS variables so the React planner can use them later. Review the actual content at desktop and narrow widths. Check visible keyboard focus, at least 44px primary interaction targets, long titles, local table overflow, unavailable media and explicit labels for sample, replayed and observed evidence. The first visual review should show the planner's package decision and both comparison variants with representative content.

@@ -265,7 +265,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if not isinstance(data, dict):
                     raise ValueError("Invalid agent request.")
                 if self.path == "/api/agent/placements":
-                    if set(data) != {"request", "model", "session_id", "run_id", "catalog_id"}:
+                    fields = {"request", "model", "session_id", "run_id", "catalog_id"}
+                    if set(data) not in (fields, fields | {"after_message"}):
                         raise ValueError("Supply a request, main model, conversation and catalog.")
                     run_id = agent.planner.start(**data)
                     result = agent.read(run_id)
@@ -445,6 +446,26 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
                     })
+                return
+            if url.path in {"/api/agent/conversations", "/api/agent/conversation"}:
+                if not self.check_operator():
+                    return
+                try:
+                    if agent is None:
+                        raise LookupError('Conversations are available in sample mode.')
+                    if url.path.endswith('/conversations'):
+                        result = agent.planner.conversations.list()
+                    else:
+                        session_id = parse_qs(url.query).get('id', [''])[0]
+                        if not RUN_ID.fullmatch(session_id):
+                            raise LookupError('Invalid conversation.')
+                        result = agent.planner.conversations.read(session_id)
+                except (LookupError, PermissionError):
+                    self.send(404, {"error": "Conversation unavailable."})
+                except sqlite3.Error:
+                    self.send(503, {"error": "Could not load the conversation. Try again."})
+                else:
+                    self.send(200, result)
                 return
             if url.path == "/api/agent/run":
                 if not self.check_operator():
