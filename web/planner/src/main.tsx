@@ -17,6 +17,8 @@ type Draft = {
     review_id: string; source_revision: number; creative_version: string;
     before: string; after: string; reason: string; measure: string;
     original_viewer_path: string; correction: {label: string; note: string};
+    inference?: {mode: string; model: string; prompt_version: string; evidence_id: string;
+      usage: {input_tokens: number | null; output_tokens: number | null; cost_usd: number | null}};
   };
 };
 type PackageReview = {
@@ -37,6 +39,7 @@ type Mode = {
   demoRequest: string;
   viewerOrigin: string;
   openrouterReviewModels: string[];
+  openrouterDraftModels: string[];
   examples: {creative: string; ref: string; title: string}[];
 };
 type RunResult = {revision: number; ambiguous: Placement[]};
@@ -45,6 +48,7 @@ type Run = {
   request: string;
   status: "running" | "ready_for_review";
   steps: {tool: string; result: unknown}[];
+  inference?: {settings: {mode: string; model?: string}};
 };
 
 const stepLabels = {
@@ -65,9 +69,10 @@ const instructionReviewStepLabels = {
   save_test_review: "Save the test assessment",
   finish_test_review: "Prepare the assessment for review",
 };
-type Preparation = {kind: "next_test"; reviewId: string}
+type Preparation = {kind: "next_test"; reviewId: string; selection: ReviewSelection}
   | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
 const runKey = "campaign-planner:last-run";
+const pendingStartKey = "campaign-planner:pending-start";
 const operatorKey = "placement-review:operator";
 type Page = "/" | "/campaign";
 const currentPage = (): Page => location.pathname === "/campaign" ? "/campaign" : "/";
@@ -233,34 +238,46 @@ function App() {
     const id = !source && !stale && run?.status !== "ready_for_review" && pendingId
       ? pendingId
       : crypto.randomUUID().replaceAll("-", "");
-    if (!source) {
-      setPendingId(id);
-      sessionStorage.setItem(runKey, id);
-    }
+    setPendingId(id);
+    sessionStorage.setItem(runKey, id);
     setBusy(true);
     setError("");
     setStale(false);
     if (id !== run?.run_id) setRun(null);
+    let starting = false;
     try {
       let current: Run;
+      let start: {path: string; body: Record<string, string | number>} | null = null;
       if (source?.kind === "instruction_review") {
-        current = await request<Run>("/api/agent/instruction-review", {
+        start = {path: "/api/agent/instruction-review", body: {
           test_id: source.testId,
           ...source.selection,
-        });
+        }};
       } else if (source?.kind === "next_test" && activePackage) {
-        current = await request<Run>("/api/agent/next-test", {
+        start = {path: "/api/agent/next-test", body: {
           campaign_id: activePackage.package.campaign_id, revision: activePackage.package.revision,
           fingerprint: activePackage.fingerprint, review_id: source.reviewId,
-        });
+          ...source.selection,
+        }};
+      } else if (!stale) {
+        const savedStart = sessionStorage.getItem(pendingStartKey);
+        if (savedStart) start = JSON.parse(savedStart);
+      }
+      if (start) {
+        sessionStorage.setItem(pendingStartKey, JSON.stringify(start));
+        starting = true;
+        current = await request<Run>(start.path, start.body);
+        starting = false;
+        sessionStorage.removeItem(pendingStartKey);
       } else if (id === pendingId && !stale) {
-        current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(id))
-          .catch(failure => {
-            if (!(failure instanceof RequestError && failure.status === 404)) throw failure;
-            return request<Run>("/api/agent/run", {run_id: id, request: mode.demoRequest});
-          });
+        current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(id));
       } else {
-        current = await request<Run>("/api/agent/run", {run_id: id, request: mode.demoRequest});
+        const demoStart = {path: "/api/agent/run", body: {run_id: id, request: mode.demoRequest}};
+        sessionStorage.setItem(pendingStartKey, JSON.stringify(demoStart));
+        starting = true;
+        current = await request<Run>(demoStart.path, demoStart.body);
+        starting = false;
+        sessionStorage.removeItem(pendingStartKey);
       }
       setPendingId(current.run_id);
       sessionStorage.setItem(runKey, current.run_id);
@@ -272,6 +289,14 @@ function App() {
       if (result) setDraft(await request<Draft>("/api/campaign?revision=" + result.revision));
       setRun(current);
     } catch (failure) {
+      if (failure instanceof RequestError && [400, 403, 404, 409].includes(failure.status)) {
+        sessionStorage.removeItem(pendingStartKey);
+        if (starting || failure.status === 404) {
+          sessionStorage.removeItem(runKey);
+          setPendingId(null);
+          setRun(null);
+        }
+      }
       setStale(failure instanceof RequestError && failure.status === 409);
       setError(failure instanceof Error ? failure.message : "Could not prepare the campaign.");
     } finally {
@@ -324,7 +349,8 @@ function App() {
       <main>
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
-          {mode && <span className="mode">{mode.live ? "Live catalog" : "Offline sample"}</span>}
+          {mode && <span className="mode">{mode.live ? "Live catalog"
+            : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
         </div>
         {home ? (
           <div className="home">
@@ -386,7 +412,16 @@ function App() {
                     {mode && <a className="text-action" href={mode.viewerOrigin + draft.instruction_test.original_viewer_path}>
                       Open original comparison <span aria-hidden="true">↗</span>
                     </a>}
-                    <p className="provenance">Draft wording · Recorded model response</p>
+                    <p className="provenance">{draft.instruction_test.inference?.mode === "openrouter"
+                      ? `Draft wording · OpenRouter · ${draft.instruction_test.inference.model}`
+                      : "Draft wording · Recorded model response"}</p>
+                    {draft.instruction_test.inference && <details className="evidence">
+                      <summary>Draft inference details</summary>
+                      <p className="revision">Prompt {draft.instruction_test.inference.prompt_version} · Evidence {draft.instruction_test.inference.evidence_id.slice(0, 12)}</p>
+                      <p className="revision">Tokens: {draft.instruction_test.inference.usage.input_tokens ?? "unknown"} input,
+                        {" "}{draft.instruction_test.inference.usage.output_tokens ?? "unknown"} output · Reported cost: {draft.instruction_test.inference.usage.cost_usd === null
+                          ? "unknown" : `$${draft.instruction_test.inference.usage.cost_usd}`}</p>
+                    </details>}
                   </section>}
                   {activePackage && <dl className="setup-details">
                     {Object.entries(activePackage.package.proposed_setup).map(([label, value]) => (
@@ -468,7 +503,8 @@ function App() {
                   <PerformanceReview key={activePackage.fingerprint} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
-                    onPrepareNextTest={reviewId => void prepare({kind: "next_test", reviewId})}
+                    draftModels={mode?.openrouterDraftModels ?? []}
+                    onPrepareNextTest={(reviewId, selection) => void prepare({kind: "next_test", reviewId, selection})}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);
@@ -509,7 +545,9 @@ function App() {
                     <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>
                   </details>
                 )}
-                <p className="provenance">Recorded model decisions · Fictional catalog</p>
+                <p className="provenance">{run?.inference?.settings.mode === "openrouter"
+                  ? `OpenRouter inference · ${run.inference.settings.model} · Fictional placements`
+                  : "Recorded model decisions · Fictional catalog"}</p>
               </aside>
             </div>
           </div>
