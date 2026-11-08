@@ -10,6 +10,8 @@ from campaign_agent.handoff import package_fingerprint
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
 from scripts.campaign_drafts import PackageConflict
 from .planning_models import OpenRouterPlanner, SimulatedPlanner
+from .conversations import CampaignConversations
+from .replies import REPLY_VERSION, clarification, reply, verified_result
 
 
 ID = re.compile(r'[0-9a-f]{32}')
@@ -39,6 +41,7 @@ class PlacementAgent:
                     run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
                     PRIMARY KEY(run_id,position));
             ''')
+        self.conversations = CampaignConversations(self)
 
     def options(self):
         self.owner.operator.require_brand(LOCAL_BRAND)
@@ -56,11 +59,13 @@ class PlacementAgent:
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
 
-    def start(self, request, model, session_id, run_id, catalog_id):
+    def start(self, request, model, session_id, run_id, catalog_id, after_message=None):
         self.owner.operator.require_brand(LOCAL_BRAND)
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
                 or not isinstance(request, str) or not request.strip() or len(request) > 1500):
             raise ValueError('Supply a request and valid session, run and catalog references.')
+        if after_message is not None and (type(after_message) is not int or not 0 <= after_message < 2**63):
+            raise ValueError('Supply a valid conversation message reference.')
         settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -71,22 +76,18 @@ class PlacementAgent:
                 if (source['request'], source['settings'], source['session_id'], source['catalog_id']) != (
                         request, settings, session_id, catalog_id):
                     raise ValueError('This run ID belongs to a different request.')
+                if source.get('after_message') != after_message:
+                    raise ValueError('This run ID belongs to a different conversation turn.')
                 return run_id
-            session = db.execute('SELECT client_id,brand_id,actor_id,settings FROM planner_sessions WHERE id=?',
-                                 (session_id,)).fetchone()
             expected = (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.owner.operator.id, json.dumps(settings))
-            if session and session != expected:
-                raise PermissionError('Start a new conversation to change its model or scope.')
             self.catalogs.read(db, catalog_id)
             current = self.drafts._read(db)
-            previous = [{'request': json.loads(snapshot)['request'][:500], 'outcome': ({'revision': json.loads(outcome).get('revision'), 'message': json.loads(outcome).get('message', '')[:200]} if outcome else None)}
-                        for snapshot, outcome in db.execute(
-                            'SELECT snapshot,outcome FROM planner_jobs WHERE session_id=? ORDER BY rowid DESC LIMIT 5',
-                            (session_id,))]
+            previous, truncated = self.conversations.begin(db, session_id, settings, run_id, request,
+                                                          catalog_id, current['revision'], after_message)
             context = {'request': request, 'session_id': session_id, 'catalog_id': catalog_id,
                        'revision': current['revision'], 'settings': settings,
-                       'conversation': list(reversed(previous)), 'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
-            db.execute('INSERT INTO planner_sessions VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING', (session_id, *expected))
+                       'conversation': previous, 'conversation_truncated': truncated, 'after_message': after_message,
+                       'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
             db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
                        (*expected[:3], model))
             db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?)',
@@ -97,18 +98,28 @@ class PlacementAgent:
 
     def _context(self, db, run_id):
         self.owner.operator.require_brand(LOCAL_BRAND)
-        self.owner._owned_run(db, run_id)
+        _, status = self.owner._owned_run(db, run_id)
+        if status != 'running':
+            raise PackageConflict('This request is no longer active. Read the latest conversation.')
         source = json.loads(db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()[0])
+        if self.conversations.session(db, source['session_id']) != source['settings']:
+            raise PermissionError('The conversation scope or model has changed.')
         if self.drafts._read(db)['revision'] != source['revision']:
             raise PackageConflict('The campaign changed. Start a new placement request from the latest revision.')
         return source
 
     def _history(self, db, run_id):
-        return [{'tool': tool, 'result': json.loads(result),
-                 'call_id': json.loads(receipt)['call_id'], 'arguments': json.loads(receipt)['arguments']}
-                for tool, result, receipt in db.execute(
-                    'SELECT s.tool,s.result,t.receipt FROM agent_steps s JOIN planner_turns t '
-                    'ON t.run_id=s.run_id AND t.position=s.position WHERE s.run_id=? ORDER BY s.position', (run_id,))]
+        history = []
+        for tool, result, receipt in db.execute(
+                'SELECT s.tool,s.result,t.receipt FROM agent_steps s JOIN planner_turns t '
+                'ON t.run_id=s.run_id AND t.position=s.position WHERE s.run_id=? ORDER BY s.position', (run_id,)):
+            result, receipt = json.loads(result), json.loads(receipt)
+            reply_status = {'respond': 'answered', 'ask_clarification': 'needs_input'}.get(tool)
+            if reply_status and 'error' not in result:
+                result = verified_result(result, reply_status)
+            history.append({'tool': tool, 'result': result,
+                            'call_id': receipt['call_id'], 'arguments': receipt['arguments']})
+        return history
 
     def _classify(self, run_id):
         with closing(sqlite3.connect(self.path)) as db, db:
@@ -164,6 +175,7 @@ class PlacementAgent:
                 if not row:
                     if source['settings']['mode'] == 'openrouter':
                         self.remote.require_available(source['settings'])
+                        self.remote.prepare_turn(source, history, source['settings'])
                     db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL)", (run_id, position))
             if receipt is None:
                 try:
@@ -209,10 +221,12 @@ class PlacementAgent:
                            (run_id, position, receipt['tool'], json.dumps(result)))
                 if status == 'running' and position + 1 >= source['max_turns']:
                     result, status = {'revision': source['revision'], 'ambiguous': [],
-                                      'message': 'The turn allowance is exhausted. Start a new request with more context.'}, 'needs_input'
+                                      'message': 'The turn allowance is exhausted. Start a new request with more context.',
+                                      'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
                 if status != 'running':
                     db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
                     db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(result), run_id))
+                    self.conversations.finish(db, run_id, result, status)
         return self.read(run_id)
 
     def _tool(self, db, run_id, source, history, call, classified):
@@ -253,11 +267,14 @@ class PlacementAgent:
                           'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
             return {'revision': saved['revision'], 'ambiguous': ambiguous,
                     'message': 'Placement draft saved for package review. Classifications are simulated.'}, 'ready_for_review'
-        if name == 'ask_clarification' and set(args) == {'question'}:
-            question = args['question']
-            if not isinstance(question, str) or not question.strip() or len(question) > 500:
-                raise ValueError('Provide a bounded question')
-            return {'revision': source['revision'], 'ambiguous': [], 'message': question}, 'needs_input'
+        if name == 'ask_clarification' and set(args) == {'reason'}:
+            return clarification(args['reason'], source['revision']), 'needs_input'
+        if name == 'respond' and set(args) == {'topic'}:
+            draft = self.drafts._read(db)
+            approved = False
+            if args['topic'] == 'approval_and_launch':
+                approved = self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None
+            return reply(args['topic'], draft, approved=approved), 'answered'
         raise ValueError('Unknown tool')
 
     def read(self, run_id):
@@ -269,6 +286,6 @@ class PlacementAgent:
             turns = [{'position': position, 'state': state, 'inference': json.loads(receipt).get('inference') if receipt else None}
                      for position, state, receipt in db.execute('SELECT position,state,receipt FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,))]
             return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(db, run_id),
-                    'result': json.loads(outcome) if outcome else None,
+                    'result': verified_result(json.loads(outcome), status) if outcome else None,
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
                                 'routing': source['routing'], 'max_turns': source['max_turns'], 'turns': turns}}

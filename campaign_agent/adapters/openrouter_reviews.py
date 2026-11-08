@@ -15,6 +15,7 @@ ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 PROMPT_VERSION = "instruction-test-review-v2"
 MAX_OUTPUT_TOKENS = 512
 MAX_RESPONSE_BYTES = 64_000
+MAX_REQUEST_BYTES = 32_000
 MODEL_ID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:free")
 ASSESSMENT_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -94,15 +95,19 @@ class OpenRouterInference:
                 pass
         return {output_key: output, **receipt}
 
-    def chat(self, context, settings, body):
-        self.require_available(settings)
+    def encode_request(self, settings, body):
         body = {**body, "model": settings["model"], "stream": False,
                 "max_tokens": MAX_OUTPUT_TOKENS,
                 "provider": {"require_parameters": True, "allow_fallbacks": False,
                              "max_price": {"prompt": 0, "completion": 0, "request": 0}}}
         encoded = json.dumps(body).encode()
-        if len(encoded) > 32_000:
+        if len(encoded) > MAX_REQUEST_BYTES:
             raise ReviewInferenceError("The inference input exceeds the configured request limit.")
+        return encoded
+
+    def chat(self, context, settings, body):
+        self.require_available(settings)
+        encoded = self.encode_request(settings, body)
         request = Request(ENDPOINT, data=encoded, headers={
             "Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"], "Content-Type": "application/json",
         })

@@ -3,6 +3,8 @@ import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
 import {AgentComposer} from "./AgentComposer";
+import {CampaignChat} from "./CampaignChat";
+import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
 import type {ReviewSelection} from "./InstructionTest";
@@ -45,13 +47,13 @@ type Mode = {
   agentPlanner?: PlannerOptions;
   examples: {creative: string; ref: string; title: string}[];
 };
-type RunResult = {revision: number; ambiguous: Placement[]; outcome?: string; message?: string};
+type RunResult = {revision: number; ambiguous: Placement[]; outcome?: string; message?: string; needs_verification?: boolean};
 type Run = {
   run_id: string;
   request: string;
-  status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input";
+  status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
   result?: RunResult | null;
-  planner?: {settings: {mode: string; model: string}; max_turns: number; turns: unknown[]; routing: {classifier: string}};
+  planner?: {session_id: string; settings: {mode: string; model: string}; max_turns: number; turns: unknown[]; routing: {classifier: string}};
   steps: {tool: string; result: unknown}[];
   inference?: {settings: {mode: string; model?: string}};
 };
@@ -74,7 +76,7 @@ const instructionReviewStepLabels = {
   save_test_review: "Save the test assessment",
   finish_test_review: "Prepare the assessment for review",
 };
-type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string}
+type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string; afterMessage: number}
   | {kind: "next_test"; reviewId: string; selection: ReviewSelection}
   | {kind: "experiment_next_test"; testId: string; reviewId: string; selection: ReviewSelection}
   | {kind: "instruction_review"; testId: string; selection: ReviewSelection};
@@ -120,6 +122,9 @@ function App() {
   const [mainModel, setMainModel] = useState("");
   const [placementCatalog, setPlacementCatalog] = useState(() => sessionStorage.getItem("campaign-planner:catalog") ?? "");
   const [conversationId, setConversationId] = useState(() => sessionStorage.getItem("campaign-planner:conversation") || crypto.randomUUID().replaceAll("-", ""));
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [messageText, setMessageText] = useState("");
   const [draft, setDraft] = useState<Draft>();
   const [run, setRun] = useState<Run | null>(null);
   const [pendingId, setPendingId] = useState(() => sessionStorage.getItem(runKey));
@@ -166,7 +171,18 @@ function App() {
         if (!workspace.agentPlanner?.catalogs.some(item => item.id === placementCatalog)) {
           setPlacementCatalog(workspace.agentPlanner?.catalogs[0]?.id ?? "");
         }
-        const savedId = sessionStorage.getItem(runKey);
+          const chats = workspace.live ? [] : await request<ConversationSummary[]>("/api/agent/conversations");
+          setConversations(chats);
+          const savedConversation = sessionStorage.getItem("campaign-planner:conversation");
+          const pendingStart = sessionStorage.getItem(pendingStartKey);
+          const restore = chats.find(item => item.id === savedConversation)
+            ?? (currentPage() === "/campaign" && !savedConversation && !pendingStart ? chats[0] : undefined);
+          if (!workspace.live && restore) {
+            await openConversation(restore.id, false);
+            setMode(workspace);
+            return;
+          }
+          const savedId = sessionStorage.getItem(runKey);
         try {
           if (workspace.live || !savedId) return;
           const previous = await request<Run>("/api/agent/run?id=" + encodeURIComponent(savedId));
@@ -256,8 +272,8 @@ function App() {
   }
 
   async function prepare(source?: Preparation) {
-    if (!mode || mode.live || busy || packageAction) return;
-    if (source && source.kind !== "placement_request" && (!activePackage || needsLatest)) return;
+    if (!mode || mode.live || busy || packageAction) return false;
+    if (source && source.kind !== "placement_request" && (!activePackage || needsLatest)) return false;
     const id = !source && !stale && run?.status !== "ready_for_review" && pendingId
       ? pendingId
       : crypto.randomUUID().replaceAll("-", "");
@@ -268,13 +284,14 @@ function App() {
     setStale(false);
     if (id !== run?.run_id) setRun(null);
     let starting = false;
+    let chatId = source?.kind === "placement_request" ? source.sessionId : run?.planner?.session_id;
     try {
       let current: Run;
       let start: {path: string; body: Record<string, string | number>} | null = null;
       if (source?.kind === "placement_request") {
         start = {path: "/api/agent/placements", body: {
           request: source.request, model: source.model, session_id: source.sessionId,
-          run_id: id, catalog_id: source.catalogId,
+          run_id: id, catalog_id: source.catalogId, after_message: source.afterMessage,
         }};
       } else if (source?.kind === "experiment_next_test") {
         start = {path: "/api/agent/experiment-next-test", body: {
@@ -296,6 +313,7 @@ function App() {
         if (savedStart) start = JSON.parse(savedStart);
       }
       if (start) {
+        if (start.path === "/api/agent/placements") chatId = String(start.body.session_id);
         sessionStorage.setItem(pendingStartKey, JSON.stringify(start));
         starting = true;
         current = await request<Run>(start.path, start.body);
@@ -312,14 +330,16 @@ function App() {
         sessionStorage.removeItem(pendingStartKey);
       }
       setPendingId(current.run_id);
+      if (current.planner) chatId = current.planner.session_id;
       sessionStorage.setItem(runKey, current.run_id);
       for (let step = current.steps.length; current.status === "running" && step < 12; step++) {
         setRun(current);
         current = await request<Run>("/api/agent/run", {run_id: current.run_id});
       }
       const result = review(current);
-      if (result) setDraft(await request<Draft>("/api/campaign?revision=" + result.revision));
+      if (result) setDraft(await request<Draft>("/api/campaign"));
       setRun(current);
+      return true;
     } catch (failure) {
       if (failure instanceof RequestError && [400, 403, 404, 409].includes(failure.status)) {
         sessionStorage.removeItem(pendingStartKey);
@@ -331,27 +351,105 @@ function App() {
       }
       setStale(failure instanceof RequestError && failure.status === 409);
       setError(failure instanceof Error ? failure.message : "Could not prepare the campaign.");
+      return false;
+    } finally {
+      if (chatId) {
+        try {await refreshConversation(chatId);} catch (failure) {
+          if (!(failure instanceof RequestError && failure.status === 404)) {
+            setError(previous => previous || "Could not refresh saved messages. Reload before sending another message.");
+          }
+        }
+      }
+      setBusy(false);
+    }
+  }
+
+  async function refreshConversation(id: string) {
+    const [chat, chats] = await Promise.all([
+      request<Conversation>("/api/agent/conversation?id=" + encodeURIComponent(id)),
+      request<ConversationSummary[]>("/api/agent/conversations"),
+    ]);
+    setConversation(chat);
+    setConversations(chats);
+  }
+
+  function newConversation(model = mainModel, preserveText = false) {
+    setMainModel(model);
+    sessionStorage.setItem("campaign-planner:model", model);
+    const id = crypto.randomUUID().replaceAll("-", "");
+    setConversationId(id);
+    sessionStorage.setItem("campaign-planner:conversation", id);
+    sessionStorage.removeItem(runKey);
+    sessionStorage.removeItem(pendingStartKey);
+    setConversation(null);
+    setRun(null);
+    setPendingId(null);
+    if (!preserveText) setMessageText("");
+    setStale(false);
+    setError("");
+    return id;
+  }
+
+  async function openConversation(id: string, navigateToWorkspace = true) {
+    if (busy || packageAction) return;
+    setBusy(true);
+    setError("");
+    try {
+      const [chat, currentDraft] = await Promise.all([
+        request<Conversation>("/api/agent/conversation?id=" + encodeURIComponent(id)),
+        request<Draft>("/api/campaign"),
+      ]);
+      const latest = chat.latest_run_id
+        ? await request<Run>("/api/agent/run?id=" + encodeURIComponent(chat.latest_run_id)) : null;
+      setConversation(chat);
+      setDraft(currentDraft);
+      setConversationId(id);
+      setMainModel(chat.settings.model);
+      setRun(latest);
+      setPendingId(chat.latest_run_id);
+      setMessageText("");
+      setStale(false);
+      const catalog = chat.messages.at(-1)?.catalog_id;
+      if (catalog) {
+        setPlacementCatalog(catalog);
+        sessionStorage.setItem("campaign-planner:catalog", catalog);
+      }
+      sessionStorage.setItem("campaign-planner:conversation", id);
+      sessionStorage.setItem("campaign-planner:model", chat.settings.model);
+      if (chat.latest_run_id) sessionStorage.setItem(runKey, chat.latest_run_id);
+      // A failed start's original payload must remain available when restoring that same run.
+      const pendingStart = sessionStorage.getItem(pendingStartKey);
+      if (pendingStart && JSON.parse(pendingStart).body?.run_id !== chat.latest_run_id) sessionStorage.removeItem(pendingStartKey);
+      if (navigateToWorkspace) navigate("/campaign");
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not open the conversation.");
     } finally {
       setBusy(false);
     }
   }
 
   function chooseModel(value: string) {
-    setMainModel(value);
-    sessionStorage.setItem("campaign-planner:model", value);
-    const id = crypto.randomUUID().replaceAll("-", "");
-    setConversationId(id);
-    sessionStorage.setItem("campaign-planner:conversation", id);
+    newConversation(value, true);
   }
-  function startPlacement(request: string, catalogId: string) {
+  async function startPlacement(request: string, catalogId: string) {
     sessionStorage.setItem("campaign-planner:conversation", conversationId);
     navigate("/campaign");
-    void prepare({kind: "placement_request", request, model: mainModel, sessionId: conversationId, catalogId});
+    const pending = sessionStorage.getItem(pendingStartKey);
+    if (pending) {
+      const saved = JSON.parse(pending);
+      if (saved.path === "/api/agent/placements" && saved.body.session_id === conversationId
+          && saved.body.request === request && saved.body.catalog_id === catalogId && saved.body.model === mainModel) {
+        return prepare();
+      }
+    }
+    return prepare({kind: "placement_request", request, model: mainModel, sessionId: conversationId, catalogId,
+                    afterMessage: conversation?.latest_message ?? 0});
   }
   const inheritedModel = mode?.agentPlanner?.models.find(item => item.id === mainModel)?.mode === "openrouter"
     ? {mode: "openrouter" as const, model: mainModel} : {mode: "offline" as const};
   const composer = mode?.agentPlanner && <AgentComposer options={mode.agentPlanner} model={mainModel}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
+    followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
     onModel={chooseModel} onSubmit={startPlacement} busy={busy || !!packageAction} request={request}
     onCatalogs={catalogs => setMode(current => current?.agentPlanner
       ? {...current, agentPlanner: {...current.agentPlanner, catalogs}} : current)} />;
@@ -383,7 +481,14 @@ function App() {
 
   function openExample() {
     navigate("/campaign");
-    if (!result && !busy) void prepare();
+    if (!mode || result || busy) return;
+    if (pendingId && !stale) {
+      void prepare();
+    } else {
+      const sessionId = newConversation("simulated");
+      void prepare({kind: "placement_request", request: mode.demoRequest, model: "simulated", sessionId,
+                    catalogId: placementCatalog || mode.agentPlanner?.catalogs[0]?.id || "", afterMessage: 0});
+    }
   }
 
   return (
@@ -392,12 +497,23 @@ function App() {
         <div className="identity"><span className="mark" aria-hidden="true" />DG Creative Lab</div>
         <nav aria-label="Workspace">
           <span className="rail-label">Workspace</span>
-          <a className="new-request" href="/" onClick={event => follow(event, "/")}
+          <a className="new-request" href="/" onClick={event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            if (!busy && !packageAction) {newConversation(); navigate("/");}
+          }}
              aria-current={home ? "page" : undefined}><span aria-hidden="true">+</span> New request</a>
           <a href="/campaign" onClick={event => follow(event, "/campaign")}
              aria-current={!home ? "page" : undefined}>Campaign</a>
           <a href="/placements">Placements <span aria-hidden="true">↗</span></a>
         </nav>
+        {conversations.length > 0 && <label className="saved-conversations">Saved conversations
+          <select aria-label="Saved conversations" value={conversation?.id ?? ""} disabled={busy || !!packageAction}
+            onChange={event => {if (event.target.value) void openConversation(event.target.value);}}>
+            <option value="">Choose a conversation</option>
+            {conversations.map(chat => <option key={chat.id} value={chat.id}>{chat.title}</option>)}
+          </select>
+        </label>}
         <div className="rail-footer">Campaign workspace</div>
       </aside>
       <main>
@@ -415,10 +531,6 @@ function App() {
               {error && mode && <p className="error" role="alert">{error}</p>}
               {mode && !mode.live && (
                 <>
-                  <div className="sample-request">
-                    <span className="label">Example request</span>
-                    <p>{mode.demoRequest}</p>
-                  </div>
                   <button className="example-action" onClick={openExample}>
                     {exampleAction} <span aria-hidden="true">↗</span>
                   </button>
@@ -440,11 +552,10 @@ function App() {
               <div className="main-column">
                 <section className="request" aria-labelledby="request-heading">
                   <span className="label">01 / Prepare</span>
-                  <h2 id="request-heading">Campaign request</h2>
-                  {mode && <p>{mode.live ? "Recorded preparation is available in sample mode." : run?.request ?? mode.demoRequest}</p>}
+                  <h2 id="request-heading">Conversation</h2>
+                  <CampaignChat conversation={conversation} busy={busy} />
                   {composer}
                   {mode && !mode.live && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
-                  {run?.status === "needs_input" && <p className="revision" role="status">Agent question · {result?.message}</p>}
                   {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
                   {busy && <p className="compact-progress" role="status">
                     {Object.entries(activitySteps).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
@@ -591,7 +702,7 @@ function App() {
                 <span className="label">Run details</span>
                 <h2>Agent activity</h2>
                 <p role="status" className="run-status">
-                  {run?.status === "needs_input" ? "Agent needs input" : waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
+                  {result?.needs_verification ? "Earlier reply needs verification" : run?.status === "superseded" ? "Request superseded by a follow-up" : run?.status === "answered" ? "Reply saved" : run?.status === "needs_input" ? "Agent needs input" : waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
                     : result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
                     : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
                     : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
