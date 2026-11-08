@@ -18,6 +18,7 @@ type Test = {
   evidence: Evidence;
   needs_review: boolean;
   review: {
+    id: string;
     created_at: string;
     evidence: Evidence;
     assessment: {kind: string; title: string; reason: string};
@@ -33,6 +34,8 @@ type Props = {
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
   onReview: (testId: string, selection: ReviewSelection) => void;
   models: string[];
+  draftModels: string[];
+  onPrepareNextTest: (testId: string, reviewId: string, selection: ReviewSelection) => void;
   onPackageConflict: (message: string) => void;
 };
 
@@ -41,13 +44,15 @@ const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFr
 const label = (arm: string) => arm === "original" ? "Original instructions" : "Revised instructions";
 
 export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin, request,
-                                 onReview, onPackageConflict, models}: Props) {
+                                 onReview, onPackageConflict, models, draftModels, onPrepareNextTest}: Props) {
   const [test, setTest] = useState<Test | null>(null);
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reviewMode, setReviewMode] = useState("offline");
   const [model, setModel] = useState("");
+  const [draftMode, setDraftMode] = useState("offline");
+  const [draftModel, setDraftModel] = useState("");
   const operation = useRef<string | null>(null);
   const query = new URLSearchParams({revision: String(revision), fingerprint}).toString();
 
@@ -88,6 +93,15 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
     } else {
       onReview(test.id, {mode: "openrouter", model, operation_id: operation.current});
     }
+  }
+
+  const canDraft = test?.review?.assessment.kind === "prepare_another_test";
+  function planNextStep() {
+    if (!test?.review || test.needs_review || working) return;
+    const operation_id = crypto.randomUUID().replaceAll("-", "");
+    const selection: ReviewSelection = canDraft && draftMode === "openrouter"
+      ? {mode: "openrouter", model: draftModel, operation_id} : {mode: "offline", operation_id};
+    onPrepareNextTest(test.id, test.review.id, selection);
   }
 
   return (
@@ -160,6 +174,26 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
             </p>}
             <h3>{test.review.assessment.title}</h3>
             <p className="revision">{test.review.assessment.reason}</p>
+            {!test.needs_review && <div className="performance-controls">
+              {canDraft && <label>Next draft mode
+                <select value={draftMode} onChange={event => setDraftMode(event.target.value)} disabled={working}>
+                  <option value="offline">Offline</option>
+                  <option value="openrouter" disabled={!draftModels.length}>OpenRouter</option>
+                </select>
+              </label>}
+              {canDraft && draftMode === "openrouter" && <label>Next draft model
+                <select value={draftModel} onChange={event => setDraftModel(event.target.value)} disabled={working}>
+                  <option value="">Choose a model</option>
+                  {draftModels.map(id => <option key={id} value={id}>{id}</option>)}
+                </select>
+              </label>}
+              <button onClick={planNextStep} disabled={working || (canDraft && draftMode === "openrouter" && !draftModel)}>
+                Plan next step
+              </button>
+            </div>}
+            {!test.needs_review && <p className="revision">{canDraft
+              ? "Prepare another instruction draft using the current approved comparison as the baseline. Approval is separate."
+              : "The agent will record that more evidence is needed. No draft or drafting model request will be created."}</p>}
             {test.review.evidence.correction && <p className="revision">
               Buyer correction used · {test.review.evidence.correction.label}. {test.review.evidence.correction.note}
             </p>}

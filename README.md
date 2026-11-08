@@ -56,6 +56,12 @@ After a performance review with an active **Keep takes** correction, choose **Dr
 
 Resume uses the saved provider receipt without another request. The application rechecks the approved content and active correction before dispatch, when accepting the response and when saving the revision. The writer also verifies that the saved wording matches its approved components. A rejected start clears its placeholder; an interrupted start retains the exact operation for retry, and an unavailable saved run never starts a different campaign. A changed package or correction requires a fresh review. Provider tests use authored simulated responses; live drafting quality has not been verified.
 
+### Continue from an experiment assessment
+
+After **Review instruction test**, choose **Plan next step**. The agent checks the latest saved assessment against current activity, the buyer correction and the approved package. If it calls for more evidence, the run records **Waiting for more evidence** without creating a draft or making a drafting inference request. Review again after more activity before planning another step.
+
+If the verified assessment supports another instruction test, the agent prepares a new unapproved revision. **Next draft mode** defaults to **Offline**, with the separately configured OpenRouter drafting models available as an option. The current approved revised comparison becomes the next baseline; this does not declare it a winner. The draft links its source experiment and assessment, preserves the recordings and placements, and requires package approval before a new experiment can start. Earlier experiments, reviews and viewer assignments remain intact. Repeated or interrupted preparation reuses its run and provider receipt.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

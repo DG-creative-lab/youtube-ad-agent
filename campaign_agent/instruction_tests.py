@@ -206,6 +206,50 @@ class InstructionTests:
         )
         return {"id": review_id, **review}
 
+    def next_test_context(self, db, test_id, review_id):
+        """Validate a current experiment assessment and pin the approved revised arm as baseline."""
+        self.drafts.operator.require_brand(LOCAL_BRAND)
+        test = self._test(db, test_id)
+        row = db.execute(
+            "SELECT id, snapshot FROM instruction_test_reviews WHERE test_id = ? ORDER BY rowid DESC LIMIT 1",
+            (test_id,),
+        ).fetchone()
+        if row is None or row[0] != review_id:
+            raise PackageConflict("Choose the latest saved assessment for this instruction test.")
+        saved = json.loads(row[1])
+        try:
+            assessment = self.validate_assessment(saved["evidence"], saved["assessment"])
+        except ValueError:
+            raise PackageConflict("Review the instruction test again to verify its assessment.") from None
+        if assessment != saved["assessment"] or saved["evidence"] != self._evidence(db, test):
+            raise PackageConflict("Activity or the buyer correction changed. Review the instruction test again.")
+        package = self.drafts.require_approved_package(
+            db, test["campaign_id"], test["revision"], test["fingerprint"],
+        )["package"]
+        self._verify_media(test)
+        group = next(group for group in package["groups"] if group["creative_version"] == test["creative_version"])
+        revised = next(version for version in test["versions"] if version["arm"] == "revised")
+        if group["content"] != revised["content"]:
+            raise PackageConflict("The approved baseline differs from the reviewed experiment.")
+        return {
+            "package": package, "comparison": group["content"],
+            "correction": saved["evidence"]["correction"],
+            "next_action": "draft" if assessment["kind"] == "prepare_another_test" else "wait",
+            "experiment_review": {"id": review_id, **saved},
+            "review": {"id": review_id, "test_id": test_id, "fingerprint": test["fingerprint"],
+                       "proposal": {"creative_version": test["creative_version"],
+                                    "reason": assessment["reason"],
+                                    "measure": "Compare completions per assigned visit in a new instruction experiment."}},
+        }
+
+    def save_next_test(self, db, source, instruction, *, inference=None):
+        context = self.next_test_context(db, **source)
+        if context["next_action"] != "draft":
+            raise PackageConflict("This assessment calls for more evidence, not another draft.")
+        return self.drafts.save_instruction_test(
+            db, context["package"], context["review"], context["correction"], instruction, inference=inference,
+        )
+
     @staticmethod
     def validate_assessment(context, assessment):
         if not isinstance(assessment, dict):
