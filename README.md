@@ -48,6 +48,14 @@ The model selects a constrained reason code. The application checks that code ag
 
 An interrupted run can reuse a saved provider receipt through **Resume preparation**. A request with an unknown outcome or a failed response consumes its allowance. A new deliberate review creates a new operation. Integration verification uses simulated responses, including receipt recovery, timeouts, malformed output, rejected permissions and budget checks.
 
+### Next-test drafting models
+
+**Prepare next test** also defaults to recorded offline wording. To offer OpenRouter drafting, enable models separately with `--openrouter-draft-model 'provider/model:free'` when starting the server. This flag can be combined with the review-model flag. The server uses the same `OPENROUTER_API_KEY` environment variable and one-request, zero-price, 512-token limits.
+
+After a performance review with an active **Keep takes** correction, choose **Draft mode** and **Draft model**, then **Prepare next test**. The model receives the saved sample delivery, observed local activity, comparison text and buyer correction. It selects approved components for playback, comparison focus and a neutral choice. The application validates those IDs and assembles the viewer text: both takes must be finished, with no preferred take or added product claims. Free-form provider text is rejected. The workspace shows original and proposed wording, the correction and inference provenance. Recordings and placements remain fixed, and the new revision requires approval.
+
+Resume uses the saved provider receipt without another request. The application rechecks the approved content and active correction before dispatch, when accepting the response and when saving the revision. The writer also verifies that the saved wording matches its approved components. A rejected start clears its placeholder; an interrupted start retains the exact operation for retry, and an unavailable saved run never starts a different campaign. A changed package or correction requires a fresh review. Provider tests use authored simulated responses; live drafting quality has not been verified.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

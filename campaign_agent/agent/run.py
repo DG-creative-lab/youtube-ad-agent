@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+from campaign_agent.creatives import render_instruction_choices
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
@@ -15,6 +16,7 @@ from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests
 from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
+from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
@@ -60,7 +62,7 @@ class RecordedInference:
 
 class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR,
-                 openrouter_models=(), review_transport=None):
+                 openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
@@ -69,6 +71,7 @@ class AgentRuntime:
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
+        self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -108,28 +111,46 @@ class AgentRuntime:
             self._owned_run(db, run_id)
         return run_id
 
-    def start_next_test(self, campaign_id, revision, fingerprint, review_id):
+    def start_next_test(self, campaign_id, revision, fingerprint, review_id, *,
+                        mode="offline", model=None, operation_id=None):
         self.drafts._package_scope(campaign_id, revision)
         if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
                for value in (fingerprint, review_id)):
             raise ValueError("Choose a valid performance review.")
         source = {"campaign_id": campaign_id, "revision": revision,
                   "fingerprint": fingerprint, "review_id": review_id}
-        run_id = package_fingerprint({
-            "client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id,
-            "actor": self.operator.id, "request": NEXT_TEST_REQUEST, "source": source,
-        })[:32]
+        if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
+            raise ValueError("Choose offline or OpenRouter drafting.")
+        if mode == "offline" and model is not None:
+            raise ValueError("Offline drafts do not use provider settings.")
+        settings = {"mode": "offline"} if mode == "offline" else self.openrouter_drafts.settings(model)
+        if mode == "openrouter" and operation_id is None:
+            raise ValueError("Use a valid drafting operation ID.")
+        identity = {"client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id,
+                    "actor": self.operator.id, "request": NEXT_TEST_REQUEST}
+        if operation_id is not None:
+            if not isinstance(operation_id, str) or not RUN_ID.fullmatch(operation_id):
+                raise ValueError("Use a valid drafting operation ID.")
+            identity["operation_id"] = operation_id
+        else:
+            identity["source"] = source
+        run_id = package_fingerprint(identity)[:32]
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()
             if existing is not None:
                 self._owned_run(db, run_id)
+                saved = db.execute("SELECT settings FROM agent_review_inference WHERE run_id = ?", (run_id,)).fetchone()
+                if json.loads(existing[0]) != source or (json.loads(saved[0]) if saved else {"mode": "offline"}) != settings:
+                    raise ValueError("This drafting operation was already used for a different request.")
                 return run_id
             self.performance.instruction_test_context(db, **source)
             db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?)",
                        (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
                         self.operator.id, NEXT_TEST_REQUEST, "running"))
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?)", (run_id, json.dumps(source)))
+            db.execute("INSERT INTO agent_review_inference (run_id, settings) VALUES (?, ?)",
+                       (run_id, json.dumps(settings)))
         return run_id
 
     def _owned_run(self, db, run_id):
@@ -197,7 +218,7 @@ class AgentRuntime:
             raise ValueError("The step budget must be between zero and four.")
         for _ in range(max_steps):
             self.operator.require_brand(LOCAL_BRAND)
-            if self._resume_openrouter_review(run_id):
+            if self._resume_openrouter(run_id):
                 continue
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
@@ -242,7 +263,7 @@ class AgentRuntime:
                                        "receipt": receipt["inference"] if receipt else None, "error": inference[3]}
             return result
 
-    def _resume_openrouter_review(self, run_id):
+    def _resume_openrouter(self, run_id):
         """Reserve a single request, call outside SQLite, and persist its receipt before the step."""
         self.operator.require_brand(LOCAL_BRAND)
         receipt = None
@@ -253,24 +274,26 @@ class AgentRuntime:
                 "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
             ).fetchone()
             count = db.execute("SELECT COUNT(*) FROM agent_steps WHERE run_id = ?", (run_id,)).fetchone()[0]
-            if request != REVIEW_TEST_REQUEST or count != 1 or not row:
+            if request not in {REVIEW_TEST_REQUEST, NEXT_TEST_REQUEST} or count != 1 or not row:
                 return False
             settings = json.loads(row[0])
             if settings["mode"] != "openrouter":
                 return False
-            context = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
-            self.instruction_tests.require_review_context(db, context)
+            source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
+            context = self._inference_context(db, request, source)
+            adapter = self.openrouter if request == REVIEW_TEST_REQUEST else self.openrouter_drafts
             if row[1] == "received":
                 receipt = json.loads(row[2])
             elif row[1] == "pending":
-                self.openrouter.require_available(settings)
+                adapter.require_available(settings)
                 db.execute("UPDATE agent_review_inference SET state = 'requested' WHERE run_id = ?", (run_id,))
             else:
                 raise ReviewInferenceError(row[3] or
-                    "This review's request is in progress or its outcome is unknown. Start a new review to retry.")
+                    "This request is in progress or its outcome is unknown. Start a new operation to retry.")
         if receipt is None:
             try:
-                receipt = self.openrouter.assess_instruction_test(context, settings)
+                receipt = (adapter.assess_instruction_test(context, settings) if request == REVIEW_TEST_REQUEST
+                           else adapter.draft_instructions(context, settings))
                 receipt["inference"]["run_id"] = run_id
             except ReviewInferenceError as exc:
                 with closing(sqlite3.connect(self.path)) as db, db:
@@ -286,20 +309,36 @@ class AgentRuntime:
             self._owned_run(db, run_id)
             if db.execute("SELECT 1 FROM agent_steps WHERE run_id = ? AND position = 1", (run_id,)).fetchone():
                 return True
-            self.instruction_tests.require_review_context(db, context)
+            self._inference_context(db, request, source)
             usage = receipt["inference"]["usage"]
             if ((usage["cost_usd"] is not None and usage["cost_usd"] > 0)
                     or (usage["output_tokens"] is not None and usage["output_tokens"] > settings["max_output_tokens"])):
-                raise ReviewInferenceError("The provider reported usage beyond the review limits. Its receipt was retained.")
+                raise ReviewInferenceError("The provider reported usage beyond the inference limits. Its receipt was retained.")
             try:
-                assessment = self.instruction_tests.validate_assessment(context, receipt["assessment"])
+                if request == REVIEW_TEST_REQUEST:
+                    assessment = self.instruction_tests.validate_assessment(context, receipt["assessment"])
+                    tool = "assess_instruction_test"
+                    result = {"assessment": assessment, "inference": receipt["inference"]}
+                else:
+                    draft = receipt["draft"]
+                    instruction = self.drafts.validate_instruction(
+                        render_instruction_choices(draft), context["comparison"]["instruction"],
+                    )
+                    tool = "draft_instructions"
+                    result = {"instruction": instruction,
+                              "inference": {**receipt["inference"], "wording_choices": draft}}
             except ValueError:
                 raise ReviewInferenceError(
-                    "The model assessment did not pass validation. Start a new review to retry."
+                    "The model output did not pass validation. Start a new operation to retry."
                 ) from None
-            db.execute("INSERT INTO agent_steps VALUES (?, 1, 'assess_instruction_test', ?)",
-                       (run_id, json.dumps({"assessment": assessment, "inference": receipt["inference"]})))
+            db.execute("INSERT INTO agent_steps VALUES (?, 1, ?, ?)", (run_id, tool, json.dumps(result)))
         return True
+
+    def _inference_context(self, db, request, source):
+        if request == REVIEW_TEST_REQUEST:
+            self.instruction_tests.require_review_context(db, source)
+            return source
+        return self.performance.instruction_test_context(db, **source)
 
     def _dispatch_instruction_review(self, db, run_id, tool, history):
         expected = ("load_test_evidence", "assess_instruction_test", "save_test_review", "finish_test_review")
@@ -341,7 +380,9 @@ class AgentRuntime:
             )
             return {"instruction": instruction}
         if tool == "save_instruction_test":
-            return self.performance.save_instruction_test(db, source, history[1]["result"]["instruction"])
+            result = history[1]["result"]
+            return self.performance.save_instruction_test(db, source, result["instruction"],
+                                                          inference=result.get("inference"))
         draft = history[2]["result"]
         return {"campaign_id": draft["campaign_id"], "revision": draft["revision"], "ambiguous": [],
                 "message": "Revised comparison instructions prepared for approval."}

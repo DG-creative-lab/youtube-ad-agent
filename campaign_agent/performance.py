@@ -314,10 +314,11 @@ class CampaignPerformance:
         return {"package": approved["package"], "review": review, "correction": correction,
                 "comparison": group["content"]}
 
-    def save_instruction_test(self, db, source, instruction):
+    def save_instruction_test(self, db, source, instruction, *, inference=None):
         context = self.instruction_test_context(db, **source)
+        options = {"inference": inference} if inference is not None else {}
         return self.drafts.save_instruction_test(
-            db, context["package"], context["review"], context["correction"], instruction,
+            db, context["package"], context["review"], context["correction"], instruction, **options,
         )
 
     def read(self, campaign_id, revision, fingerprint):

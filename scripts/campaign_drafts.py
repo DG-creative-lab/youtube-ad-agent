@@ -9,6 +9,7 @@ import sqlite3
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.handoff import MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
@@ -297,12 +298,15 @@ class CampaignDrafts:
             raise ValueError("Provide revised comparison instructions of up to 500 characters.")
         return instruction.strip()
 
-    def save_instruction_test(self, db, package, review, correction, instruction):
+    def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
         """Persist one instruction change in the caller's validated review transaction."""
         self._package_scope(package["campaign_id"], package["revision"])
         group = next(group for group in package["groups"]
                      if group["creative_version"] == review["proposal"]["creative_version"])
         instruction = self.validate_instruction(instruction, group["content"]["instruction"])
+        if inference is not None and inference.get("mode") == "openrouter":
+            if render_instruction_choices(inference.get("wording_choices")) != instruction:
+                raise ValueError("Provider instructions must match the approved components.")
         current = self._read(db)
         if current["revision"] != package["revision"]:
             raise StaleDraft(current)
@@ -314,6 +318,8 @@ class CampaignDrafts:
             "original_viewer_path": group["viewer_path"],
             "reason": review["proposal"]["reason"], "measure": review["proposal"]["measure"],
         }
+        if inference is not None:
+            test["inference"] = inference
         saved = {
             **current, "revision": current["revision"] + 1,
             "comparison_instructions": {**current.get("comparison_instructions", {}),

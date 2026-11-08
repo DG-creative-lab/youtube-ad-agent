@@ -67,7 +67,7 @@ def youtube_search(key, query, page):
 
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=()):
+          openrouter_review_models=(), openrouter_draft_models=()):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -82,7 +82,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     drafts = CampaignDrafts(draft_path, live)
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
-                                          openrouter_models=openrouter_review_models)
+                                          openrouter_models=openrouter_review_models,
+                                          openrouter_draft_models=openrouter_draft_models)
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
     instruction_tests = agent.instruction_tests if agent else None
@@ -242,7 +243,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     run_id = agent.start_instruction_review(**data)
                     result = agent.read(run_id)
                 elif self.path == "/api/agent/next-test":
-                    if set(data) != {"campaign_id", "revision", "fingerprint", "review_id"}:
+                    fields = {"campaign_id", "revision", "fingerprint", "review_id"}
+                    if set(data) not in (fields, fields | {"mode", "operation_id"},
+                                         fields | {"mode", "model", "operation_id"}):
                         raise ValueError("Choose a valid performance review.")
                     run_id = agent.start_next_test(**data)
                     result = agent.read(run_id)
@@ -396,6 +399,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS,
                         "demoRequest": DEMO_REQUEST,
                         "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
+                        "openrouterDraftModels": list(agent.openrouter_drafts.models) if agent else [],
                         "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
@@ -647,6 +651,8 @@ def main():
     web.add_argument("--live-youtube", action="store_true", help="Use the existing YouTube Data key for public search.")
     web.add_argument("--openrouter-review-model", action="append", default=[],
                      help="Explicitly enable a :free model for reviews. One request per run, with a zero-price cap.")
+    web.add_argument("--openrouter-draft-model", action="append", default=[],
+                     help="Explicitly enable a :free model for next-test drafting. One request per run, with a zero-price cap.")
     routing = commands.add_parser("assign", help="Propose creative assignments for an independently supplied catalog.")
     routing.add_argument("catalog", type=Path)
     routing.add_argument("--paid-jev-limit", type=int, help="Enable paid Jev requests. Maximum calls for this invocation.")
@@ -655,7 +661,8 @@ def main():
     try:
         if args.command == "serve":
             serve(args.port, args.live_youtube, viewer_port=args.viewer_port,
-                  openrouter_review_models=args.openrouter_review_model)
+                  openrouter_review_models=args.openrouter_review_model,
+                  openrouter_draft_models=args.openrouter_draft_model)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
     except sqlite3.Error:
