@@ -19,6 +19,7 @@ from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, Review
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup
+from campaign_agent.delivery import CampaignDelivery
 from .planner import PlacementAgent
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
@@ -62,12 +63,13 @@ class RecordedInference:
 class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
-                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None):
+                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
         self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path))
+        self.delivery = CampaignDelivery(self.drafts, reporting)
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()

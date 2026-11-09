@@ -16,7 +16,7 @@ from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
 ADS_SCOPE = 'https://www.googleapis.com/auth/adwords'
 
 
-def google_transport(config, session):
+def google_transport(config, session, *, read_only=False):
     # The optional Google libraries are loaded only for this CLI.
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -37,7 +37,7 @@ def google_transport(config, session):
             raise SetupProviderError('The refreshed OAuth grant has unexpected scopes.')
 
     def post(account, endpoint, body):
-        if ((endpoint == 'googleAds:mutate' and account != config['account_id'])
+        if ((endpoint == 'googleAds:mutate' and (read_only or account != config['account_id']))
                 or (endpoint == 'googleAds:searchStream' and account not in {config['manager_id'], config['account_id']})
                 or endpoint not in {'googleAds:mutate', 'googleAds:searchStream'}):
             raise SetupProviderError('The request is outside the configured Google Ads sandbox.')

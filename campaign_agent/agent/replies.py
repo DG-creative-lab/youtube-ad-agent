@@ -6,7 +6,7 @@ WORKFLOW_CODES = ('approval_required', 'waiting_for_evidence', 'correction_requi
                   'instruction_test_prepared', 'review_refresh_required', 'experiment_review_required',
                   'instruction_draft_not_authorized', 'placement_draft_not_authorized',
                   'experiment_unavailable', 'experiment_waiting', 'experiment_followup_prepared', 'experiment_refresh_required',
-                  'setup_package_required', 'setup_validated')
+                  'setup_package_required', 'setup_validated', 'google_ads_delivery')
 QUESTIONS = {
     'choose_context': 'Should I focus on video editing, audiobook production, or both?',
     'supply_catalog': 'No unambiguous placements were found. Can you supply a more relevant catalog?',

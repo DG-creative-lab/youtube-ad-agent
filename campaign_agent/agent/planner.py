@@ -6,6 +6,7 @@ import sqlite3
 
 from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.delivery import delivery_message
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
 from scripts.campaign_drafts import PackageConflict
@@ -19,6 +20,27 @@ from .draft_permissions import DRAFT_PERMISSIONS, permits
 ID = re.compile(r'[0-9a-f]{32}')
 MAX_TURNS = 8
 SIMULATED = ('simulated', 'simulated-inspect')
+CURRENT_CAMPAIGN = r'(?:this|the|my|our)(?: current)? campaign'
+GOOGLE_ADS = r'(?:(?:the|my|our) )?google ads'
+DELIVERY_TOPIC = (
+    r'(?:delivery|performance)(?: (?:report|metrics))?'
+    r'|(?:video )?placement report|reported (?:video )?placements'
+)
+CURRENT_SCOPE = rf'(?: (?:for|of) {CURRENT_CAMPAIGN})?'
+PERFORMANCE_VERB = r'(?:perform(?:ing)?|do(?:ing)?|deliver(?:ing)?)'
+# Match an explicit request for the current campaign. Keep quoted mentions and other scopes out.
+DELIVERY_REQUEST = re.compile(
+    r'(?:(?:can|could|would) you (?:please )?|please,? )?'
+    r'(?:'
+    r'(?:review|check|pull|fetch|show(?: me)?|give me) '
+    rf"(?:{GOOGLE_ADS} (?:campaign(?:['’]s)? )?(?:{DELIVERY_TOPIC}){CURRENT_SCOPE}"
+    rf'|(?:the )?(?:{DELIVERY_TOPIC}){CURRENT_SCOPE} (?:in|from|on) google ads)'
+    r'|(?:(?:tell me|check) )?how (?:is|are|did) '
+    rf'(?:{GOOGLE_ADS}(?: campaign)? {PERFORMANCE_VERB}'
+    rf'|{CURRENT_CAMPAIGN} {PERFORMANCE_VERB} (?:in|on) google ads)'
+    r')(?:,? please)?[.!?]*',
+    re.IGNORECASE,
+)
 
 
 class PlacementAgent:
@@ -97,6 +119,13 @@ class PlacementAgent:
                        'conversation': previous, 'conversation_truncated': truncated, 'after_message': after_message,
                        **self.review_tools.pin(db, current),
                        'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
+            if DELIVERY_REQUEST.fullmatch(' '.join(request.split())):
+                try:
+                    binding = self.owner.delivery.binding(db, self.drafts.campaign_id, current['revision'],
+                                                          context['fingerprint'])
+                except PackageConflict:
+                    binding = None
+                context.update(delivery_request=True, delivery_setup_id=binding['setup_id'] if binding else None)
             db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
                        (*expected[:3], model))
             db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?)',
@@ -187,14 +216,18 @@ class PlacementAgent:
                     raise ReviewInferenceError(row[2] or 'This model request is in progress or its outcome is unknown. Start a new run.')
                 receipt = json.loads(row[1]) if row else None
                 if not row:
-                    if source['settings']['mode'] == 'openrouter':
+                    if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
                         self.remote.require_available(source['settings'])
                         self.remote.prepare_turn(source, history, source['settings'])
                     db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL)", (run_id, position))
             if receipt is None:
                 try:
-                    model = self.remote if source['settings']['mode'] == 'openrouter' else self.simulator
-                    receipt = model.next_turn(source, history, source['settings'])
+                    if source.get('delivery_request'):
+                        receipt = {'call_id': 'delivery', 'tool': 'review_google_ads_delivery', 'arguments': {},
+                                   'inference': {'mode': 'application', 'usage': None}}
+                    else:
+                        model = self.remote if source['settings']['mode'] == 'openrouter' else self.simulator
+                        receipt = model.next_turn(source, history, source['settings'])
                     if (not isinstance(receipt, dict) or not isinstance(receipt.get('call_id'), str)
                             or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', receipt['call_id'])
                             or not isinstance(receipt.get('tool'), str) or len(receipt['tool']) > 64
@@ -222,6 +255,14 @@ class PlacementAgent:
                     approved = self.review_tools.approved(db, source)
                 if approved is not None:
                     captured_review = self.review_tools.capture(source)
+            if (receipt['tool'] == 'review_google_ads_delivery' and not receipt['arguments']
+                    and source.get('delivery_request') and source.get('delivery_setup_id')):
+                try:
+                    captured_review = self.owner.delivery.capture(
+                        self.drafts.campaign_id, source['revision'], source['fingerprint'],
+                        setup_id=source['delivery_setup_id'])
+                except PackageConflict:
+                    pass
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 _, status = self.owner._owned_run(db, run_id)
@@ -295,6 +336,19 @@ class PlacementAgent:
             return classified, 'running'
         if name == 'review_performance':
             return self.review_tools.review(db, source, captured_review)
+        if name == 'review_google_ads_delivery' and not args and source.get('delivery_request'):
+            report = None
+            if captured_review is not None:
+                try:
+                    report = self.owner.delivery.save(db, self.drafts.campaign_id, source['revision'],
+                                                      source['fingerprint'], captured_review)
+                except PackageConflict:
+                    pass
+            message = delivery_message(report) if report else (
+                'Open the reporting-enabled workspace and verify the current Google Ads setup before reviewing delivery.')
+            return {'revision': source['revision'], 'ambiguous': [], 'message': message,
+                    'reply_version': REPLY_VERSION, 'reply_code': 'google_ads_delivery',
+                    'delivery_report_id': report['id'] if report else None}, 'answered' if report else 'needs_input'
         if name == 'load_experiment_evidence':
             return self.review_tools.load_experiment(db, source)
         if name == 'assess_instruction_experiment':
