@@ -20,6 +20,32 @@ AD_FIELDS = ', '.join('ad_group_ad.ad.demand_gen_video_responsive_ad.' + name
                       for name in ('videos', 'logo_images', 'business_name', 'headlines', 'long_headlines', 'descriptions'))
 
 
+def query_rows(post, account, query):
+    payload, _ = post(account, 'googleAds:searchStream', {'query': query})
+    if not isinstance(payload, list) or any(not isinstance(batch, dict) or 'error' in batch for batch in payload):
+        raise SetupProviderError('Google Ads returned an incomplete read-back.')
+    return [row for batch in payload for row in batch.get('results', [])]
+
+
+def verify_test_account(query_rows, manager_id, account_id):
+    query = 'SELECT customer.id, customer.test_account, customer.manager, customer.currency_code FROM customer'
+    for account, manager in ((manager_id, True), (account_id, False)):
+        rows = query_rows(account, query)
+        customer = rows[0].get('customer', {}) if len(rows) == 1 else {}
+        if (str(customer.get('id')) != account or customer.get('testAccount') is not True
+                or customer.get('manager', False) is not manager):
+            raise SetupProviderError('Google did not verify the configured test account.')
+        if not manager and customer.get('currencyCode') != 'GBP':
+            raise SetupProviderError('The Google Ads test client must use GBP.')
+    rows = query_rows(manager_id,
+                       'SELECT customer_client.id, customer_client.level, customer_client.test_account, '
+                       'customer_client.manager FROM customer_client WHERE customer_client.id = ' + account_id)
+    child = rows[0].get('customerClient', {}) if len(rows) == 1 else {}
+    if (str(child.get('id')) != account_id or str(child.get('level')) != '1'
+            or child.get('testAccount') is not True or child.get('manager', False) is not False):
+        raise SetupProviderError('Google did not verify the test manager relationship.')
+
+
 class GoogleAdsSandbox:
     name = 'google-ads-sandbox'
     local_validation = False
@@ -151,28 +177,10 @@ class GoogleAdsSandbox:
         return operations
 
     def _query(self, account, query):
-        payload, _ = self.post(account, 'googleAds:searchStream', {'query': query})
-        if not isinstance(payload, list) or any(not isinstance(batch, dict) or 'error' in batch for batch in payload):
-            raise SetupProviderError('Google Ads returned an incomplete read-back.')
-        return [row for batch in payload for row in batch.get('results', [])]
+        return query_rows(self.post, account, query)
 
     def _verify_account(self):
-        query = 'SELECT customer.id, customer.test_account, customer.manager, customer.currency_code FROM customer'
-        for account, manager in ((self.manager_id, True), (self.account_id, False)):
-            rows = self._query(account, query)
-            customer = rows[0].get('customer', {}) if len(rows) == 1 else {}
-            if (str(customer.get('id')) != account or customer.get('testAccount') is not True
-                    or customer.get('manager', False) is not manager):
-                raise SetupProviderError('Google did not verify the configured test account.')
-            if not manager and customer.get('currencyCode') != 'GBP':
-                raise SetupProviderError('The Google Ads test client must use GBP.')
-        rows = self._query(self.manager_id,
-                           'SELECT customer_client.id, customer_client.level, customer_client.test_account, '
-                           'customer_client.manager FROM customer_client WHERE customer_client.id = ' + self.account_id)
-        child = rows[0].get('customerClient', {}) if len(rows) == 1 else {}
-        if (str(child.get('id')) != self.account_id or str(child.get('level')) != '1'
-                or child.get('testAccount') is not True or child.get('manager', False) is not False):
-            raise SetupProviderError('Google did not verify the test manager relationship.')
+        verify_test_account(self._query, self.manager_id, self.account_id)
 
     def validate(self, plan):
         operations = self._checked_operations(plan)

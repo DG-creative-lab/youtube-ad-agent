@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Find candidate placements and route a creator-supplied video catalog."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,6 +21,7 @@ if not __package__:
     sys.path.insert(0, str(ROOT))
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import caption_bytes, media_sha256, package_fingerprint
@@ -27,6 +29,7 @@ from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
+from scripts.google_ads_sandbox import google_transport
 
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
@@ -67,7 +70,7 @@ def youtube_search(key, query, page):
 
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=(), openrouter_draft_models=(), main_models=()):
+          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -84,7 +87,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
                                           openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
                                           openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
-                                          main_models=main_models)
+                                          main_models=main_models, reporting=reporting)
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
@@ -94,6 +97,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
                        '/api/campaign/setup/create': agent.setup.create,
                        '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})
+    delivery_path = '/api/campaign/google-ads-delivery'
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -145,7 +149,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.post_catalog()
                 return
             if (self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
-                              "/api/campaign/correction", "/api/campaign/instruction-test"} or self.path in setup_commands):
+                              "/api/campaign/correction", "/api/campaign/instruction-test", delivery_path}
+                    or self.path in setup_commands):
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -217,6 +222,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     raise ValueError("Send a valid package reference.")
                 if setup_command is not None:
                     command = setup_command
+                elif self.path == delivery_path:
+                    command = agent.delivery.review
                 elif is_instruction_test:
                     command = instruction_tests.start
                 elif is_correction:
@@ -450,6 +457,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     self.send(200, {
                         "live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS,
                         "demoRequest": DEMO_REQUEST,
+                        "googleAdsReporting": reporting is not None,
                         "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
                         "openrouterDraftModels": list(agent.openrouter_drafts.models) if agent else [],
                         "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,
@@ -498,11 +506,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if self.check_operator():
                     self.read_campaign(url.query, package=url.path.endswith("/package"))
                 return
-            if url.path in {"/api/campaign/performance", "/api/campaign/instruction-test", "/api/campaign/setup"}:
+            if url.path in {"/api/campaign/performance", "/api/campaign/instruction-test", "/api/campaign/setup", delivery_path}:
                 if self.check_operator():
                     commands = ({"/api/campaign/performance": performance.read,
                                  "/api/campaign/instruction-test": instruction_tests.read,
-                                 "/api/campaign/setup": agent.setup.read} if agent else {})
+                                 "/api/campaign/setup": agent.setup.read,
+                                 delivery_path: agent.delivery.read} if agent else {})
                     self.read_package_record(url.query, commands.get(url.path))
                 return
             if url.path != "/api/search":
@@ -588,6 +597,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             try:
                 result = command(drafts.campaign_id, int(revision), fingerprint)
+            except PackageConflict as exc:
+                self.send(409, {"error": str(exc)})
             except sqlite3.Error:
                 self.send(503, {"error": "Could not load the package record. Try again."})
             else:
@@ -712,6 +723,23 @@ def assign(path, jev_limit, register_catalog=False):
         print(json.dumps(result), flush=True)
 
 
+def google_ads_reporting(config_path):
+    config = json.loads(config_path.read_text())
+
+    @contextmanager
+    def connect():
+        import requests
+
+        with requests.Session() as session:
+            session.trust_env = False
+            yield google_transport(config, session, read_only=True)
+
+    try:
+        return GoogleAdsReporting(config['manager_id'], config['account_id'], connect)
+    except (KeyError, TypeError):
+        raise ValueError('Supply the private Google Ads sandbox account configuration.') from None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -720,6 +748,8 @@ def main():
     web.add_argument("--viewer-port", type=int, default=DEFAULT_VIEWER_PORT,
                      help=f"Fixed port for viewer links (default: {DEFAULT_VIEWER_PORT}).")
     web.add_argument("--live-youtube", action="store_true", help="Use the existing YouTube Data key for public search.")
+    web.add_argument("--draft-db", type=Path, help="Use a separate local campaign database.")
+    web.add_argument("--google-ads-reporting-config", type=Path, help="Opt in to read-only Google Ads test reporting.")
     web.add_argument("--openrouter-review-model", action="append", default=[],
                      help="Explicitly enable a :free model for reviews. One request per run, with a zero-price cap.")
     web.add_argument("--openrouter-draft-model", action="append", default=[],
@@ -733,9 +763,15 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "serve":
-            serve(args.port, args.live_youtube, viewer_port=args.viewer_port,
+            path = args.draft_db or DEFAULT_DRAFT_PATH
+            reporting = None
+            if args.google_ads_reporting_config:
+                if args.live_youtube or path.resolve() == DEFAULT_DRAFT_PATH.resolve() or not path.is_file():
+                    raise ValueError('Google Ads reporting needs an existing, separate sandbox draft database in sample mode.')
+                reporting = google_ads_reporting(args.google_ads_reporting_config)
+            serve(args.port, args.live_youtube, path, viewer_port=args.viewer_port,
                   openrouter_review_models=args.openrouter_review_model,
-                  openrouter_draft_models=args.openrouter_draft_model, main_models=args.agent_model)
+                  openrouter_draft_models=args.openrouter_draft_model, main_models=args.agent_model, reporting=reporting)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
     except sqlite3.Error:

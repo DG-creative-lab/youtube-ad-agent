@@ -31,6 +31,14 @@ python3 scripts/google_ads_sandbox.py --config CONFIG --draft-db SANDBOX_DB \
 
 Review the saved payload and setup ID after Google accepts validation. To approve creation, use the same options with `create-paused --setup-id SETUP_ID`. The CLI sends one paused create request and compares Google's read-back with the approved plan. If the response is uncertain, use `reconcile --setup-id SETUP_ID` to look up the same campaign. Store the CLI output in a private location.
 
+To review the verified test campaign's delivery, start the planner with the same private config and database.
+
+```sh
+python3 scripts/placement_review.py serve --draft-db SANDBOX_DB --google-ads-reporting-config CONFIG
+```
+
+Choose **Review Google Ads delivery** in the approved campaign workspace or ask in chat. For example, “How is this campaign performing in Google Ads?” The planner queries the verified campaign and ad groups for the last seven calendar dates, including today. It saves ad-group totals and reported video placements separately from configured targets. Test-account reports can contain zero totals or empty rows. The ordinary planner starts in offline mode.
+
 After approval, choose a sample delivery scenario and click **Review performance**. The review saves fictional delivery and observed local viewer activity as separate evidence, then proposes a next test. Local completion is measured per verified visit for the approved comparison content. Visits without a verified content identity are shown separately. The sample delivery window and clicks belong to the fictional report.
 
 When the review proposes a comparison test, use **Buyer correction** to specify what must stay fixed. Save it and run another review to see how the proposal changes. The constraint applies within that campaign. **Keep both takes unchanged** carries over to instruction edits when the takes and their comparison context match. **Keep the entire comparison unchanged** applies to the full comparison. The optional note records the reason.

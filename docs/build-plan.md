@@ -20,6 +20,8 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 
 ## Current follow-up slice
 
+**Review Google Ads delivery.** Bind a read-only report to the verified setup for the current approved package. Save ad-group metrics and video placement coverage, and expose the same review action in the workspace and chat. Keep configured targets, missing rows and observed zero totals distinct. Exercise complete, partial and empty reports with fixtures before querying the paused test campaign.
+
 **Verify paused setup in Google Ads.** Use the sandbox CLI with a private creative binding for each approved group. Validate the full Demand Gen request and save it with its Google request ID. Present the saved setup ID for approval before creation. Read back both ad groups, their ads, video assets, destinations and positive video targets. After an uncertain create response, query the original campaign name. The workspace continues to use the simulator by default.
 
 **Prepare and verify campaign setup.** Build a paused plan from the current approved package. Validate it in chat or the workspace and show the simulated account, budget and per-group targeting for explicit approval. Reserve one creation attempt for the exact validated plan. Read back the simulated campaign and its ad groups and ads, and keep the observation with the receipt. Exercise stale approval, duplicate submission, lost receipt and mismatched targeting. Use a separate test-account validation-only probe to check positive YouTube video and channel criteria.

@@ -6,6 +6,7 @@ import {AgentComposer, draftPermissionLabels} from "./AgentComposer";
 import type {DraftPermission} from "./AgentComposer";
 import {CampaignChat} from "./CampaignChat";
 import {CampaignSetup} from "./CampaignSetup";
+import {GoogleAdsDelivery} from "./GoogleAdsDelivery";
 import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
@@ -42,6 +43,7 @@ type PackageReview = {
 };
 type Mode = {
   live: boolean;
+  googleAdsReporting?: boolean;
   demoRequest: string;
   viewerOrigin: string;
   openrouterReviewModels: string[];
@@ -61,6 +63,7 @@ type Run = {
 };
 
 const stepLabels = {
+  review_google_ads_delivery: "Review Google Ads delivery",
   load_context: "Load campaign brief",
   propose_placements: "Classify sample placements",
   save_draft: "Save draft revision",
@@ -685,6 +688,14 @@ function App() {
                 </section>
                 {activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
+                    revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
+                    onPackageConflict={message => {
+                      setPackageChanged(true);
+                      setPackageError(message);
+                    }} />
+                )}
+                {mode?.googleAdsReporting && activePackage?.approval && !needsLatest && !busy && (
+                  <GoogleAdsDelivery key={`google-ads:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onPackageConflict={message => {
                       setPackageChanged(true);
