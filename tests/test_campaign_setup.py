@@ -33,7 +33,7 @@ class CampaignSetupTests(unittest.TestCase):
         plan = self.setup.read(*self.reference)
         self.assertEqual(result['result']['setup_id'], plan['id'])
         self.assertIsNone(plan['approval'])
-        self.assertIsNone(self.setup.provider.readback(plan['id'], 'offline-demo'))
+        self.assertIsNone(self.setup.provider.readback(plan['id'], plan['plan']))
         self.assertEqual([group['placement_ids'] for group in plan['plan']['groups']], [['SAMPLE00001'], ['SAMPLE00002']])
         with self.assertRaisesRegex(PackageConflict, 'Approve creation'):
             self.setup.reconcile(*self.reference, plan['id'])
@@ -43,7 +43,7 @@ class CampaignSetupTests(unittest.TestCase):
         def overlapping_request(operation_id, configuration):
             duplicate = self.case.reopen().setup.create(*self.reference, plan['id'])
             self.assertEqual(duplicate['status'], 'creating')
-            self.assertIsNone(provider.readback(plan['id'], 'offline-demo'))
+            self.assertIsNone(provider.readback(plan['id'], plan['plan']))
             return original_create(operation_id, configuration)
 
         with patch.object(provider, 'create_paused', side_effect=overlapping_request) as create:
@@ -85,7 +85,7 @@ class CampaignSetupTests(unittest.TestCase):
         reopened = self.case.reopen().setup
         with patch.object(reopened.provider, 'create_paused') as create:
             self.assertEqual(reopened.create(*self.reference, plan['id']), unknown)
-            observed = reopened.provider.readback(plan['id'], 'offline-demo')
+            observed = reopened.provider.readback(plan['id'], plan['plan'])
             for invalid in ('', '   ', None, 42):
                 with self.subTest(campaign_id=invalid):
                     with patch.object(reopened.provider, 'readback', return_value={**observed, 'campaign_id': invalid}):
@@ -111,8 +111,8 @@ class CampaignSetupTests(unittest.TestCase):
     def test_readback_with_different_placements_is_not_verified(self):
         plan = self.validate()
         original_readback = self.setup.provider.readback
-        def different_placements(operation_id, account_id):
-            observed = original_readback(operation_id, account_id)
+        def different_placements(operation_id, configuration):
+            observed = original_readback(operation_id, configuration)
             observed['configuration']['groups'][1]['placement_ids'] = ['OTHER000001']
             return observed
 

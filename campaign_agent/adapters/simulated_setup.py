@@ -7,6 +7,7 @@ import sqlite3
 class SimulatedCampaignSetup:
     name = 'simulated'
     account_id = 'offline-demo'
+    local_validation = True
 
     def __init__(self, path):
         self.path = path
@@ -15,6 +16,18 @@ class SimulatedCampaignSetup:
                 account_id TEXT NOT NULL, operation_id TEXT NOT NULL, snapshot TEXT NOT NULL,
                 PRIMARY KEY (account_id, operation_id)
             )''')
+
+    def prepare(self, package, fingerprint):
+        return {
+            'provider': self.name, 'account_id': self.account_id,
+            'action': 'create_paused', 'status': 'PAUSED', 'title': package['title'],
+            'objective': package['proposed_setup']['objective'], 'budget_micros': 0,
+            'schedule': package['proposed_setup']['schedule'],
+            'groups': [{'context': group['context'], 'title': group['title'],
+                        'creative_version': group['creative_version'], 'destination': group['viewer_path'],
+                        'placement_ids': [placement['demo_id'] for placement in group['placements']]}
+                       for group in package['groups']],
+        }
 
     def validate(self, plan):
         if (plan['provider'] != self.name or plan['account_id'] != self.account_id
@@ -34,7 +47,8 @@ class SimulatedCampaignSetup:
                        (self.account_id, operation_id, json.dumps(observed)))
         return {'campaign_id': campaign_id}
 
-    def readback(self, operation_id, account_id):
+    def readback(self, operation_id, plan):
+        account_id = plan['account_id']
         if account_id != self.account_id:
             raise ValueError('The simulated account is unavailable.')
         with closing(sqlite3.connect(self.path)) as db:
