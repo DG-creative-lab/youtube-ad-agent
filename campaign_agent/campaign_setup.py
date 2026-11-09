@@ -1,4 +1,4 @@
-"""Validate, approve and verify creation of one paused setup per package."""
+"""Validate, approve and verify one paused setup per package and provider account."""
 from contextlib import closing
 from datetime import datetime, timezone
 import json
@@ -21,10 +21,12 @@ class SetupProviderError(RuntimeError):
 class SetupProvider(Protocol):
     name: str
     account_id: str
+    local_validation: bool
 
-    def validate(self, plan: dict) -> None: ...
+    def prepare(self, package: dict, fingerprint: str) -> dict: ...
+    def validate(self, plan: dict) -> str | None: ...
     def create_paused(self, operation_id: str, plan: dict) -> dict: ...
-    def readback(self, operation_id: str, account_id: str) -> dict | None: ...
+    def readback(self, operation_id: str, plan: dict) -> dict | None: ...
 
 
 class CampaignSetup:
@@ -32,28 +34,43 @@ class CampaignSetup:
         self.drafts, self.provider = drafts, provider
         self.path = drafts.path
         with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(campaign_setups)')}
+            legacy = bool(columns) and 'provider' not in columns
+            if legacy:
+                db.execute('ALTER TABLE campaign_setups RENAME TO campaign_setups_legacy')
             db.execute('''CREATE TABLE IF NOT EXISTS campaign_setups (
                 client_id TEXT NOT NULL, brand_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
-                revision INTEGER NOT NULL, fingerprint TEXT NOT NULL, snapshot TEXT NOT NULL,
-                PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint)
+                revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+                provider TEXT NOT NULL, account_id TEXT NOT NULL, snapshot TEXT NOT NULL,
+                PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint, provider, account_id)
             )''')
+            if legacy:
+                db.execute('''INSERT INTO campaign_setups
+                              SELECT client_id, brand_id, campaign_id, revision, fingerprint,
+                                     json_extract(snapshot, '$.plan.provider'),
+                                     json_extract(snapshot, '$.plan.account_id'), snapshot
+                              FROM campaign_setups_legacy''')
+                db.execute('DROP TABLE campaign_setups_legacy')
 
     def _key(self, campaign_id, revision, fingerprint):
         scope = self.drafts._package_scope(campaign_id, revision)
         if not isinstance(fingerprint, str) or not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
             raise ValueError('Choose a valid package fingerprint.')
-        return *scope, revision, fingerprint
+        return *scope, revision, fingerprint, self.provider.name, self.provider.account_id
 
     @staticmethod
     def _read(db, key):
         row = db.execute('''SELECT snapshot FROM campaign_setups WHERE client_id=? AND brand_id=?
-                           AND campaign_id=? AND revision=? AND fingerprint=?''', key).fetchone()
+                           AND campaign_id=? AND revision=? AND fingerprint=?
+                           AND provider=? AND account_id=?''', key).fetchone()
         return json.loads(row[0]) if row else None
 
     @staticmethod
     def _update(db, key, record):
         db.execute('''UPDATE campaign_setups SET snapshot=? WHERE client_id=? AND brand_id=?
-                      AND campaign_id=? AND revision=? AND fingerprint=?''', (json.dumps(record), *key))
+                      AND campaign_id=? AND revision=? AND fingerprint=? AND provider=? AND account_id=?''',
+                   (json.dumps(record), *key))
 
     def read(self, campaign_id, revision, fingerprint):
         key = self._key(campaign_id, revision, fingerprint)
@@ -61,41 +78,64 @@ class CampaignSetup:
             return self._read(db, key)
 
     def validate(self, campaign_id, revision, fingerprint, *, connection=None):
+        key = self._key(campaign_id, revision, fingerprint)
+        if not self.provider.local_validation:
+            if connection is not None:
+                raise ValueError('Validate the Google Ads setup from the sandbox CLI.')
+            with closing(sqlite3.connect(self.path)) as db:
+                db.execute('BEGIN')
+                record, plan = self._prepare(db, key)
+            if record is not None:
+                return record
+            validation_id = self.provider.validate(plan)
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('BEGIN IMMEDIATE')
+                self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
+                existing = self._read(db, key)
+                if existing is not None:
+                    return self._require_setup(db, key, existing['id'])
+                return self._save_validated(db, key, plan, validation_id)
         if connection is None:
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 return self.validate(campaign_id, revision, fingerprint, connection=db)
-        key = self._key(campaign_id, revision, fingerprint)
-        package = self.drafts.require_approved_package(connection, campaign_id, revision, fingerprint)['package']
-        existing = self._read(connection, key)
+        existing, plan = self._prepare(connection, key)
         if existing is not None:
             return existing
-        plan = {
-            'provider': self.provider.name, 'account_id': self.provider.account_id,
-            'action': 'create_paused', 'status': 'PAUSED', 'title': package['title'],
-            'objective': package['proposed_setup']['objective'], 'budget_micros': 0,
-            'schedule': package['proposed_setup']['schedule'],
-            'groups': [{'context': group['context'], 'title': group['title'],
-                        'creative_version': group['creative_version'], 'destination': group['viewer_path'],
-                        'placement_ids': [placement['demo_id'] for placement in group['placements']]}
-                       for group in package['groups']],
-        }
-        # This adapter validates locally. Remote preflight must run outside this transaction.
         self.provider.validate(plan)
-        record = {'id': package_fingerprint({'scope': key, 'plan': plan}), 'revision': revision,
+        return self._save_validated(connection, key, plan)
+
+    def _prepare(self, db, key):
+        campaign_id, revision, fingerprint = key[2:5]
+        package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
+        existing = self._read(db, key)
+        if existing is not None:
+            return self._require_setup(db, key, existing['id']), None
+        return None, self.provider.prepare(package, fingerprint)
+
+    @staticmethod
+    def _setup_id(key, plan):
+        # The plan already binds the provider and account. Preserve IDs issued before the journal migration.
+        return package_fingerprint({'scope': key[:5], 'plan': plan})
+
+    def _save_validated(self, connection, key, plan, validation_id=None):
+        revision, fingerprint = key[3:5]
+        record = {'id': self._setup_id(key, plan), 'revision': revision,
                   'fingerprint': fingerprint, 'plan': plan, 'status': 'validated',
                   'approval': None, 'receipt': None, 'readback': None}
-        connection.execute('INSERT INTO campaign_setups VALUES (?, ?, ?, ?, ?, ?)', (*key, json.dumps(record)))
+        if validation_id:
+            record['validation_request_id'] = validation_id
+        connection.execute('INSERT INTO campaign_setups VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (*key, json.dumps(record)))
         return record
 
     def _require_setup(self, db, key, setup_id):
         record = self._read(db, key)
         if (record is None or record['id'] != setup_id
-                or package_fingerprint({'scope': key, 'plan': record['plan']}) != setup_id):
+                or self._setup_id(key, record['plan']) != setup_id):
             raise PackageConflict('Validate and review this exact setup first.')
         plan = record['plan']
-        if (plan['provider'], plan['account_id'], plan['action'], plan['status'], plan['budget_micros']) != (
-                self.provider.name, self.provider.account_id, 'create_paused', 'PAUSED', 0):
+        if (plan['provider'], plan['account_id'], plan['action'], plan['status']) != (
+                self.provider.name, self.provider.account_id, 'create_paused', 'PAUSED'):
             raise PackageConflict('The approved setup is unavailable for this provider and account.')
         return record
 
@@ -141,7 +181,7 @@ class CampaignSetup:
         if record['status'] in {'verified', 'mismatch'}:
             return record
         try:
-            observed = self.provider.readback(setup_id, record['plan']['account_id'])
+            observed = self.provider.readback(setup_id, record['plan'])
         except SetupProviderError:
             return record
         if (observed is None or observed['operation_id'] != setup_id
@@ -159,8 +199,9 @@ class CampaignSetup:
             if record['status'] in {'verified', 'mismatch'}:
                 return record
             receipt = record['receipt']
-            expected_contexts = [group['context'] for group in record['plan']['groups']]
-            matches = (observed['configuration'] == record['plan']
+            expected = record['plan'].get('expected_readback', record['plan'])
+            expected_contexts = [group['context'] for group in expected['groups']]
+            matches = (observed['configuration'] == expected
                        and [group['context'] for group in observed_groups] == expected_contexts
                        and (receipt is None or observed_id == receipt['campaign_id']))
             record.update(status='verified' if matches else 'mismatch', readback=observed)

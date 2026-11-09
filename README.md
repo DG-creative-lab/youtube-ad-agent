@@ -22,6 +22,15 @@ In the campaign workspace, review the setup, preview the cuts and choose **Appro
 
 To rehearse campaign creation, ask **“Validate the campaign setup”** in chat or choose **Validate paused setup** in **Campaign setup**. Review the simulated account, creative groups, destinations and placement IDs, then choose **Approve and create paused campaign**. The workspace shows the separately saved provider read-back and simulated resource IDs. If creation is uncertain, **Check provider read-back** checks for that same operation. This flow uses the local simulated provider and a zero budget.
 
+The optional Google Ads sandbox CLI uses a separate local draft database with an approved test package. Use the existing Ads OAuth grant in `.local/google/` and a Python environment with `google-auth` and `requests`. In a private config JSON, set `manager_id`, `account_id`, `logo_file` and `creatives`. Key `creatives` by the package's creative versions and provide `video_id`, `destination`, `headline`, `long_headline` and `description` for each. Supply approved test videos, public HTTPS destinations and a square PNG logo. The test package needs two groups with registered, distinct video targets.
+
+```sh
+python3 scripts/google_ads_sandbox.py --config CONFIG --draft-db SANDBOX_DB \
+  --revision REVISION --fingerprint FINGERPRINT validate
+```
+
+Review the saved payload and setup ID after Google accepts validation. To approve creation, use the same options with `create-paused --setup-id SETUP_ID`. The CLI sends one paused create request and compares Google's read-back with the approved plan. If the response is uncertain, use `reconcile --setup-id SETUP_ID` to look up the same campaign. Store the CLI output in a private location.
+
 After approval, choose a sample delivery scenario and click **Review performance**. The review saves fictional delivery and observed local viewer activity as separate evidence, then proposes a next test. Local completion is measured per verified visit for the approved comparison content. Visits without a verified content identity are shown separately. The sample delivery window and clicks belong to the fictional report.
 
 When the review proposes a comparison test, use **Buyer correction** to specify what must stay fixed. Save it and run another review to see how the proposal changes. The constraint applies within that campaign. **Keep both takes unchanged** carries over to instruction edits when the takes and their comparison context match. **Keep the entire comparison unchanged** applies to the full comparison. The optional note records the reason.
