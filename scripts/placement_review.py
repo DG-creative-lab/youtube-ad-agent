@@ -91,6 +91,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     viewer = ViewerMeasurement(draft_path)
     performance = None if live else CampaignPerformance(drafts, viewer)
     instruction_tests = agent.instruction_tests if agent else None
+    setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
+                       '/api/campaign/setup/create': agent.setup.create,
+                       '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -141,8 +144,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if self.path == "/api/agent/catalog":
                 self.post_catalog()
                 return
-            if self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
-                             "/api/campaign/correction", "/api/campaign/instruction-test"}:
+            if (self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
+                              "/api/campaign/correction", "/api/campaign/instruction-test"} or self.path in setup_commands):
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -195,6 +198,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 is_performance = self.path.endswith("/performance")
                 is_correction = self.path.endswith("/correction")
                 is_instruction_test = self.path.endswith("/instruction-test")
+                setup_command = setup_commands.get(self.path)
+                needs_setup_id = setup_command is not None and not self.path.endswith('/validate')
+                if needs_setup_id:
+                    fields.add('setup_id')
                 if is_performance:
                     fields.add("scenario")
                 if is_correction:
@@ -202,11 +209,15 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if (not isinstance(data, dict) or set(data) != fields
                         or not isinstance(data["fingerprint"], str)
                         or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])
+                        or (needs_setup_id and (not isinstance(data['setup_id'], str)
+                            or not re.fullmatch(r'[0-9a-f]{64}', data['setup_id'])))
                         or (is_performance and not isinstance(data["scenario"], str))
                         or (is_correction and (not isinstance(data["review_id"], str)
                             or not re.fullmatch(r"[0-9a-f]{64}", data["review_id"])))):
                     raise ValueError("Send a valid package reference.")
-                if is_instruction_test:
+                if setup_command is not None:
+                    command = setup_command
+                elif is_instruction_test:
                     command = instruction_tests.start
                 elif is_correction:
                     command = performance.save_correction
@@ -487,13 +498,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if self.check_operator():
                     self.read_campaign(url.query, package=url.path.endswith("/package"))
                 return
-            if url.path == "/api/campaign/performance":
+            if url.path in {"/api/campaign/performance", "/api/campaign/instruction-test", "/api/campaign/setup"}:
                 if self.check_operator():
-                    self.read_performance(url.query)
-                return
-            if url.path == "/api/campaign/instruction-test":
-                if self.check_operator():
-                    self.read_performance(url.query, instruction_test=True)
+                    commands = ({"/api/campaign/performance": performance.read,
+                                 "/api/campaign/instruction-test": instruction_tests.read,
+                                 "/api/campaign/setup": agent.setup.read} if agent else {})
+                    self.read_package_record(url.query, commands.get(url.path))
                 return
             if url.path != "/api/search":
                 self.send(404, {"error": "Not found."})
@@ -565,9 +575,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             headers.append(("Content-Range", f"bytes {start}-{end}/{size}"))
             self.send(206, data[start:end + 1], content_type, headers)
 
-        def read_performance(self, query, *, instruction_test=False):
-            if performance is None:
-                self.send(404, {"error": "Performance review is available in sample mode."})
+        def read_package_record(self, query, command):
+            if command is None:
+                self.send(404, {"error": "This package record is available in sample mode."})
                 return
             params = parse_qs(query)
             revision = params.get("revision", [""])[0]
@@ -577,10 +587,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Choose an approved package to review."})
                 return
             try:
-                command = instruction_tests.read if instruction_test else performance.read
                 result = command(drafts.campaign_id, int(revision), fingerprint)
             except sqlite3.Error:
-                self.send(503, {"error": "Could not load performance review. Try again."})
+                self.send(503, {"error": "Could not load the package record. Try again."})
             else:
                 self.send(200, result)
 

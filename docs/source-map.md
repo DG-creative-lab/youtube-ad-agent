@@ -20,6 +20,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [campaign_agent/creatives.py](../campaign_agent/creatives.py) | Published examples and the approved neutral instruction components used to validate and assemble provider proposals. |
 | [campaign_agent/instruction_tests.py](../campaign_agent/instruction_tests.py) | Approved test pairs, stable viewer assignments, experiment-specific evidence and saved agent assessments. |
 | [campaign_agent/handoff.py](../campaign_agent/handoff.py) | Package content fingerprints, media references and the manual setup export. |
+| [campaign_agent/campaign_setup.py](../campaign_agent/campaign_setup.py) | Setup validation, exact-plan approval, one creation attempt and provider read-back. The simulated adapter stores its campaign separately from the approved plan. |
 | [campaign_agent/measurement.py](../campaign_agent/measurement.py) | Scoped viewer activity and completion attributed to exact comparison content. |
 | [web/planner/src/](../web/planner/src/) and [web/viewer/](../web/viewer/) | React campaign workspace and the public comparison experience. |
 | [tests/](../tests/) and [examples/](../examples/) | Offline behavior tests, authored catalogs and synthetic evidence. Private state and credentials live under the ignored `.local/` directory. |
