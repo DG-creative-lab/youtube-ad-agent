@@ -279,6 +279,18 @@ class PlacementAgent:
             rows = self.catalogs.read(db, source['catalog_id'])
             return {'entries': [{**row, 'description': row['description'][:300], 'source_reference': row['source_reference'][:200]} for row in rows[:10]],
                     'total': len(rows), 'shown': min(10, len(rows))}, 'running'
+        if name == 'validate_campaign_setup' and not args:
+            revision = source['revision']
+            try:
+                setup = self.owner.setup.validate(self.drafts.campaign_id, revision,
+                                                  source.get('fingerprint'), connection=db)
+            except PackageConflict:
+                return {'revision': revision, 'ambiguous': [], 'reply_version': REPLY_VERSION,
+                        'reply_code': 'setup_package_required',
+                        'message': 'Review and approve the current package before validating its setup.'}, 'needs_input'
+            return {'revision': revision, 'ambiguous': [], 'reply_version': REPLY_VERSION,
+                    'reply_code': 'setup_validated', 'setup_id': setup['id'],
+                    'message': f'The simulated setup for revision {revision} is available in Campaign setup.'}, 'answered'
         if name == 'classify_catalog':
             return classified, 'running'
         if name == 'review_performance':

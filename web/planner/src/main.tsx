@@ -5,6 +5,7 @@ import {PerformanceReview} from "./PerformanceReview";
 import {AgentComposer, draftPermissionLabels} from "./AgentComposer";
 import type {DraftPermission} from "./AgentComposer";
 import {CampaignChat} from "./CampaignChat";
+import {CampaignSetup} from "./CampaignSetup";
 import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
@@ -682,6 +683,14 @@ function App() {
                   </details>}
                   {draft && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
+                {activePackage?.approval && !needsLatest && !busy && (
+                  <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
+                    revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
+                    onPackageConflict={message => {
+                      setPackageChanged(true);
+                      setPackageError(message);
+                    }} />
+                )}
                 {activePackage?.approval && !needsLatest && !busy && (
                   <PerformanceReview key={`performance:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}

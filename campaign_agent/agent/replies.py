@@ -5,7 +5,8 @@ TOPICS = ('campaign_summary', 'capabilities', 'approval_and_launch', 'performanc
 WORKFLOW_CODES = ('approval_required', 'waiting_for_evidence', 'correction_required', 'comparison_fixed',
                   'instruction_test_prepared', 'review_refresh_required', 'experiment_review_required',
                   'instruction_draft_not_authorized', 'placement_draft_not_authorized',
-                  'experiment_unavailable', 'experiment_waiting', 'experiment_followup_prepared', 'experiment_refresh_required')
+                  'experiment_unavailable', 'experiment_waiting', 'experiment_followup_prepared', 'experiment_refresh_required',
+                  'setup_package_required', 'setup_validated')
 QUESTIONS = {
     'choose_context': 'Should I focus on video editing, audiobook production, or both?',
     'supply_catalog': 'No unambiguous placements were found. Can you supply a more relevant catalog?',
