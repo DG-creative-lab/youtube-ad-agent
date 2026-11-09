@@ -175,12 +175,11 @@ class PlacementAgent:
                     return self.read(run_id)
                 source = self._context(db, run_id)
                 history = self._history(db, run_id)
-                if any(step['tool'] == 'review_performance' and 'id' in step['result'] for step in history):
-                    try:
-                        self.review_tools.latest(db, source, history)
-                    except PackageConflict:
-                        self._finish(db, run_id, self.review_tools.refresh_outcome(source, history), 'needs_input')
-                        continue
+                try:
+                    self.review_tools.check_progress(db, source, history)
+                except PackageConflict:
+                    self._finish(db, run_id, self.review_tools.refresh_outcome(source, history), 'needs_input')
+                    continue
                 position = len(history)
                 row = db.execute('SELECT state,receipt,error FROM planner_turns WHERE run_id=? AND position=?',
                                  (run_id, position)).fetchone()
@@ -237,9 +236,10 @@ class PlacementAgent:
                     result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
                 except PackageConflict:
                     db.execute('ROLLBACK TO planner_tool')
-                    if receipt['tool'] not in {'review_performance', 'prepare_next_test', 'respond'}:
+                    if receipt['tool'] not in {'review_performance', 'load_experiment_evidence',
+                                               'assess_instruction_experiment', 'prepare_next_test', 'respond'}:
                         raise
-                    result, status = self.review_tools.refresh_outcome(source, history), 'needs_input'
+                    result, status = self.review_tools.refresh_outcome(source, history, receipt['tool']), 'needs_input'
                 except (ValueError, TypeError):
                     db.execute('ROLLBACK TO planner_tool')
                     result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
@@ -261,7 +261,7 @@ class PlacementAgent:
 
     def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
         name, args = call['tool'], call['arguments']
-        if name in {'read_campaign', 'inspect_catalog', 'classify_catalog', 'review_performance'} and args:
+        if name in {'read_campaign', 'inspect_catalog', 'classify_catalog', 'review_performance', 'load_experiment_evidence'} and args:
             raise ValueError('Unexpected fields')
         if name == 'read_campaign':
             draft = self.drafts._read(db)
@@ -272,6 +272,7 @@ class PlacementAgent:
                     'draft_permission': source.get('draft_permission', 'none'),
                     'package_approved': self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None,
                     'reporting_scenario': source.get('reporting_scenario', 'balanced'),
+                    'instruction_test_id': source.get('instruction_test_id'),
                     'placements': [{key: row[key] for key in ('id', 'creative', 'source')} for row in draft['placements'][:30]],
                     'placement_count': len(draft['placements']), 'buyer_corrections': [item for item in corrections if item]}, 'running'
         if name == 'inspect_catalog':
@@ -282,6 +283,10 @@ class PlacementAgent:
             return classified, 'running'
         if name == 'review_performance':
             return self.review_tools.review(db, source, captured_review)
+        if name == 'load_experiment_evidence':
+            return self.review_tools.load_experiment(db, source)
+        if name == 'assess_instruction_experiment':
+            return self.review_tools.assess_experiment(db, run_id, source, history, call)
         if name == 'prepare_next_test':
             return self.review_tools.prepare(db, run_id, source, history, call)
         if name == 'save_placement_draft' and set(args) in ({'video_ids'}, {'contexts'}):
@@ -311,6 +316,8 @@ class PlacementAgent:
         if name == 'respond' and set(args) == {'topic'}:
             if args['topic'] == 'performance_review':
                 return self.review_tools.explain(db, source, history)
+            if args['topic'] == 'experiment_review':
+                return self.review_tools.explain_experiment(db, source, history)
             draft = self.drafts._read(db)
             approved = False
             if args['topic'] == 'approval_and_launch':
