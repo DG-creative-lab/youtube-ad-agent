@@ -23,6 +23,17 @@ ASSESSMENT_REASONS = {
 LEGACY_REASON_CODES = {kind: code for code, (kind, _title) in ASSESSMENT_REASONS.items()}
 
 
+def recorded_assessment(context):
+    """Authored offline decision shared by the workspace and chat simulators."""
+    original, revised = context["rows"]
+    if any(row["arrivals"] < context["minimum_per_version"] for row in (original, revised)):
+        return {"reason_code": "insufficient_visits"}
+    if (revised["completions"] * original["arrivals"] <= original["completions"] * revised["arrivals"]
+            and context["correction"] and context["correction"]["kind"] == "keep_takes"):
+        return {"reason_code": "revised_not_higher"}
+    return {"reason_code": "continue_observation"}
+
+
 class InstructionTests:
     def __init__(self, drafts, viewer, performance):
         self.drafts = drafts
@@ -185,8 +196,10 @@ class InstructionTests:
             "correction": self.performance.correction_for_comparison(db, test["package"], test["creative_version"]),
         }
 
-    def review_context(self, test_id):
+    def review_context(self, test_id, *, connection=None):
         self.drafts.operator.require_brand(LOCAL_BRAND)
+        if connection is not None:
+            return self._evidence(connection, self._test(connection, test_id))
         with closing(self.viewer.connect()) as db:
             db.execute("BEGIN")
             test = self._test(db, test_id)

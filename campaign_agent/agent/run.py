@@ -14,7 +14,7 @@ from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
-from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests
+from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
 from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from .planner import PlacementAgent
@@ -54,13 +54,7 @@ class RecordedInference:
         return next(text for text in options if text != context["comparison"]["instruction"])
 
     def assess_instruction_test(self, context):
-        original, revised = context["rows"]
-        if any(row["arrivals"] < context["minimum_per_version"] for row in (original, revised)):
-            return {"reason_code": "insufficient_visits"}
-        if (revised["completion_rate"] <= original["completion_rate"]
-                and context["correction"] and context["correction"]["kind"] == "keep_takes"):
-            return {"reason_code": "revised_not_higher"}
-        return {"reason_code": "continue_observation"}
+        return recorded_assessment(context)
 
 
 class AgentRuntime:

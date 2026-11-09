@@ -237,7 +237,13 @@ class ChatCampaignReviewTests(unittest.TestCase):
         package = self.runtime.drafts.review_package('tts-sample', 3)
         self.runtime.drafts.approve_package('tts-sample', 3, package['fingerprint'])
         experiment = self.runtime.instruction_tests.start('tts-sample', 3, package['fingerprint'])
-        result = self.finish(self.start())
+        simulator = Mock()
+        simulator.next_turn.side_effect = [
+            {'call_id': 'aggregate', 'tool': 'review_performance', 'arguments': {}},
+            {'call_id': 'draft', 'tool': 'prepare_next_test', 'arguments': CHOICES},
+        ]
+        runtime = self.case.reopen(planner_simulator=simulator)
+        result = self.finish(self.start(runtime=runtime), runtime)
         self.assertEqual(result['result']['reply_code'], 'experiment_review_required')
         self.assertEqual(result['result']['performance_review']['instruction_test_id'], experiment['id'])
         self.assertIsNone(self.runtime.drafts.read(4))

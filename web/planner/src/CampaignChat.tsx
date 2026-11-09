@@ -9,6 +9,17 @@ type ReviewEvidence = {
   proposal: {title: string; correction?: {label: string; note: string}};
 };
 
+type ExperimentReview = {
+  id: string;
+  evidence: {
+    revision: number;
+    minimum_per_version: number;
+    rows: {arm: "original" | "revised"; arrivals: number; completions: number}[];
+    versions: {arm: "original" | "revised"; revision: number; content: {instruction: string}}[];
+    correction: {label: string; note: string} | null;
+  };
+};
+
 export type Conversation = {
   id: string;
   campaign_id: string;
@@ -18,10 +29,31 @@ export type Conversation = {
   messages: {
     id: number; role: "user" | "assistant"; content: string; run_id: string;
     revision: number; catalog_id: string; kind: string; created_at: string;
-    review?: ReviewEvidence; review_needs_refresh?: boolean;
+    review?: ReviewEvidence; experiment_review?: ExperimentReview; review_needs_refresh?: boolean;
   }[];
 };
 export type ConversationSummary = {id: string; title: string; model: string};
+
+function ExperimentEvidence({review, needsRefresh}: {review: ExperimentReview; needsRefresh?: boolean}) {
+  const evidence = review.evidence;
+  return <details className="chat-evidence">
+    <summary>Experiment evidence · revision {evidence.revision}{needsRefresh ? " · Refresh needed" : ""}</summary>
+    <h3>Recorded local activity by assigned version</h3>
+    <ul>{evidence.versions.map(version => {
+      const row = evidence.rows.find(item => item.arm === version.arm);
+      const label = version.arm === "original" ? "Original" : "Revised";
+      return <li key={version.arm}>
+        <strong>{label} · revision {version.revision}</strong>
+        {row && <> · {row.completions} of {row.arrivals} assigned visits completed</>}
+        <p>{version.content.instruction}</p>
+      </li>;
+    })}</ul>
+    <p>The draft decision uses an illustrative minimum of {evidence.minimum_per_version} assigned visits per version.</p>
+    {evidence.correction && <p>Saved buyer correction: {evidence.correction.label}.
+      {evidence.correction.note && <> Buyer note: “{evidence.correction.note}”</>}</p>}
+    <p className="review-reference">Assessment {review.id}</p>
+  </details>;
+}
 
 export function CampaignChat({conversation, busy}: {conversation: Conversation | null; busy: boolean}) {
   const messages = useRef<HTMLOListElement>(null);
@@ -36,7 +68,7 @@ export function CampaignChat({conversation, busy}: {conversation: Conversation |
           <strong>{message.role === "user" ? "You" : "Campaign agent"}</strong>
           <span>{message.role === "user" ? "From" : "At"} revision {message.revision}
             {message.kind === "needs_input" ? " · Question" : message.kind === "ready_for_review" ? " · Draft saved"
-              : message.kind === "superseded" ? " · Superseded" : message.kind === "answered" ? " · Reply only"
+              : message.kind === "superseded" ? " · Superseded" : message.kind === "answered" ? (message.experiment_review ? " · Assessment saved" : " · Reply only")
                 : message.kind === "needs_verification" ? " · Needs verification"
                   : message.kind === "waiting_for_evidence" ? " · Waiting for evidence" : ""}</span>
         </div>
@@ -58,6 +90,7 @@ export function CampaignChat({conversation, busy}: {conversation: Conversation |
             {message.review.proposal.correction.note && <> Buyer note: “{message.review.proposal.correction.note}”</>}</p>}
           <p className="review-reference">Review {message.review.id}</p>
         </details>}
+        {message.experiment_review && <ExperimentEvidence review={message.experiment_review} needsRefresh={message.review_needs_refresh} />}
       </li>)}
     </ol> : <p className="revision">Start a conversation about this campaign. Your messages and the agent’s replies will be saved here.</p>}
     {busy && <p className="chat-progress" role="status">The agent is working. Completed steps appear in Agent activity.</p>}

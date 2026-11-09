@@ -1,10 +1,11 @@
 """Application-owned chat wording for campaign facts and supported next actions."""
 
 REPLY_VERSION = 1
-TOPICS = ('campaign_summary', 'capabilities', 'approval_and_launch', 'performance_review')
+TOPICS = ('campaign_summary', 'capabilities', 'approval_and_launch', 'performance_review', 'experiment_review')
 WORKFLOW_CODES = ('approval_required', 'waiting_for_evidence', 'correction_required', 'comparison_fixed',
                   'instruction_test_prepared', 'review_refresh_required', 'experiment_review_required',
-                  'instruction_draft_not_authorized', 'placement_draft_not_authorized')
+                  'instruction_draft_not_authorized', 'placement_draft_not_authorized',
+                  'experiment_unavailable', 'experiment_waiting', 'experiment_followup_prepared', 'experiment_refresh_required')
 QUESTIONS = {
     'choose_context': 'Should I focus on video editing, audiobook production, or both?',
     'supply_catalog': 'No unambiguous placements were found. Can you supply a more relevant catalog?',
@@ -18,7 +19,7 @@ def reply(topic, draft, *, approved=False):
         text = f"Revision {draft['revision']} has {len(draft['placements'])} saved placements. "
         text += 'You can ask me to find more placements for video editing or audiobook production.'
     elif topic == 'capabilities':
-        text = 'I can inspect catalogs, add classified placements, review sample delivery with recorded viewer activity, and prepare instruction-only tests from eligible evidence and a saved keep-takes correction.'
+        text = 'I can inspect catalogs, add classified placements, review campaign delivery and assigned instruction experiment results, and prepare instruction tests from eligible evidence and a saved keep-takes correction.'
     elif topic == 'approval_and_launch':
         text = ('The current package has a saved approval in this app.' if approved
                 else 'The current package has no matching approval in this app.')

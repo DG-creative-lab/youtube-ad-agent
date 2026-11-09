@@ -16,9 +16,10 @@ def bounded_context(messages):
     kept = []
     for saved in reversed(messages):
         # Transcript inspectors retain full evidence; dialogue carries its reference and reloads current facts through tools.
-        message = {key: value for key, value in saved.items() if key != 'review'}
-        if saved.get('review'):
-            message['review_id'] = saved['review']['id']
+        message = {key: value for key, value in saved.items() if key not in {'review', 'experiment_review'}}
+        for evidence in ('review', 'experiment_review'):
+            if saved.get(evidence):
+                message[evidence + '_id'] = saved[evidence]['id']
         candidate = [message, *kept]
         if len(json.dumps(json.dumps(candidate)).encode()) > MAX_CONTEXT_BYTES:
             break
@@ -71,16 +72,17 @@ class CampaignConversations:
         messages = []
         for row in reversed(rows):
             message = dict(zip(keys, row[:8]))
-            if message['role'] == 'assistant' and message['kind'] in {'answered', 'needs_input'}:
-                result = verified_result(json.loads(row[8] or '{}'), message['kind'])
-                message['content'] = result['message']
-                if result.get('needs_verification'):
-                    message['kind'] = 'needs_verification'
             if message['role'] == 'assistant':
-                result = json.loads(row[8] or '{}')
-                if result.get('reply_version') == 1 and result.get('performance_review'):
-                    message['review'] = result['performance_review']
-                    message['review_needs_refresh'] = result.get('review_needs_refresh', False)
+                result = verified_result(json.loads(row[8] or '{}'), message['kind'])
+                if message['kind'] in {'answered', 'needs_input'}:
+                    message['content'] = result['message']
+                    if result.get('needs_verification'):
+                        message['kind'] = 'needs_verification'
+                if result.get('reply_version') == 1 and not result.get('needs_verification'):
+                    for source, field in (('performance_review', 'review'), ('experiment_review', 'experiment_review')):
+                        if result.get(source):
+                            message[field] = result[source]
+                            message['review_needs_refresh'] = result.get('review_needs_refresh', False)
             messages.append(message)
         return messages
 
