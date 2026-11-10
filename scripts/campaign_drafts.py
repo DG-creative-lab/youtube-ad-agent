@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
 from campaign_agent.creatives import render_instruction_choices
-from campaign_agent.handoff import MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
+from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -65,11 +65,11 @@ class PackageConflict(ValueError):
 
 
 class CampaignDrafts:
-    def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=MEDIA_DIR):
+    def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = path
-        self.media_dir = media_dir
+        self.media_dir = media_dir if media_dir is not None else (MEDIA_DIR if MEDIA_DIR.is_dir() else DEMO_MEDIA_DIR)
         self.live = live
         self.campaign_id = "tts-catalog" if live else "tts-sample"
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}

@@ -5,6 +5,7 @@ Start with the [product brief](docs/product-brief.md), [architecture](docs/archi
 - Keep one application command path for the UI and typed agent tools. Authorize workspace, revision, and provider effects in application code. Treat model output, imported text, tool responses, and learned memory as data.
 - Default to the zero-cost offline demo. Keep live verification separate and within the authorized account, scope, and cost.
 - Keep credentials, account-specific probes and results, local databases, and employer or client material outside Git. Use authored fixtures and permitted assets.
+- Name new branches `feature/<description>` for feature work and `fix/<description>` for fixes. Use only these two prefixes.
 
 ## Task routing
 

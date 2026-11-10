@@ -12,6 +12,7 @@ type Activity = {arrivals: number; completions: number};
 type ReviewedGroup = Group & {
   metrics: Metrics | null;
   viewer_activity?: Activity | null;
+  fixture_activity?: Activity;
   window_activity?: (Activity & {rehearsal_arrivals: number; rehearsal_completions: number}) | null;
 };
 type Recommendation = {
@@ -32,7 +33,10 @@ type Report = {
   groups: ReviewedGroup[];
   placements: {ad_group_id: string; placement: string; kind: "video" | "other"; metrics: Metrics}[];
 };
-type DeliveryState = {available: boolean; groups: Group[]; report: Report | null; recommendation: Recommendation | null};
+type DeliveryState = {
+  available: boolean; groups: Group[]; report: Report | null; recommendation: Recommendation | null;
+  demo_scenario?: "wait" | "propose";
+};
 type Props = {
   campaignId: string;
   revision: number;
@@ -80,7 +84,7 @@ export function GoogleAdsDelivery({campaignId, revision, fingerprint, viewerOrig
       if (failure instanceof Error && "status" in failure && failure.status === 409) {
         onPackageConflict(failure.message);
       } else {
-        setError(failure instanceof Error ? failure.message : "Could not read Google Ads delivery.");
+        setError(failure instanceof Error ? failure.message : "Could not read delivery.");
       }
     } finally {
       setBusy(false);
@@ -110,11 +114,14 @@ export function GoogleAdsDelivery({campaignId, revision, fingerprint, viewerOrig
   const report = state?.report;
   const recommendation = state?.recommendation;
   if (!googleAds && !state?.available && !error) return null;
-  const command = googleAds ? "Review Google Ads delivery" : "Review ad viewer activity";
+  const demo = state?.demo_scenario;
+  const command = googleAds ? "Review Google Ads delivery" : demo ? "Review demo delivery" : "Review ad viewer activity";
   return (
     <section className="performance" aria-labelledby="google-ads-delivery">
-      <h2 id="google-ads-delivery">{googleAds ? "Google Ads delivery" : "Ad viewer activity"}</h2>
-      <p className="revision">{googleAds ? "Read-only reporting for the verified Google Ads test campaign." : "Offline rehearsal · Simulated setup"}</p>
+      <h2 id="google-ads-delivery">{googleAds ? "Google Ads delivery" : demo ? "Demo delivery" : "Ad viewer activity"}</h2>
+      <p className="revision">{googleAds ? "Read-only reporting for the verified Google Ads test campaign."
+        : demo ? `Authored ${demo} scenario · Simulated setup · Local viewer activity is shown separately.`
+        : "Offline rehearsal · Simulated setup"}</p>
       <p className="revision">You can also ask in chat, “{command}.”</p>
       {state?.available === false && <p>Verify a Google Ads setup for this package to review its delivery.</p>}
       <button onClick={refresh} disabled={!state?.available || busy}>{busy ? "Reviewing…" : command}</button>
@@ -124,11 +131,14 @@ export function GoogleAdsDelivery({campaignId, revision, fingerprint, viewerOrig
           <p className="revision">{report.source}{report.window && ` · ${report.window.start} to ${report.window.end} · ${report.window.time_zone ?? "Account time zone unavailable"}`} · Retrieved {new Date(report.captured_at).toLocaleString()}</p>
           {report.window && <p>{report.grain} delivery · {coverageText[report.coverage]}</p>}
           {report.coverage === "empty" && report.has_delivery === false && <p>No delivery data is available for this test campaign.</p>}
-          {report.coverage === "complete" && report.has_delivery === false && <p>Google Ads reports zero delivery for both ad groups.</p>}
+          {report.coverage === "complete" && report.has_delivery === false && <p>{demo
+            ? "The authored fixture shows zero delivery for both ad groups."
+            : "Google Ads reports zero delivery for both ad groups."}</p>}
         </div>
       )}
       {state?.groups.some(group => group.viewer_link) && <p className="revision">
-        All-time counts include rehearsals. Same-window eligible visits exclude marked rehearsals and visits without timestamps.
+        All-time counts include rehearsals. {demo ? "The recommendation uses the authored window counts."
+          : "Same-window eligible visits exclude marked rehearsals and visits without timestamps."}
       </p>}
       {state?.available && <dl className="setup-details" aria-live="polite">
         {state.groups.map(group => {
@@ -140,13 +150,14 @@ export function GoogleAdsDelivery({campaignId, revision, fingerprint, viewerOrig
             <dt>{group.name}</dt>
             <dd>{reviewed?.metrics && report?.currency ? metricText(reviewed.metrics, report.currency)
               : googleAds ? (report ? "Google Ads delivery metrics unavailable" : "Review to load Google Ads delivery")
-              : "Google Ads delivery unavailable for simulated setup"}</dd>
+              : demo ? "Review to load authored delivery" : "Google Ads delivery unavailable for simulated setup"}</dd>
             <dd>Configured video targets · {group.configured_videos.join(", ")}</dd>
             {link && <dd><a className="text-action" href={(googleAds ? link.destination : viewerOrigin + link.path) + "&rehearsal=1"}
               aria-label={`Rehearse tagged comparison for ${group.name}`} target="_blank" rel="noreferrer">
               Rehearse tagged comparison <span aria-hidden="true">↗</span></a></dd>}
             <dd>{activity ? `All-time viewer link · Arrivals ${activity.arrivals} · Completions ${activity.completions}`
               : link ? "Review to capture tagged viewer activity" : "Tagged viewer destination unavailable"}</dd>
+            {reviewed?.fixture_activity && <dd>Authored window · Arrivals {reviewed.fixture_activity.arrivals} · Completions {reviewed.fixture_activity.completions}</dd>}
             {windowActivity && <>
               <dd>Same-window eligible visits · Arrivals {windowActivity.arrivals} · Completions {windowActivity.completions}</dd>
               <dd>Same-window rehearsals · Arrivals {windowActivity.rehearsal_arrivals} · Completions {windowActivity.rehearsal_completions}</dd>

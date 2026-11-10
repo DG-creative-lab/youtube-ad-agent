@@ -1,5 +1,6 @@
-"""Generate local synthetic speech and original comparison media on macOS."""
+"""Regenerate the original comparison media with Flite or a local macOS voice."""
 
+import argparse
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,17 +32,30 @@ def video(voice, art, destination):
 
 
 def main():
-    if not all(shutil.which(command) for command in ("say", "ffmpeg")):
-        raise SystemExit("Generate these local fixtures with macOS say and FFmpeg.")
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=OUTPUT) as folder:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--flite", help="Path to a Flite executable with the CMU SLT voice.")
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    args = parser.parse_args()
+    speech = args.flite or "say"
+    if not all(shutil.which(command) for command in (speech, "ffmpeg")):
+        parser.error("Media regeneration requires FFmpeg and the specified Flite executable or macOS say.")
+    args.output.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=args.output) as folder:
         staging = Path(folder)
         for example in EXAMPLES:
-            for (take, _, name), rate in zip(example.takes, (194, 144), strict=True):
-                voice = staging / "voice.aiff"
-                subprocess.run(["say", "-v", "Samantha", "-r", str(rate), "-o", str(voice), example.passage], check=True)
+            for take, _, name in example.takes:
+                if args.flite:
+                    voice = staging / "voice.wav"
+                    stretch = "0.85" if take == "a" else "1.18"
+                    command = [speech, "-voice", "slt", "--setf", "duration_stretch=" + stretch,
+                               "-t", example.passage, "-o", str(voice)]
+                else:
+                    voice = staging / "voice.aiff"
+                    rate = "194" if take == "a" else "144"
+                    command = [speech, "-v", "Samantha", "-r", rate, "-o", str(voice), example.passage]
+                subprocess.run(command, check=True)
                 if voice.stat().st_size < 4096:
-                    raise SystemExit("macOS did not produce a usable voice recording. Check the local voice installation.")
+                    raise SystemExit("The synthesizer did not produce a usable voice recording.")
                 if name.endswith(".mp4"):
                     video(voice, EDIT, staging / name)
                 else:
@@ -50,8 +64,8 @@ def main():
                         video(voice, BOOK, staging / example.preview)
                 voice.unlink()
         for asset in staging.iterdir():
-            asset.replace(OUTPUT / asset.name)
-    print(f"Local demo media prepared in {OUTPUT}")
+            asset.replace(args.output / asset.name)
+    print(f"Demo media prepared in {args.output}")
 
 
 if __name__ == "__main__":

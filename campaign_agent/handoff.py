@@ -9,6 +9,7 @@ from .creatives import EXAMPLES
 
 
 MEDIA_DIR = Path(__file__).resolve().parents[1] / ".local/viewer-media"
+DEMO_MEDIA_DIR = Path(__file__).resolve().parents[1] / "examples/viewer-media"
 
 
 def media_sha256(data):

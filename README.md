@@ -11,16 +11,26 @@ Start with the [product brief](docs/product-brief.md), [architecture](docs/archi
 Use Python 3.12 or newer, Node 22.12 or newer, and pnpm 10.33.0 to run the React planner. After building the frontend, start the Python server and open the private planner link printed in the terminal.
 
 ```sh
-pnpm --dir web/planner install --frozen-lockfile
-pnpm --dir web/planner build
-python3 scripts/placement_review.py serve
+(cd web/planner && pnpm install --frozen-lockfile && pnpm build)
+python3 scripts/placement_review.py serve --portable-demo wait
 ```
 
 Choose **Try the offline example** on the home screen to open the campaign workspace and run the recorded agent against the fictional catalog. The workspace shows the completed steps, saved draft revision, placements and comparison links. **Resume preparation** continues a run interrupted in the same browser tab. Use **Placements** to search, edit selections or export placement URLs. Rebuild after editing the React source.
 
-In the campaign workspace, review the setup, preview the cuts and choose **Approve package**. Both placement groups and their generated media must be ready. **Export setup** downloads a JSON handoff with fictional placement labels. Review links allow switching between the examples whose content still matches the package. If the draft, comparison text or media changes, reload and review the package before approving it again. **Approval history** shows the saved contents of each approval recorded with a snapshot.
+In the campaign workspace, review the setup, preview the bundled cuts and choose **Approve package**. **Export setup** downloads a JSON handoff with fictional placement labels. Review links allow switching between the examples whose content still matches the package. If the draft, comparison text or media changes, reload and review the package before approving it again. **Approval history** shows the saved contents of each approval recorded with a snapshot.
 
 To rehearse campaign creation, ask **“Validate the campaign setup”** in chat or choose **Validate paused setup** in **Campaign setup**. Review the simulated account, creative groups, destinations and placement IDs, then choose **Approve and create paused campaign**. The workspace shows the separately saved provider read-back and simulated resource IDs. If creation is uncertain, **Check provider read-back** checks for that same operation. This flow uses the local simulated provider and a zero budget.
+
+### Portable demo walkthrough
+
+The portable demo uses bundled media, recorded agent responses and an authored delivery scenario. It needs no provider credentials or media generation. The default database is `.local/portable-demo.sqlite3`. Use `--draft-db` with a new path for a fresh run.
+
+1. Prepare and approve the offline package, then validate and create its paused simulated setup.
+2. In **Demo delivery**, open **Rehearse tagged comparison** for each group. Play Take A and Take B to the end and select one. Return to the planner and choose **Review demo delivery**. Each group's **All-time viewer link** row should show one arrival and one completion on a fresh run.
+3. Choose **Recommend next test**. The `wait` fixture shows zero delivery and recommends waiting for evidence.
+4. Stop the server and restart with `--portable-demo propose` using the same database and viewer port. Open the new private planner link, return to the approved workspace, choose **Review demo delivery**, then **Recommend next test**. The authored editing cohort shows one completion from four arrivals and the recommendation is **Test a shorter second take**. The observed viewer link counts remain separate. The same actions are available in chat with “Review demo delivery” and “Recommend the next test from the saved delivery review.”
+
+The ordinary `serve` command uses the simulated setup and local viewer attribution without these authored delivery scenarios.
 
 The optional Google Ads sandbox CLI uses a separate local draft database with an approved test package. Use the existing Ads OAuth grant in `.local/google/` and a Python environment with `google-auth` and `requests`. In a private config JSON, set `manager_id`, `account_id`, `logo_file` and `creatives`. Key `creatives` by the package's creative versions and provide `video_id`, `destination`, `headline`, `long_headline` and `description` for each. Supply approved test videos, public HTTPS destinations and a square PNG logo. The test package needs two groups with registered, distinct video targets.
 
@@ -124,7 +134,7 @@ The default assignment uses local rules. To explicitly enable the billed Jev ada
 
 ## Viewer comparison
 
-On macOS with FFmpeg installed, run `python3 -m scripts.prepare_viewer_media` once. It uses the local Samantha voice and writes the original demo media to ignored `.local/viewer-media/`. Start the placement server and open **Preview local creatives** to play the captioned previews and follow their comparison links.
+The [bundled viewer media](examples/viewer-media/README.md) uses original scripts and graphics with Flite synthetic speech. Open **Preview local creatives** to play the captioned previews and follow their comparison links. Ordinary `serve` preserves an existing `.local/viewer-media/` directory for packages approved with locally generated media. Portable demo mode always uses the bundled versions.
 
 The comparison records local viewer activity in the draft database. A visit keeps its original creative reference when the viewer switches examples. Playing both takes through and choosing one records one completion per visit and example version. The viewer retries pending activity with the same event IDs after a refresh in the same tab.
 
