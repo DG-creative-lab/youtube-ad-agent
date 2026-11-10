@@ -79,12 +79,12 @@ async function post(action, payload) {
 
 function storageKey() {
   if (attribution) return "viewer:ad:" + attribution + (rehearsal ? ":rehearsal" : "");
-  return testId ? "viewer:test:" + testId
+  return testId ? "viewer:test:" + testId + (rehearsal ? ":rehearsal" : "")
     : "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : "");
 }
 
 async function participantReference() {
-  const key = "instruction-test:participant:" + testId;
+  const key = "instruction-test:participant:" + testId + (rehearsal ? ":rehearsal" : "");
   function getOrCreate() {
     try {
       let participant = localStorage.getItem(key);
@@ -228,7 +228,7 @@ function render(data) {
 async function openExample(example = null, id = null) {
   if (attribution) return post("open", {attribution, visit_id: id, rehearsal});
   if (testId) {
-    return post("test/open", {test_id: testId, participant_id: await participantReference()});
+    return post("test/open", {test_id: testId, participant_id: await participantReference(), rehearsal});
   }
   return post("open", {creative_ref: creative, example_ref: example, visit_id: id,
                        ...(content && {content}), ...(references && {references})});
