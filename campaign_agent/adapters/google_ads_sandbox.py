@@ -28,7 +28,8 @@ def query_rows(post, account, query):
 
 
 def verify_test_account(query_rows, manager_id, account_id):
-    query = 'SELECT customer.id, customer.test_account, customer.manager, customer.currency_code FROM customer'
+    query = ('SELECT customer.id, customer.test_account, customer.manager, customer.currency_code, '
+             'customer.time_zone FROM customer')
     for account, manager in ((manager_id, True), (account_id, False)):
         rows = query_rows(account, query)
         customer = rows[0].get('customer', {}) if len(rows) == 1 else {}
@@ -44,6 +45,7 @@ def verify_test_account(query_rows, manager_id, account_id):
     if (str(child.get('id')) != account_id or str(child.get('level')) != '1'
             or child.get('testAccount') is not True or child.get('manager', False) is not False):
         raise SetupProviderError('Google did not verify the test manager relationship.')
+    return customer
 
 
 class GoogleAdsSandbox:

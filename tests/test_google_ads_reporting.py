@@ -1,6 +1,7 @@
 from contextlib import closing, nullcontext
+from datetime import datetime
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND
@@ -16,6 +17,7 @@ import test_google_ads_sandbox as fixtures
 GROUPS = ('201', '202')
 CAMPAIGN = '101'
 REQUEST = 'Review Google Ads delivery'
+RECOMMEND = 'Recommend the next test from the saved delivery review.'
 
 
 def row(group, impressions, placement=None):
@@ -223,6 +225,107 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.assertEqual(self.runtime.drafts.read()['revision'], 2)
         local_review = offline.performance.capture_review(*self.reference, 'balanced')
         self.assertEqual([group['completions'] for group in local_review['local_viewer_activity']['rows']], [0, 1])
+
+    def test_recommends_from_the_saved_window_and_current_buyer_correction(self):
+        self.sandbox.provider.viewer_origin = 'https://viewer.example.com'
+        edit_link, book_link = self.verify_setup()['viewer_links']
+        viewer = self.runtime.performance.viewer
+
+        def open_visit(link, timestamp, *, rehearsal=False, tagged=True):
+            with patch('campaign_agent.measurement.time_ns',
+                       return_value=int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000)):
+                return viewer.open_example(
+                    link['creative_ref'], link['comparison_ref'], content_fingerprint=link['content_fingerprint'],
+                    ad_link_id=link['id'] if tagged else None, rehearsal=rehearsal,
+                )['visit_id']
+
+        def complete(link, visit, timestamp):
+            for take in ('a', 'b'):
+                for kind in ('start', 'finish'):
+                    viewer.record(link['creative_ref'], visit, link['comparison_ref'], uuid4().hex, kind, take)
+            with patch('campaign_agent.measurement.time_ns',
+                       return_value=int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000)):
+                viewer.record(link['creative_ref'], visit, link['comparison_ref'], uuid4().hex, 'choose', 'a')
+
+        # The account-local window starts at 23:00 UTC and includes the October clock change.
+        first = open_visit(edit_link, '2026-10-18T23:00:00+00:00')
+        second = open_visit(edit_link, '2026-10-20T10:00:00+00:00')
+        open_visit(edit_link, '2026-10-21T10:00:00+00:00')
+        outside = open_visit(edit_link, '2026-10-18T22:59:59+00:00')
+        rehearsal = open_visit(edit_link, '2026-10-20T11:00:00+00:00', rehearsal=True)
+        self.assertEqual(viewer.open_example(
+            edit_link['creative_ref'], edit_link['comparison_ref'], rehearsal,
+            content_fingerprint=edit_link['content_fingerprint'], ad_link_id=edit_link['id'],
+        )['visit_id'], rehearsal)
+        legacy = open_visit(edit_link, '2026-10-20T12:00:00+00:00')
+        with closing(viewer.connect()) as db, db:
+            db.execute('UPDATE viewer_visits SET arrived_ms=NULL, rehearsal=NULL WHERE id=?', (legacy,))
+        open_visit(book_link, '2026-10-20T10:00:00+00:00')
+        complete(edit_link, first, '2026-10-19T07:00:00+00:00')
+        complete(edit_link, second, '2026-10-26T00:00:00+00:00')
+        complete(edit_link, outside, '2026-10-19T07:00:00+00:00')
+        complete(edit_link, rehearsal, '2026-10-20T12:00:00+00:00')
+        for _ in range(3):
+            open_visit(edit_link, '2026-10-20T10:00:00+00:00', tagged=False)
+        sample = self.runtime.performance.review(*self.reference, 'balanced')
+        self.assertEqual(sample['proposal']['creative_version'], edit_link['creative_ref'])
+        now = datetime.fromisoformat('2026-10-26T00:30:00+00:00')
+        with patch('campaign_agent.adapters.google_ads_reporting.datetime', wraps=datetime) as clock:
+            clock.now.return_value = now
+            self.totals = [{'campaign': {'id': CAMPAIGN}, 'adGroup': {'id': group}} for group in GROUPS]
+            zero = self.delivery.review(*self.reference)
+            wait = self.delivery.recommend(*self.reference, zero['id'])
+            self.assertEqual(wait['kind'], 'wait')
+            self.assertIn('zero delivery', wait['reason'])
+
+            editing = row('201', 100)
+            editing['metrics']['clicks'] = '8'
+            self.totals = [editing]
+            partial = self.delivery.review(*self.reference)
+            self.assertEqual(self.delivery.recommend(*self.reference, partial['id'])['kind'], 'coverage_check')
+            self.totals.append(row('202', 100))
+            complete_report = self.delivery.review(*self.reference)
+        self.assertEqual(complete_report['window'], {'start': '2026-10-19', 'end': '2026-10-25',
+                                                    'time_zone': 'Europe/London'})
+        self.assertEqual(complete_report['groups'][0]['window_activity'],
+                         {'arrivals': 3, 'completions': 1, 'rehearsal_arrivals': 1, 'rehearsal_completions': 1})
+        self.assertEqual(complete_report['groups'][1]['window_activity']['arrivals'], 1)
+        self.transport.reset_mock()
+        with self.assertRaises(PackageConflict):
+            self.delivery.recommend(*self.reference, partial['id'])
+        baseline = self.delivery.recommend(*self.reference, complete_report['id'])
+        self.assertEqual(baseline['title'], 'Test a shorter second take')
+        self.assertEqual(baseline['creative_version'], edit_link['creative_ref'])
+        correction = self.runtime.performance.save_correction(
+            *self.reference, sample['id'], 'keep_takes', '', uuid4().hex)
+        self.assertTrue(self.delivery.read(*self.reference)['recommendation']['needs_refresh'])
+
+        case = self.sandbox.case
+        session = uuid4().hex
+        run = self.runtime.planner.start(RECOMMEND, 'simulated', session, uuid4().hex, case.catalog,
+                                         draft_permission='instruction_test')
+        result = case.finish(run, self.runtime)
+        saved = self.delivery.read(*self.reference)['recommendation']
+        self.assertEqual(result['result']['delivery_recommendation_id'], saved['id'])
+        self.assertEqual(saved['title'], 'Test clearer comparison instructions')
+        self.assertEqual(saved['correction']['id'], correction['id'])
+        self.assertFalse(saved['needs_refresh'])
+        self.assertIn('1 of 3 eligible tagged visits', result['result']['message'])
+        self.runtime.performance.save_correction(*self.reference, sample['id'], 'keep_comparison', '', uuid4().hex)
+        held = self.delivery.recommend(*self.reference, complete_report['id'])
+        self.assertEqual(held['kind'], 'hold_comparison')
+        self.assertEqual(self.runtime.drafts.read()['revision'], 2)
+        self.transport.assert_not_called()
+
+        stale = self.runtime.planner.start('Could you suggest a next test from this Google Ads delivery report?',
+                                           'simulated', uuid4().hex, uuid4().hex, case.catalog)
+        newer_report = self.delivery.review(*self.reference)
+        self.assertNotEqual(newer_report['id'], complete_report['id'])
+        self.transport.reset_mock()
+        result = case.finish(stale, self.runtime)
+        self.assertEqual(result['status'], 'needs_input')
+        self.assertIsNone(result['result']['delivery_recommendation_id'])
+        self.transport.assert_not_called()
 
     def test_chat_reports_only_on_an_explicit_current_campaign_request(self):
         self.verify_setup()
