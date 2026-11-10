@@ -1,7 +1,9 @@
 from contextlib import closing
 import sqlite3
 import unittest
+from unittest.mock import patch
 
+from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
@@ -25,6 +27,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         self.addCleanup(self.case.doCleanups)
         self.drafts = self.case.runtime.drafts
         self.native_campaign = None
+        self.ad_destinations = []
         self.mutations = []
         self.test_account = True
         self.manager_currency = 'GBP'
@@ -58,6 +61,8 @@ class GoogleAdsSandboxTests(unittest.TestCase):
                     self.edit_draft()
                 return {}, 'validate-fixture'
             self.native_campaign = body['mutateOperations'][1]['campaignOperation']['create']['name']
+            self.ad_destinations = [op['adGroupAdOperation']['create']['ad']['finalUrls']
+                                    for op in body['mutateOperations'] if 'adGroupAdOperation' in op]
             if self.lose_receipt:
                 raise SetupProviderError('Lost the creation response')
             results = [{} for _ in body['mutateOperations']]
@@ -92,7 +97,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         if 'FROM ad_group_ad ' in query:
             return [
                 {'adGroup': {'id': str(index)}, 'adGroupAd': {'status': 'ENABLED', 'ad': {
-                    'id': str(index + 100), 'finalUrls': [f'https://example.com/{context}'],
+                    'id': str(index + 100), 'finalUrls': self.ad_destinations[index - 201],
                     'demandGenVideoResponsiveAd': {
                         'videos': [{'asset': f'customers/{ACCOUNT}/assets/{index + 200}'}],
                         'logoImages': [{'asset': f'customers/{ACCOUNT}/assets/500'}],
@@ -144,6 +149,24 @@ class GoogleAdsSandboxTests(unittest.TestCase):
                           for row in placements], [('-4', TARGETS[0], False), ('-6', TARGETS[1], False)])
         self.assertEqual(self.setup.create(*self.reference, preview['id']), verified)
         self.assertEqual(len(self.mutations), 2)
+
+    def test_different_destination_in_readback_keeps_the_ad_link_unavailable(self):
+        self.provider.viewer_origin = 'https://viewer.example.com'
+        preview = self.setup.validate(*self.reference)
+        link = preview['viewer_links'][0]
+        campaign_rows = self.campaign_rows
+
+        def replace_destination(query):
+            rows = campaign_rows(query)
+            if 'FROM ad_group_ad ' in query:
+                rows[0]['adGroupAd']['ad']['finalUrls'] = ['https://viewer.example.com/viewer']
+            return rows
+
+        with patch.object(self, 'campaign_rows', side_effect=replace_destination):
+            result = self.setup.create(*self.reference, preview['id'])
+        self.assertEqual(result['status'], 'mismatch')
+        with closing(sqlite3.connect(self.drafts.path)) as db:
+            self.assertIsNone(CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, link['id']))
 
     def test_migrates_existing_setup_and_keeps_provider_accounts_separate(self):
         simulator = self.case.runtime.setup

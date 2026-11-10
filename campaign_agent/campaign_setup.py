@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from .handoff import package_fingerprint
 from scripts.campaign_drafts import PackageConflict
@@ -84,7 +85,7 @@ class CampaignSetup:
                 raise ValueError('Validate the Google Ads setup from the sandbox CLI.')
             with closing(sqlite3.connect(self.path)) as db:
                 db.execute('BEGIN')
-                record, plan = self._prepare(db, key)
+                record, plan, links = self._prepare(db, key)
             if record is not None:
                 return record
             validation_id = self.provider.validate(plan)
@@ -94,39 +95,69 @@ class CampaignSetup:
                 existing = self._read(db, key)
                 if existing is not None:
                     return self._require_setup(db, key, existing['id'])
-                return self._save_validated(db, key, plan, validation_id)
+                return self._save_validated(db, key, plan, links, validation_id)
         if connection is None:
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 return self.validate(campaign_id, revision, fingerprint, connection=db)
-        existing, plan = self._prepare(connection, key)
+        existing, plan, links = self._prepare(connection, key)
         if existing is not None:
             return existing
         self.provider.validate(plan)
-        return self._save_validated(connection, key, plan)
+        return self._save_validated(connection, key, plan, links)
 
     def _prepare(self, db, key):
         campaign_id, revision, fingerprint = key[2:5]
         package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
         existing = self._read(db, key)
         if existing is not None:
-            return self._require_setup(db, key, existing['id']), None
-        return None, self.provider.prepare(package, fingerprint)
+            return self._require_setup(db, key, existing['id']), None, None
+        links, groups = [], []
+        for group in package['groups']:
+            link = {'context': group['context'], 'creative_ref': group['creative_version'],
+                    'comparison_ref': group['comparison_version'],
+                    'content_fingerprint': package_fingerprint(group['content'])}
+            link['id'] = package_fingerprint({'setup_scope': key, 'comparison': link})
+            path = '/viewer?attribution=' + link['id']
+            links.append({**link, 'path': path})
+            groups.append({**group, 'viewer_path': path})
+        plan = self.provider.prepare({**package, 'groups': groups}, fingerprint)
+        destinations = {group['context']: group['destination']
+                        for group in plan.get('expected_readback', plan)['groups']}
+        used_links = []
+        for link in links:
+            destination = destinations[link['context']]
+            url = urlsplit(destination)
+            if f'{url.path}?{url.query}' == link['path'] and not url.fragment:
+                used_links.append({**link, 'destination': destination})
+        return None, plan, used_links
 
     @staticmethod
     def _setup_id(key, plan):
         # The plan already binds the provider and account. Preserve IDs issued before the journal migration.
         return package_fingerprint({'scope': key[:5], 'plan': plan})
 
-    def _save_validated(self, connection, key, plan, validation_id=None):
+    def _save_validated(self, connection, key, plan, links, validation_id=None):
         revision, fingerprint = key[3:5]
         record = {'id': self._setup_id(key, plan), 'revision': revision,
                   'fingerprint': fingerprint, 'plan': plan, 'status': 'validated',
                   'approval': None, 'receipt': None, 'readback': None}
         if validation_id:
             record['validation_request_id'] = validation_id
+        if links:
+            record['viewer_links'] = links
         connection.execute('INSERT INTO campaign_setups VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (*key, json.dumps(record)))
         return record
+
+    @staticmethod
+    def verified_viewer_link(db, scope, link_id):
+        row = db.execute('''SELECT link.value FROM campaign_setups AS setup,
+                            json_each(setup.snapshot, '$.viewer_links') AS link
+                            WHERE setup.client_id=? AND setup.brand_id=?
+                            AND json_extract(setup.snapshot, '$.status')='verified'
+                            AND json_extract(link.value, '$.id')=?''',
+                         (scope.client_id, scope.brand_id, link_id)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def _require_setup(self, db, key, setup_id):
         record = self._read(db, key)

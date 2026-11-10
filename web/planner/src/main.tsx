@@ -142,6 +142,7 @@ function App() {
   const [packageError, setPackageError] = useState("");
   const [packageChanged, setPackageChanged] = useState(false);
   const [reviewRefresh, setReviewRefresh] = useState(0);
+  const [setupRefresh, setSetupRefresh] = useState(0);
   const [historicalSnapshot, setHistoricalSnapshot] = useState<{fingerprint: string; data: unknown}>();
   const [historyError, setHistoryError] = useState("");
 
@@ -689,13 +690,15 @@ function App() {
                 {activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
+                    onSetupChanged={() => setSetupRefresh(current => current + 1)}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);
                     }} />
                 )}
-                {mode?.googleAdsReporting && activePackage?.approval && !needsLatest && !busy && (
-                  <GoogleAdsDelivery key={`google-ads:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
+                {mode && activePackage?.approval && !needsLatest && !busy && (
+                  <GoogleAdsDelivery key={`delivery:${activePackage.fingerprint}:${setupRefresh}`} campaignId={activePackage.package.campaign_id}
+                    viewerOrigin={mode.viewerOrigin} googleAds={Boolean(mode.googleAdsReporting)}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onPackageConflict={message => {
                       setPackageChanged(true);

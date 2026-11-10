@@ -53,6 +53,7 @@ const el = (id) => document.getElementById(id);
 const defaultCreative = "editing-voiceover-v1";
 const query = new URLSearchParams(location.search);
 const testId = query.get("test");
+const attribution = query.get("attribution");
 const content = query.get("content");
 const reviewed = query.getAll("reviewed");
 const references = reviewed.length ? Object.fromEntries(reviewed.map(value => value.split(":"))) : null;
@@ -76,6 +77,7 @@ async function post(action, payload) {
 }
 
 function storageKey() {
+  if (attribution) return "viewer:ad:" + attribution;
   return testId ? "viewer:test:" + testId
     : "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : "");
 }
@@ -223,6 +225,7 @@ function render(data) {
 }
 
 async function openExample(example = null, id = null) {
+  if (attribution) return post("open", {attribution, visit_id: id});
   if (testId) {
     return post("test/open", {test_id: testId, participant_id: await participantReference()});
   }
@@ -265,7 +268,7 @@ el("example").onchange = async () => {
     try {
       render(await openExample());
     } catch (error) {
-      if (error.status !== 404 || creative === defaultCreative || content || testId) throw error;
+      if (error.status !== 404 || creative === defaultCreative || content || testId || attribution) throw error;
       creative = defaultCreative;
       render(await openExample());
       history.replaceState(null, "", "/viewer");

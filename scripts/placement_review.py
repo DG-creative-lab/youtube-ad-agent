@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find candidate placements and route a creator-supplied video catalog."""
 import argparse
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -23,6 +23,8 @@ if not __package__:
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.access import LOCAL_BRAND
+from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import caption_bytes, media_sha256, package_fingerprint
 from campaign_agent.placements import read_catalog, rule_assignment
@@ -355,20 +357,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         raise ValueError("Choose a valid instruction test.")
                     result = instruction_tests.open(**data)
                 elif self.path == "/api/viewer/open":
-                    content = data.pop("content", None)
-                    references = data.pop("references", None)
-                    if (set(data) != {"creative_ref", "example_ref", "visit_id"}
-                            or not isinstance(data["creative_ref"], str)
-                            or (content is not None and (not isinstance(content, str)
-                                or not re.fullmatch(r"[0-9a-f]{64}", content)))
-                            or (references is not None and (
-                                content is None or not isinstance(references, dict)
-                                or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
-                                       for digest in references.values())))
-                            or any(data[key] is not None and not isinstance(data[key], str)
-                                   for key in ("example_ref", "visit_id"))):
-                        raise ValueError("Invalid comparison request.")
-                    result = self.open_comparison(data, content, references)
+                    if "attribution" in data:
+                        result = self.open_ad_comparison(data)
+                    else:
+                        result = self.open_reviewed_comparison(data)
                 else:
                     if (set(data) != {"creative_ref", "example_ref", "visit_id", "event_id", "kind", "take"}
                             or any(not isinstance(value, str) for value in data.values())):
@@ -387,7 +379,42 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             else:
                 self.send(200, result)
 
-        def open_comparison(self, data, fingerprint, references):
+        def open_reviewed_comparison(self, data):
+            content = data.pop("content", None)
+            references = data.pop("references", None)
+            if (set(data) != {"creative_ref", "example_ref", "visit_id"}
+                    or not isinstance(data["creative_ref"], str)
+                    or (content is not None and (not isinstance(content, str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", content)))
+                    or (references is not None and (
+                        content is None or not isinstance(references, dict)
+                        or any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                               for digest in references.values())))
+                    or any(data[key] is not None and not isinstance(data[key], str)
+                           for key in ("example_ref", "visit_id"))):
+                raise ValueError("Invalid comparison request.")
+            return self.open_comparison(data, content, references)
+
+        def open_ad_comparison(self, data):
+            if (set(data) != {"attribution", "visit_id"} or not isinstance(data["attribution"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", data["attribution"])
+                    or (data["visit_id"] is not None and not isinstance(data["visit_id"], str))):
+                raise ValueError("Choose a valid ad comparison link.")
+            if agent is None:
+                raise ViewerNotFound("This ad comparison is unavailable.")
+            with closing(viewer.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                link = CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, data["attribution"])
+                if link is None:
+                    raise ViewerNotFound("This ad comparison is unavailable.")
+                result = self.open_comparison(
+                    {"creative_ref": link["creative_ref"], "example_ref": link["comparison_ref"],
+                     "visit_id": data["visit_id"]}, link["content_fingerprint"], None,
+                    ad_link_id=link["id"], connection=db,
+                )
+                return {**result, "creative_ref": link["creative_ref"]}
+
+        def open_comparison(self, data, fingerprint, references, *, ad_link_id=None, connection=None):
             if fingerprint is None:
                 return viewer.open_example(**data)
             origin, example = viewer.resolve(data["creative_ref"], data["example_ref"])
@@ -410,6 +437,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 **{**data, "example_ref": selected_ref},
                 content_fingerprint=fingerprint,
                 origin_unavailable=origin.ref not in verified,
+                ad_link_id=ad_link_id, connection=connection,
             )
             content = verified[selected_ref]
             comparison = result["example"]

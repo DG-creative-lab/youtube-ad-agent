@@ -119,7 +119,10 @@ class PlacementAgent:
                        'conversation': previous, 'conversation_truncated': truncated, 'after_message': after_message,
                        **self.review_tools.pin(db, current),
                        'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
-            if DELIVERY_REQUEST.fullmatch(' '.join(request.split())):
+            request_text = ' '.join(request.split())
+            if (DELIVERY_REQUEST.fullmatch(request_text)
+                    or (self.owner.delivery.reporting is None
+                        and request_text.casefold().rstrip('.!?') == 'review ad viewer activity')):
                 try:
                     binding = self.owner.delivery.binding(db, self.drafts.campaign_id, current['revision'],
                                                           context['fingerprint'])
@@ -345,7 +348,7 @@ class PlacementAgent:
                 except PackageConflict:
                     pass
             message = delivery_message(report) if report else (
-                'Open the reporting-enabled workspace and verify the current Google Ads setup before reviewing delivery.')
+                'Verify the current campaign setup in the workspace before reviewing delivery and tagged viewer activity.')
             return {'revision': source['revision'], 'ambiguous': [], 'message': message,
                     'reply_version': REPLY_VERSION, 'reply_code': 'google_ads_delivery',
                     'delivery_report_id': report['id'] if report else None}, 'answered' if report else 'needs_input'

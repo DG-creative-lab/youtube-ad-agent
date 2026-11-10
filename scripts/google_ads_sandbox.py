@@ -89,7 +89,7 @@ def main():
         with requests.Session() as session:
             session.trust_env = False
             provider = GoogleAdsSandbox(config['manager_id'], config['account_id'], config['creatives'], logo,
-                                        google_transport(config, session))
+                                        google_transport(config, session), viewer_origin=config.get('viewer_origin'))
             setup = CampaignSetup(drafts, provider)
             reference = drafts.campaign_id, args.revision, args.fingerprint
             if args.command == 'validate':

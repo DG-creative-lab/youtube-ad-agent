@@ -20,6 +20,8 @@ Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 Nov
 
 ## Current follow-up slice
 
+**Attribute viewer activity to the approved ad.** Bind each tagged link to a setup, creative and comparison before validation. Open the link only after destination read-back verifies the setup. Rehearse both comparisons with the simulator and show tagged arrivals and completions beside Google Ads delivery when available. Keep sample reviews and untagged visits separate.
+
 **Review Google Ads delivery.** Bind a read-only report to the verified setup for the current approved package. Save ad-group metrics and video placement coverage, and expose the same review action in the workspace and chat. Keep configured targets, missing rows and observed zero totals distinct. Exercise complete, partial and empty reports with fixtures before querying the paused test campaign.
 
 **Verify paused setup in Google Ads.** Use the sandbox CLI with a private creative binding for each approved group. Validate the full Demand Gen request and save it with its Google request ID. Present the saved setup ID for approval before creation. Read back both ad groups, their ads, video assets, destinations and positive video targets. After an uncertain create response, query the original campaign name. The workspace continues to use the simulator by default.

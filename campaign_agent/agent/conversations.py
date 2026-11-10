@@ -17,6 +17,8 @@ def bounded_context(messages):
     for saved in reversed(messages):
         # Transcript inspectors retain full evidence; dialogue carries its reference and reloads current facts through tools.
         message = {key: value for key, value in saved.items() if key not in {'review', 'experiment_review'}}
+        if message.pop('delivery_report_id', None):
+            message['content'] = 'A campaign delivery review was saved in the workspace.'
         for evidence in ('review', 'experiment_review'):
             if saved.get(evidence):
                 message[evidence + '_id'] = saved[evidence]['id']
@@ -79,6 +81,8 @@ class CampaignConversations:
                     if result.get('needs_verification'):
                         message['kind'] = 'needs_verification'
                 if result.get('reply_version') == 1 and not result.get('needs_verification'):
+                    if result.get('delivery_report_id'):
+                        message['delivery_report_id'] = result['delivery_report_id']
                     for source, field in (('performance_review', 'review'), ('experiment_review', 'experiment_review')):
                         if result.get(source):
                             message[field] = result[source]

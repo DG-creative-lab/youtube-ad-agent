@@ -50,31 +50,38 @@ class GoogleAdsSandbox:
     name = 'google-ads-sandbox'
     local_validation = False
 
-    def __init__(self, manager_id, account_id, creatives, logo, post):
+    def __init__(self, manager_id, account_id, creatives, logo, post, *, viewer_origin=None):
         if not all(isinstance(value, str) and re.fullmatch(r'[0-9]{10}', value)
                    for value in (manager_id, account_id)) or manager_id == account_id:
             raise ValueError('Configure distinct Google Ads test manager and customer IDs.')
         if not logo.startswith(b'\x89PNG\r\n\x1a\n') or len(logo) > 512_000:
             raise ValueError('Use a PNG test logo of up to 512 KB.')
+        if viewer_origin is not None:
+            if not isinstance(viewer_origin, str) or not re.fullmatch(r'https://[^/\s?#]+/?', viewer_origin):
+                raise ValueError('Use a public HTTPS viewer origin without a path or query.')
+            viewer_origin = viewer_origin.rstrip('/')
         self.manager_id, self.account_id = manager_id, account_id
         self.creatives, self.logo, self.post = creatives, logo, post
+        self.viewer_origin = viewer_origin
 
     def prepare(self, package, fingerprint):
         groups = []
         if len(package['groups']) != 2:
             raise ValueError('The sandbox requires exactly two approved creative groups.')
+        creative_fields = {'video_id', 'headline', 'long_headline', 'description'}
         for group in package['groups']:
             creative = self.creatives.get(group['creative_version'])
-            if not isinstance(creative, dict) or set(creative) != {
-                    'video_id', 'destination', 'headline', 'long_headline', 'description'}:
-                raise ValueError('Supply a test video, destination and copy for each approved creative version.')
+            if (not isinstance(creative, dict) or not creative_fields <= creative.keys()
+                    or creative.keys() - creative_fields - {'destination'}
+                    or (self.viewer_origin is None and 'destination' not in creative)):
+                raise ValueError('Supply a test video, copy and a viewer origin or destination for each approved creative.')
             limits = {'headline': 40, 'long_headline': 90, 'description': 90}
             if any(not isinstance(creative[key], str) or not 1 <= len(creative[key].strip()) <= limit
                    for key, limit in limits.items()):
                 raise ValueError('Use short, nonempty test ad copy.')
             if not isinstance(creative['video_id'], str) or not VIDEO_ID.fullmatch(creative['video_id']):
                 raise ValueError('Use a valid YouTube test creative ID.')
-            url = creative['destination']
+            url = self.viewer_origin + group['viewer_path'] if self.viewer_origin else creative['destination']
             if not isinstance(url, str) or not re.fullmatch(r'\S+', url):
                 raise ValueError('Use a public HTTPS destination for each test ad.')
             destination = urlsplit(url)
@@ -92,7 +99,7 @@ class GoogleAdsSandbox:
                 'context': group['context'], 'name': group['title'], 'status': 'ENABLED',
                 'ad_status': 'ENABLED', 'channels': CHANNELS, 'optimized_targeting': False,
                 'placements': sorted((p['demo_id'] for p in placements)),
-                'business_name': 'Campaign Setup Sandbox', **creative,
+                'business_name': 'Campaign Setup Sandbox', **creative, 'destination': url,
             })
         if set(groups[0]['placements']) & set(groups[1]['placements']):
             raise ValueError('Use distinct placement lists for the two test ad groups.')
