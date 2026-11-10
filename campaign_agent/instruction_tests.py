@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import re
 import secrets
+from time import time_ns
 
 from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
@@ -13,8 +14,15 @@ from scripts.campaign_drafts import PackageConflict
 
 
 MIN_TEST_ARRIVALS = 20
+EVIDENCE_PROTOCOL = {
+    "version": 1, "assignment_unit": "browser_visit",
+    "metric": "completed_comparison_per_assigned_visit",
+    "observation_window_ms": 5 * 60 * 1000, "additional_batch_size": None,
+    "eligible_source": "participant",
+}
+ASSIGNMENT_SOURCES = ("participant", "rehearsal", "fixture")
 # Bump when saved assessments need reverification under a changed acceptance contract.
-ASSESSMENT_VERSION = "evidence-reasons-v1"
+ASSESSMENT_VERSION = "evidence-reasons-v2"
 ASSESSMENT_REASONS = {
     "insufficient_visits": ("insufficient_evidence", "Insufficient evidence"),
     "continue_observation": ("keep_collecting", "Keep collecting evidence"),
@@ -50,13 +58,24 @@ class InstructionTests:
                     test_id TEXT NOT NULL REFERENCES instruction_tests(id),
                     participant_id TEXT NOT NULL, arm TEXT NOT NULL CHECK (arm IN ('original', 'revised')),
                     visit_id TEXT NOT NULL UNIQUE REFERENCES viewer_visits(id),
+                    source TEXT CHECK (source IN ('participant', 'rehearsal', 'fixture')),
                     PRIMARY KEY (test_id, participant_id)
                 );
                 CREATE TABLE IF NOT EXISTS instruction_test_reviews (
                     id TEXT PRIMARY KEY, test_id TEXT NOT NULL REFERENCES instruction_tests(id),
                     actor_id TEXT NOT NULL, created_at TEXT NOT NULL, snapshot TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS instruction_test_evidence_snapshots (
+                    id TEXT PRIMARY KEY, test_id TEXT NOT NULL REFERENCES instruction_tests(id),
+                    operation_id TEXT NOT NULL, snapshot TEXT NOT NULL,
+                    UNIQUE (test_id, operation_id)
+                );
             """)
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(instruction_test_assignments)")}
+            if "source" not in columns:
+                db.execute("ALTER TABLE instruction_test_assignments ADD COLUMN source TEXT "
+                           "CHECK (source IN ('participant', 'rehearsal', 'fixture'))")
 
     @staticmethod
     def test_id(campaign_id, revision, fingerprint):
@@ -124,6 +143,7 @@ class InstructionTests:
                 "creative_version": creative, "comparison_version": new["comparison_version"],
                 "source_review_id": prepared["review_id"], "source_correction": correction,
                 "viewer_path": "/viewer?test=" + test_id,
+                "evidence_protocol": EVIDENCE_PROTOCOL.copy(),
                 "versions": [
                     {"arm": arm, "revision": arm_revision, "content": group["content"],
                      "content_fingerprint": package_fingerprint(group["content"])}
@@ -138,26 +158,30 @@ class InstructionTests:
                         revision, fingerprint, test["started_at"], json.dumps(test)))
         return test
 
-    def open(self, test_id, participant_id):
+    def open(self, test_id, participant_id, *, source="participant"):
         if not isinstance(participant_id, str) or not re.fullmatch(r"[0-9a-f]{32}", participant_id):
             raise ValueError("Use a valid participant reference.")
+        if source not in ASSIGNMENT_SOURCES:
+            raise ValueError("Use a valid assignment source.")
         with closing(self.viewer.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             test = self._test(db, test_id)
             self._verify_media(test)
             row = db.execute(
-                "SELECT arm, visit_id FROM instruction_test_assignments WHERE test_id = ? AND participant_id = ?",
+                "SELECT arm, visit_id, source FROM instruction_test_assignments WHERE test_id = ? AND participant_id = ?",
                 (test_id, participant_id),
             ).fetchone()
-            arm, visit_id = row if row else (secrets.choice(("original", "revised")), None)
+            if row and row[2] is not None and row[2] != source:
+                raise ValueError("Use a separate browser reference for each assignment source.")
+            arm, visit_id = row[:2] if row else (secrets.choice(("original", "revised")), None)
             version = next(version for version in test["versions"] if version["arm"] == arm)
             result = self.viewer.open_example(
                 test["creative_version"], test["comparison_version"], visit_id,
                 content_fingerprint=version["content_fingerprint"], connection=db,
             )
             if row is None:
-                db.execute("INSERT INTO instruction_test_assignments VALUES (?, ?, ?, ?)",
-                           (test_id, participant_id, arm, result["visit_id"]))
+                db.execute("INSERT INTO instruction_test_assignments (test_id, participant_id, arm, visit_id, source) "
+                           "VALUES (?, ?, ?, ?, ?)", (test_id, participant_id, arm, result["visit_id"], source))
             result["creative_ref"] = test["creative_version"]
             result["example"]["instruction"] = version["content"]["instruction"]
             result["examples"] = [item for item in result["examples"] if item["ref"] == test["comparison_version"]]
@@ -166,7 +190,82 @@ class InstructionTests:
             result["example"]["captions"] += "?sha256=" + version["content"]["captions_sha256"]
             return result
 
-    def _evidence(self, db, test):
+    @staticmethod
+    def _latest_snapshot(db, test_id):
+        row = db.execute("SELECT snapshot FROM instruction_test_evidence_snapshots WHERE test_id = ? "
+                         "ORDER BY rowid DESC LIMIT 1", (test_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_evidence_snapshot(self, campaign_id, revision, fingerprint, operation_id):
+        self.drafts._package_scope(campaign_id, revision)
+        if not isinstance(operation_id, str) or not re.fullmatch(r"[0-9a-f]{32}", operation_id):
+            raise ValueError("Use a valid evidence operation reference.")
+        test_id = self.test_id(campaign_id, revision, fingerprint)
+        with closing(self.viewer.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            test = self._test(db, test_id)
+            existing = db.execute("SELECT snapshot FROM instruction_test_evidence_snapshots "
+                                  "WHERE test_id = ? AND operation_id = ?", (test_id, operation_id)).fetchone()
+            if existing:
+                return json.loads(existing[0])
+            self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
+            protocol = test.get("evidence_protocol")
+            if protocol is None:
+                raise PackageConflict("Start a new instruction test with a pinned observation window to save learning evidence.")
+            cutoff = time_ns() // 1_000_000
+            previous = self._latest_snapshot(db, test_id)
+            if previous and cutoff < previous["cutoff_ms"]:
+                raise PackageConflict("The server clock is earlier than the latest evidence cutoff. Try again later.")
+            snapshot = {
+                "test_id": test_id, **vars(LOCAL_BRAND), "campaign_id": campaign_id,
+                "revision": revision, "fingerprint": fingerprint, "protocol": protocol,
+                "creative_version": test["creative_version"], "comparison_version": test["comparison_version"],
+                "cutoff_ms": cutoff, "supersedes": previous["id"] if previous else None,
+                "rows": self._snapshot_rows(db, test, protocol["observation_window_ms"], cutoff),
+            }
+            snapshot["id"] = package_fingerprint({"test_id": test_id, "operation_id": operation_id})
+            db.execute("INSERT INTO instruction_test_evidence_snapshots VALUES (?, ?, ?, ?)",
+                       (snapshot["id"], test_id, operation_id, json.dumps(snapshot)))
+        return snapshot
+
+    @staticmethod
+    def _snapshot_rows(db, test, window_ms, cutoff):
+        rows = []
+        for version in test["versions"]:
+            # An assignment and its first completion each have a unique visit key.
+            outcomes = db.execute("""
+                WITH assigned AS (
+                    SELECT a.source,
+                           CASE WHEN v.arrived_ms IS NULL OR v.arrived_ms + :window > :cutoff
+                                  OR NOT EXISTS (SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
+                                                 AND e.kind = 'arrival' AND e.example_ref = :example)
+                                  OR (c.visit_id IS NOT NULL AND
+                                      (c.completed_ms IS NULL OR c.completed_ms < v.arrived_ms)) THEN NULL
+                                WHEN c.completed_ms <= v.arrived_ms + :window THEN 1
+                                ELSE 0 END AS completed
+                    FROM instruction_test_assignments a JOIN viewer_visits v ON v.id = a.visit_id
+                    LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = :example
+                    WHERE a.test_id = :test AND a.arm = :arm AND v.client_id = :client AND v.brand_id = :brand
+                      AND v.creative_ref = :creative AND v.content_fingerprint = :content
+                      AND (v.arrived_ms IS NULL OR v.arrived_ms <= :cutoff)
+                )
+                SELECT source, COUNT(completed), COALESCE(SUM(completed), 0), COUNT(*) - COUNT(completed)
+                FROM assigned GROUP BY source
+            """, {"window": window_ms, "cutoff": cutoff, "example": test["comparison_version"],
+                  "test": test["id"], "arm": version["arm"], "client": LOCAL_BRAND.client_id,
+                  "brand": LOCAL_BRAND.brand_id, "creative": test["creative_version"],
+                  "content": version["content_fingerprint"]})
+            cohorts = {source: {"mature_arrivals": 0, "completions": 0, "unresolved": 0}
+                       for source in (*ASSIGNMENT_SOURCES, "unknown")}
+            for source, mature, completed, unresolved in outcomes:
+                cohorts[source or "unknown"] = {"mature_arrivals": mature, "completions": completed,
+                                                 "unresolved": unresolved}
+            rows.append({"arm": version["arm"], "revision": version["revision"],
+                         "content_fingerprint": version["content_fingerprint"], "cohorts": cohorts})
+        return rows
+
+    @staticmethod
+    def _assignment_rows(db, test, source):
         rows = []
         for version in test["versions"]:
             arrivals, completions = db.execute("""
@@ -175,23 +274,27 @@ class InstructionTests:
                 ) THEN 1 END)
                 FROM instruction_test_assignments a JOIN viewer_visits v ON v.id = a.visit_id
                 WHERE a.test_id = ? AND a.arm = ? AND v.client_id = ? AND v.brand_id = ?
+                    AND a.source IS ?
                     AND v.creative_ref = ? AND v.content_fingerprint = ?
                     AND EXISTS (SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
                                 AND e.kind = 'arrival' AND e.example_ref = ?)
             """, (test["comparison_version"], test["id"], version["arm"], LOCAL_BRAND.client_id,
-                  LOCAL_BRAND.brand_id, test["creative_version"], version["content_fingerprint"],
+                  LOCAL_BRAND.brand_id, source, test["creative_version"], version["content_fingerprint"],
                   test["comparison_version"])).fetchone()
             rows.append({"arm": version["arm"], "arrivals": arrivals, "completions": completions,
                          "completion_rate": completions / arrivals if arrivals else None})
+        return rows
+
+    def _evidence(self, db, test):
         through_event, = db.execute(
             "SELECT COALESCE(MAX(e.seq), 0) FROM viewer_events e JOIN instruction_test_assignments a "
-            "ON a.visit_id = e.visit_id WHERE a.test_id = ?", (test["id"],),
+            "ON a.visit_id = e.visit_id WHERE a.test_id = ? AND a.source = 'participant'", (test["id"],),
         ).fetchone()
         return {
             "test_id": test["id"], "campaign_id": test["campaign_id"],
             "revision": test["revision"], "fingerprint": test["fingerprint"],
-            "versions": test["versions"], "rows": rows,
-            "started_at": test["started_at"], "through_event": through_event,
+            "versions": test["versions"], "rows": self._assignment_rows(db, test, "participant"),
+            "started_at": test["started_at"], "through_event": through_event, "assignment_source": "participant",
             "minimum_per_version": MIN_TEST_ARRIVALS,
             "correction": self.performance.correction_for_comparison(db, test["package"], test["creative_version"]),
         }
@@ -207,6 +310,8 @@ class InstructionTests:
 
     def require_review_context(self, db, context):
         self.drafts.operator.require_brand(LOCAL_BRAND)
+        if context.get("assignment_source") != "participant":
+            raise PackageConflict("Review the instruction test again using participant visits.")
         test = self._test(db, context["test_id"])
         current = self.performance.correction_for_comparison(db, test["package"], test["creative_version"])
         if current != context["correction"]:
@@ -339,6 +444,9 @@ class InstructionTests:
                         "reason_code": "continue_observation" if enough else "insufficient_visits",
                     })
                 review["assessment"] = assessment
-                review["assessment_verified"] = assessment == saved_assessment
+                review["assessment_verified"] = (review["evidence"].get("assignment_source") == "participant"
+                                                 and assessment == saved_assessment)
             return {**test, "evidence": evidence, "review": review,
+                    "unknown_source_rows": self._assignment_rows(db, test, None),
+                    "evidence_snapshot": self._latest_snapshot(db, test_id),
                     "needs_review": review is None or not review["assessment_verified"] or review["evidence"] != evidence}

@@ -76,6 +76,17 @@ class ExperimentFollowupTests(unittest.TestCase):
         self.assertEqual(self.runtime.resume(fresh_run)['status'], 'ready_for_review')
         self.assertEqual(self.reopen().resume(run_id), result)
 
+    def test_rehearsals_and_fixtures_cannot_supply_followup_evidence(self):
+        for arm in ('original', 'revised'):
+            for _ in range(20):
+                self.case.open(arm, source='rehearsal')
+            self.case.complete(self.case.open(arm, source='fixture'))
+        review = self.assess()
+        self.assertEqual([(row['arrivals'], row['completions']) for row in review['evidence']['rows']], [(0, 0), (0, 0)])
+        self.assertEqual(review['assessment']['kind'], 'insufficient_evidence')
+        self.assertEqual(self.runtime.resume(self.start(review))['status'], 'waiting_for_evidence')
+        self.assertIsNone(self.case.drafts.read(4))
+
     def test_followup_pins_baseline_and_preserves_prior_experiment_through_another_cycle(self):
         review = self.eligible()
         participant = uuid4().hex

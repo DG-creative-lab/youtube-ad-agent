@@ -105,6 +105,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                        '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})
     delivery_path = '/api/campaign/google-ads-delivery'
     delivery_next_test_path = delivery_path + '/recommend'
+    instruction_evidence_path = '/api/campaign/instruction-test/evidence'
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -157,7 +158,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             if (self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
                               "/api/campaign/correction", "/api/campaign/instruction-test", delivery_path,
-                              delivery_next_test_path}
+                              delivery_next_test_path, instruction_evidence_path}
                     or self.path in setup_commands):
                 self.post_package()
                 return
@@ -211,6 +212,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 is_performance = self.path.endswith("/performance")
                 is_correction = self.path.endswith("/correction")
                 is_instruction_test = self.path.endswith("/instruction-test")
+                is_instruction_evidence = self.path == instruction_evidence_path
                 is_delivery_next_test = self.path == delivery_next_test_path
                 setup_command = setup_commands.get(self.path)
                 needs_setup_id = setup_command is not None and not self.path.endswith('/validate')
@@ -220,6 +222,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     fields.add("scenario")
                 if is_correction:
                     fields.update({"review_id", "kind", "note", "operation_id"})
+                if is_instruction_evidence:
+                    fields.add("operation_id")
                 if is_delivery_next_test:
                     fields.add("report_id")
                 if (not isinstance(data, dict) or set(data) != fields
@@ -241,6 +245,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     command = agent.delivery.recommend
                 elif is_instruction_test:
                     command = instruction_tests.start
+                elif is_instruction_evidence:
+                    command = instruction_tests.save_evidence_snapshot
                 elif is_correction:
                     command = performance.save_correction
                 elif is_performance:
@@ -254,7 +260,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Send a valid package reference."})
             except PermissionError:
                 self.send(403, {"error": "The package is unavailable to this operator."})
-            except (sqlite3.Error, OSError, ViewerNotFound):
+            except ViewerNotFound as exc:
+                self.send(404, {"error": str(exc)})
+            except (sqlite3.Error, OSError):
                 self.send(503, {"error": "Could not complete this action. Try again."})
             else:
                 self.send(200, result)
@@ -366,9 +374,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if not isinstance(data, dict):
                     raise ValueError("Invalid comparison request.")
                 if self.path == "/api/viewer/test/open":
-                    if instruction_tests is None or set(data) != {"test_id", "participant_id"}:
+                    rehearsal = data.pop("rehearsal", False)
+                    if (instruction_tests is None or type(rehearsal) is not bool
+                            or set(data) != {"test_id", "participant_id"}):
                         raise ValueError("Choose a valid instruction test.")
-                    result = instruction_tests.open(**data)
+                    result = instruction_tests.open(**data, source="rehearsal" if rehearsal else "participant")
                 elif self.path == "/api/viewer/open":
                     if "attribution" in data:
                         result = self.open_ad_comparison(data)

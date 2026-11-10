@@ -10,6 +10,7 @@ from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RecordedInference
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
+from campaign_agent.measurement import ViewerNotFound
 from scripts.campaign_drafts import PackageConflict
 
 
@@ -46,9 +47,9 @@ class InstructionTestTests(unittest.TestCase):
         self.test = self.tests.start(self.campaign, 3, self.fingerprint)
         return self.test
 
-    def open(self, arm, participant=None):
+    def open(self, arm, participant=None, **kwargs):
         with patch("campaign_agent.instruction_tests.secrets.choice", return_value=arm):
-            return self.tests.open(self.test["id"], participant or uuid4().hex)
+            return self.tests.open(self.test["id"], participant or uuid4().hex, **kwargs)
 
     def complete(self, result):
         for take in ("a", "b"):
@@ -60,6 +61,98 @@ class InstructionTestTests(unittest.TestCase):
 
     def read(self):
         return self.tests.read(self.campaign, 3, self.fingerprint)
+
+    def test_learning_snapshot_is_cumulative_idempotent_and_separates_assignment_sources(self):
+        test = self.start()
+        ref = (self.campaign, 3, self.fingerprint)
+        window = 300_000
+        start = 1_800_000_000_000
+        participant = uuid4().hex
+        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+            completed = self.open("original", participant)
+            late = self.open("original")
+            self.open("revised")
+            missing_time = self.open("revised")
+            rehearsal = self.open("original", source="rehearsal")
+            fixture = self.open("original", source="fixture")
+            unknown = self.open("original")
+            self.complete(rehearsal)
+            self.complete(fixture)
+            self.complete(unknown)
+            self.complete(missing_time)
+            self.viewer.open_example(test["creative_version"], content_fingerprint=test["versions"][0]["content_fingerprint"])
+        with closing(self.viewer.connect()) as db, db:
+            db.execute("UPDATE instruction_test_assignments SET source = NULL WHERE visit_id = ?", (unknown["visit_id"],))
+            db.execute("UPDATE viewer_completions SET completed_ms = NULL WHERE visit_id = ?", (missing_time["visit_id"],))
+        with patch("campaign_agent.measurement.time_ns", return_value=(start + 1) * 1_000_000):
+            immature = self.open("revised")
+        with patch("campaign_agent.measurement.time_ns", return_value=(start + window) * 1_000_000):
+            self.complete(completed)
+            self.complete(immature)
+        with self.assertRaisesRegex(ValueError, "separate browser reference"):
+            self.open("original", participant, source="rehearsal")
+
+        operation = uuid4().hex
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(start + window) * 1_000_000):
+            first = self.tests.save_evidence_snapshot(*ref, operation)
+        self.assertEqual(first["cutoff_ms"], start + window)
+        self.assertIsNone(first["supersedes"])
+        self.assertEqual(first["protocol"]["observation_window_ms"], window)
+        self.assertEqual(first["protocol"]["eligible_source"], "participant")
+        self.assertEqual((first["client_id"], first["brand_id"], first["test_id"]),
+                         (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, test["id"]))
+        self.assertEqual([row["content_fingerprint"] for row in first["rows"]],
+                         [version["content_fingerprint"] for version in test["versions"]])
+        original, revised = (row["cohorts"] for row in first["rows"])
+        self.assertEqual(original["participant"], {"mature_arrivals": 2, "completions": 1, "unresolved": 0})
+        for source in ("rehearsal", "fixture", "unknown"):
+            self.assertEqual(original[source], {"mature_arrivals": 1, "completions": 1, "unresolved": 0})
+        self.assertEqual(revised["participant"], {"mature_arrivals": 1, "completions": 0, "unresolved": 2})
+
+        reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests
+        self.assertEqual(reopened.open(test["id"], participant)["visit_id"], completed["visit_id"])
+        with patch("campaign_agent.measurement.time_ns", return_value=(start + window + 1) * 1_000_000):
+            self.complete(completed)
+            self.complete(late)
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(start + 2 * window) * 1_000_000):
+            second = reopened.save_evidence_snapshot(*ref, uuid4().hex)
+            self.assertEqual(reopened.save_evidence_snapshot(*ref, operation), first)
+        self.assertEqual(second["supersedes"], first["id"])
+        self.assertEqual(second["rows"][0]["cohorts"], original)
+        self.assertEqual(second["rows"][1]["cohorts"]["participant"],
+                         {"mature_arrivals": 2, "completions": 1, "unresolved": 1})
+        self.assertEqual(reopened.read(*ref)["evidence_snapshot"], second)
+        with closing(self.viewer.connect()) as db, db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM instruction_test_evidence_snapshots").fetchone()[0], 2)
+            db.execute("UPDATE instruction_tests SET brand_id = 'another-brand' WHERE id = ?", (test["id"],))
+        with self.assertRaises(ViewerNotFound):
+            reopened.save_evidence_snapshot(*ref, operation)
+
+    def test_legacy_assignment_keeps_unknown_source_and_legacy_test_has_no_learning_protocol(self):
+        test = self.start()
+        participant = uuid4().hex
+        visit = self.open("revised", participant)
+        self.complete(visit)
+        self.complete(self.open("original"))
+        with closing(self.viewer.connect()) as db, db:
+            db.execute("ALTER TABLE instruction_test_assignments DROP COLUMN source")
+            db.execute("UPDATE instruction_tests SET snapshot = json_remove(snapshot, '$.evidence_protocol') WHERE id = ?",
+                       (test["id"],))
+        reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests
+        self.assertEqual(reopened.open(test["id"], participant)["visit_id"], visit["visit_id"])
+        with closing(self.viewer.connect()) as db:
+            self.assertIsNone(db.execute("SELECT source FROM instruction_test_assignments").fetchone()[0])
+        ref = (self.campaign, 3, self.fingerprint)
+        current = reopened.read(*ref)
+        self.assertIsNone(current["evidence_snapshot"])
+        self.assertEqual(current["unknown_source_rows"], [
+            {"arm": arm, "arrivals": 1, "completions": 1, "completion_rate": 1.0}
+            for arm in ("original", "revised")
+        ])
+        self.assertEqual([row["arrivals"] for row in current["evidence"]["rows"]], [0, 0])
+        self.assertEqual(current["evidence"], reopened.review_context(test["id"]))
+        with self.assertRaisesRegex(PackageConflict, "pinned observation window"):
+            reopened.save_evidence_snapshot(*ref, uuid4().hex)
 
     def test_assignment_survives_restart_and_excludes_other_visits(self):
         test = self.start()

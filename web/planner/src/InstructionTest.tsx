@@ -11,11 +11,26 @@ type Inference = {
 type Correction = {id: string; label: string; note: string};
 type Observation = {arm: string; arrivals: number; completions: number; completion_rate: number | null};
 type Evidence = {rows: Observation[]; correction: Correction | null; minimum_per_version: number};
+const evidenceCohorts = {
+  participant: "Participant",
+  rehearsal: "Rehearsal",
+  fixture: "Authored fixture",
+  unknown: "Unknown source",
+} as const;
+type CohortCounts = {mature_arrivals: number; completions: number; unresolved: number};
+type EvidenceSnapshot = {
+  id: string;
+  cutoff_ms: number;
+  rows: {arm: string; cohorts: Record<keyof typeof evidenceCohorts, CohortCounts>}[];
+};
 type Test = {
   id: string;
   started_at: string;
   viewer_path: string;
   evidence: Evidence;
+  unknown_source_rows: Observation[];
+  evidence_protocol?: {observation_window_ms: number};
+  evidence_snapshot: EvidenceSnapshot | null;
   needs_review: boolean;
   review: {
     id: string;
@@ -59,15 +74,24 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
     return () => { cancelled = true; };
   }, [query, request]);
 
-  async function refresh(start = false) {
-    if (working || loading) return;
+  async function refresh(action: "read" | "start" | "snapshot" = "read") {
+    if (working || loading || (action === "snapshot" && !test)) return;
+    const snapshotKey = action === "snapshot" && test ? `instruction-test:snapshot-operation:${test.id}` : null;
     setWorking(true);
     setError("");
     try {
-      if (start) {
+      if (action === "start") {
         await request(endpoint, {campaign_id: campaignId, revision, fingerprint});
       }
+      if (snapshotKey) {
+        const operationId = sessionStorage.getItem(snapshotKey) ?? crypto.randomUUID().replaceAll("-", "");
+        sessionStorage.setItem(snapshotKey, operationId);
+        await request(endpoint + "/evidence", {
+          campaign_id: campaignId, revision, fingerprint, operation_id: operationId,
+        });
+      }
       setTest(await request<Test | null>(endpoint + "?" + query));
+      if (snapshotKey) sessionStorage.removeItem(snapshotKey);
     } catch (failure) {
       if (failure instanceof Error && "status" in failure && failure.status === 409) {
         onPackageConflict(failure.message);
@@ -101,26 +125,60 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
         <>
           <p className="revision">Compare the approved original and revised wording using the same recordings.
             Each browser keeps its assigned version when it returns.</p>
-          <button onClick={() => void refresh(true)} disabled={working}>Run instruction test</button>
+          <button onClick={() => void refresh("start")} disabled={working}>Run instruction test</button>
           {error && <button onClick={() => void refresh()} disabled={working}>Retry loading test</button>}
         </>
       ) : (
         <>
           <p className="revision">Running since {new Date(test.started_at).toLocaleString()}.
-            Only visits assigned through this test link count toward its results.</p>
-          <a className="text-action" href={viewerOrigin + test.viewer_path} target="_blank" rel="noreferrer">
-            Open instruction test <span aria-hidden="true">↗</span>
-          </a>
+            Participant visits count toward the assessment.</p>
+          <div className="package-buttons">
+            <a className="text-action" href={viewerOrigin + test.viewer_path + "&rehearsal=1"} target="_blank" rel="noreferrer">
+              Rehearse instruction test <span aria-hidden="true">↗</span>
+            </a>
+            <a className="text-action" href={viewerOrigin + test.viewer_path} target="_blank" rel="noreferrer">
+              Open participant link <span aria-hidden="true">↗</span>
+            </a>
+          </div>
           <dl className="setup-details" aria-label="Current instruction test results">
             {test.evidence.rows.map(row => <div key={row.arm}>
               <dt>{label(row.arm)}</dt>
-              <dd>{row.completions} of {row.arrivals} assigned visits completed
+              <dd>{row.completions} of {row.arrivals} participant visits completed
                 <br />{row.completion_rate === null ? "Rate unavailable" : percentage.format(row.completion_rate)}</dd>
             </div>)}
           </dl>
+          {test.unknown_source_rows.some(row => row.arrivals > 0) && <>
+            <p className="revision">Unknown source · Historical visits</p>
+            <dl className="setup-details" aria-label="Unknown source instruction test results">
+              {test.unknown_source_rows.map(row => <div key={row.arm}>
+                <dt>{label(row.arm)}</dt>
+                <dd>{row.completions} of {row.arrivals} visits completed</dd>
+              </div>)}
+            </dl>
+          </>}
           <div className="package-buttons">
             <button onClick={() => void refresh()} disabled={working}>Refresh results</button>
           </div>
+          <details className="approval-history" open>
+            <summary>Learning evidence</summary>
+            {test.evidence_protocol ? <>
+              <p className="revision">Participant visits become eligible after {test.evidence_protocol.observation_window_ms / 60000} minutes.
+                The snapshot counts completions within that window and shows the other cohorts separately.</p>
+              <button onClick={() => void refresh("snapshot")} disabled={working}>Save evidence snapshot</button>
+              {test.evidence_snapshot && <div aria-live="polite">
+                <p className="revision">Snapshot {test.evidence_snapshot.id.slice(0, 8)} · Cutoff {new Date(test.evidence_snapshot.cutoff_ms).toLocaleString()}</p>
+                <dl className="setup-details" aria-label="Saved learning evidence">
+                  {test.evidence_snapshot.rows.map(row => <div key={row.arm}>
+                    <dt>{label(row.arm)}</dt>
+                    {(Object.keys(evidenceCohorts) as (keyof typeof evidenceCohorts)[]).map(source => {
+                      const counts = row.cohorts[source];
+                      return <dd key={source}>{evidenceCohorts[source]} · {counts.completions} of {counts.mature_arrivals} mature visits completed · {counts.unresolved} unresolved</dd>;
+                    })}
+                  </div>)}
+                </dl>
+              </div>}
+            </> : <p className="revision">Start a new experiment to save evidence with a pinned observation window.</p>}
+          </details>
           <div className="performance-controls">
             <p className="revision">Main model · {mainModel.mode === "offline" ? "Recorded offline response" : mainModel.model}</p>
             <button onClick={review} disabled={working}>
@@ -158,7 +216,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
             </p>}
             <p className="provenance">Saved {new Date(test.review.created_at).toLocaleString()} ·
               {test.review.inference?.mode === "openrouter" ? ` OpenRouter · ${test.review.inference.model} · ` : " Offline assessment · "}
-              Illustrative threshold of {test.review.evidence.minimum_per_version} assigned visits per version</p>
+              Illustrative threshold of {test.review.evidence.minimum_per_version} participant visits per version</p>
             {test.review.inference && <details className="inference-provenance">
               <summary>Review provenance and usage</summary>
               <p className="revision">
