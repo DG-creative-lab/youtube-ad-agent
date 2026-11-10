@@ -23,6 +23,26 @@ type EvidenceSnapshot = {
   cutoff_ms: number;
   rows: {arm: string; cohorts: Record<keyof typeof evidenceCohorts, CohortCounts>}[];
 };
+type EvidenceDecision = {action: "unavailable"; reason: "unpinned_policy"}
+  | {action: "unavailable"; reason: "model_visit_limit"; model_visit_limit: number} | {
+  snapshot_id: string;
+  action: "reuse" | "keep" | "collect" | "continue_batch" | "wait_batch" | "wait_for_evidence" | "refresh_snapshot";
+  probability_worthwhile: number;
+  mean_lift: number;
+  batch_gain: number | null;
+  batch_status: "no_allowance" | "sample_cap" | "initial_sample_pending" | "evaluated" | "in_progress" | "no_batch_recommendation";
+  batch_size: number | null;
+  batch_remaining: number | null;
+  batch_checkpoint_id: string | null;
+  sample_cap: number | null;
+  assigned: number;
+  action_values: {reuse: number; keep: number};
+  policy: {
+    version: string; minimum_lift: number; prior_alpha: number; prior_beta: number;
+    reuse_if_worthwhile: number; reuse_otherwise: number; keep_if_worthwhile: number; keep_otherwise: number;
+    batch_cost: number;
+  };
+};
 type Test = {
   id: string;
   started_at: string;
@@ -31,6 +51,7 @@ type Test = {
   unknown_source_rows: Observation[];
   evidence_protocol?: {observation_window_ms: number};
   evidence_snapshot: EvidenceSnapshot | null;
+  evidence_decision: EvidenceDecision | null;
   needs_review: boolean;
   review: {
     id: string;
@@ -46,23 +67,67 @@ type Props = {
   revision: number;
   fingerprint: string;
   viewerOrigin: string;
-  request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
+  limits: InstructionTestLimits;
+  request: <T>(path: string, body?: Record<string, string | number | boolean>) => Promise<T>;
   onReview: (testId: string, selection: ReviewSelection) => void;
   mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
   onPrepareNextTest: (testId: string, reviewId: string, selection: ReviewSelection) => void;
   onPackageConflict: (message: string) => void;
 };
+export type InstructionTestLimits = {initial: number; batch: number; cap: number; batchCost: number};
 
 const endpoint = "/api/campaign/instruction-test";
 const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1});
+const points = new Intl.NumberFormat(undefined, {maximumFractionDigits: 1});
 const label = (arm: string) => arm === "original" ? "Original instructions" : "Revised instructions";
 
+function SnapshotDecision({decision}: {decision: EvidenceDecision}) {
+  if (decision.action === "unavailable") {
+    if (decision.reason === "unpinned_policy") {
+      return <p className="revision">This test started without a pinned decision policy. The saved evidence is available without a Bayesian recommendation.</p>;
+    }
+    return <p className="revision">The offline policy supports up to {decision.model_visit_limit} mature participant visits.</p>;
+  }
+  const {policy} = decision;
+  const initialSamplePending = decision.batch_status === "initial_sample_pending";
+  const titles = {
+    reuse: "Propose revised wording for reuse",
+    keep: "Keep the current wording",
+    collect: "Collect one more batch",
+    continue_batch: "Extra batch in progress",
+    wait_batch: "Wait for batch outcomes",
+    wait_for_evidence: initialSamplePending ? "Wait for the initial review point" : "Wait for participant outcomes",
+    refresh_snapshot: "Save a fresh snapshot",
+  };
+  return <section aria-label="Snapshot recommendation">
+    <h3>{titles[decision.action]}</h3>
+    {decision.action === "refresh_snapshot" && <p>More participant visits arrived after this snapshot. Save a fresh snapshot to check the batch status.</p>}
+    {decision.action === "continue_batch" && <p>Remaining participant visits in this batch: {decision.batch_remaining}. Save a fresh snapshot once the batch outcomes resolve.</p>}
+    {(decision.action === "wait_batch" || (decision.action === "wait_for_evidence" && !initialSamplePending)) && <p>Save a fresh snapshot once the outstanding participant outcomes resolve.</p>}
+    <p className="revision">Estimated lift over the original wording is {points.format(decision.mean_lift * 100)} percentage points.
+      The probability of exceeding {points.format(policy.minimum_lift * 100)} points is {percentage.format(decision.probability_worthwhile)}.</p>
+    {decision.batch_status === "no_allowance" && <p className="revision">This test has no additional batch allowance.</p>}
+    {decision.sample_cap !== null && decision.assigned >= decision.sample_cap && <p className="revision">This test has reached the cap of {decision.sample_cap} participant visits.</p>}
+    {initialSamplePending && <p>Save a fresh snapshot once the first {(decision.sample_cap ?? 0) - (decision.batch_size ?? 0)} participant outcomes have resolved.</p>}
+    {decision.batch_status === "no_batch_recommendation" && <p className="revision">No saved decision recommended an extra batch at the {(decision.sample_cap ?? 0) - (decision.batch_size ?? 0)}-visit review point.</p>}
+    {decision.action !== "refresh_snapshot" && decision.batch_gain !== null && <p className="revision">An additional {decision.batch_size} visits would add {decision.batch_gain.toFixed(3)} expected decision units before the {policy.batch_cost.toFixed(3)} collection cost. The test cap is {decision.sample_cap} participant visits.</p>}
+    <details>
+      <summary>Decision inputs</summary>
+      <p className="revision">Snapshot {decision.snapshot_id.slice(0, 8)} · Policy {policy.version} · Beta({policy.prior_alpha}, {policy.prior_beta}) prior per arm.</p>
+      {decision.batch_checkpoint_id && <p className="revision">Snapshot {decision.batch_checkpoint_id.slice(0, 8)} recommended collecting this batch.</p>}
+      <p className="revision">For an effect above the target, reuse is worth {policy.reuse_if_worthwhile} units and keep is worth {policy.keep_if_worthwhile}. Otherwise reuse is worth {policy.reuse_otherwise} and keep is worth {policy.keep_otherwise}.</p>
+      <p className="revision">Expected value now is {decision.action_values.reuse.toFixed(3)} for reuse and {decision.action_values.keep.toFixed(3)} for keep.</p>
+    </details>
+  </section>;
+}
+
 export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin, request,
-                                 onReview, onPackageConflict, mainModel, onPrepareNextTest}: Props) {
+                                 limits, onReview, onPackageConflict, mainModel, onPrepareNextTest}: Props) {
   const [test, setTest] = useState<Test | null>(null);
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [allowAdditionalBatch, setAllowAdditionalBatch] = useState(false);
   const query = new URLSearchParams({revision: String(revision), fingerprint}).toString();
 
   useEffect(() => {
@@ -81,7 +146,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
     setError("");
     try {
       if (action === "start") {
-        await request(endpoint, {campaign_id: campaignId, revision, fingerprint});
+        await request(endpoint, {campaign_id: campaignId, revision, fingerprint, allow_additional_batch: allowAdditionalBatch});
       }
       if (snapshotKey) {
         const operationId = sessionStorage.getItem(snapshotKey) ?? crypto.randomUUID().replaceAll("-", "");
@@ -125,6 +190,9 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
         <>
           <p className="revision">Compare the approved original and revised wording using the same recordings.
             Each browser keeps its assigned version when it returns.</p>
+          <p><label><input type="checkbox" checked={allowAdditionalBatch} disabled={working}
+            onChange={event => setAllowAdditionalBatch(event.target.checked)} /> Allow one batch of {limits.batch} more participant visits after the first {limits.initial}, up to {limits.cap} total.</label>
+            <br /><span className="revision">The offline policy charges {limits.batchCost} decision units for the batch.</span></p>
           <button onClick={() => void refresh("start")} disabled={working}>Run instruction test</button>
           {error && <button onClick={() => void refresh()} disabled={working}>Retry loading test</button>}
         </>
@@ -176,6 +244,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
                     })}
                   </div>)}
                 </dl>
+                {test.evidence_decision && <SnapshotDecision decision={test.evidence_decision} />}
               </div>}
             </> : <p className="revision">Start a new experiment to save evidence with a pinned observation window.</p>}
           </details>

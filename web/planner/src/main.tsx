@@ -10,7 +10,7 @@ import {GoogleAdsDelivery} from "./GoogleAdsDelivery";
 import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
-import type {ReviewSelection} from "./InstructionTest";
+import type {InstructionTestLimits, ReviewSelection} from "./InstructionTest";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -44,6 +44,7 @@ type PackageReview = {
 type Mode = {
   live: boolean;
   googleAdsReporting?: boolean;
+  instructionTestLimits: InstructionTestLimits;
   demoRequest: string;
   viewerOrigin: string;
   openrouterReviewModels: string[];
@@ -731,7 +732,7 @@ function App() {
                 {draft?.instruction_test && activePackage?.approval && !needsLatest && !busy && mode && (
                   <InstructionTest key={`instructions:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
-                    viewerOrigin={mode.viewerOrigin} request={request}
+                    viewerOrigin={mode.viewerOrigin} limits={mode.instructionTestLimits} request={request}
                     mainModel={inheritedModel}
                     onPrepareNextTest={(testId, reviewId, selection) => void prepare({kind: "experiment_next_test", testId, reviewId, selection})}
                     onReview={(testId, selection) => void prepare({kind: "instruction_review", testId, selection})}

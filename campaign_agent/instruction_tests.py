@@ -9,6 +9,7 @@ from time import time_ns
 
 from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
+from .instruction_policy import ADDITIONAL_BATCH_SIZE, POLICY_V1, SAMPLE_CAP, recommend_instruction_action
 from .measurement import ViewerNotFound
 from scripts.campaign_drafts import PackageConflict
 
@@ -107,14 +108,20 @@ class InstructionTests:
             if content != arm["content"] or any(not take["sha256"] for take in content["takes"]):
                 raise PackageConflict("The test media has changed or is unavailable. Restore the reviewed media to continue.")
 
-    def start(self, campaign_id, revision, fingerprint):
+    def start(self, campaign_id, revision, fingerprint, *, allow_additional_batch=None):
         self.drafts._package_scope(campaign_id, revision)
+        if allow_additional_batch is not None and type(allow_additional_batch) is not bool:
+            raise ValueError("Choose whether to allow an additional batch.")
         test_id = self.test_id(campaign_id, revision, fingerprint)
         with closing(self.viewer.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT id FROM instruction_tests WHERE id = ?", (test_id,)).fetchone()
             if existing:
-                return self._test(db, test_id)
+                test = self._test(db, test_id)
+                allowed = bool(test.get("evidence_protocol", {}).get("additional_batch_size"))
+                if allow_additional_batch is not None and allowed != allow_additional_batch:
+                    raise PackageConflict("This test already has a pinned batch allowance. Refresh the test results.")
+                return test
             package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)["package"]
             prepared = package.get("instruction_test")
             if prepared is None:
@@ -143,7 +150,11 @@ class InstructionTests:
                 "creative_version": creative, "comparison_version": new["comparison_version"],
                 "source_review_id": prepared["review_id"], "source_correction": correction,
                 "viewer_path": "/viewer?test=" + test_id,
-                "evidence_protocol": EVIDENCE_PROTOCOL.copy(),
+                "evidence_protocol": {
+                    **EVIDENCE_PROTOCOL, "decision_policy": POLICY_V1.copy(),
+                    "additional_batch_size": ADDITIONAL_BATCH_SIZE if allow_additional_batch else None,
+                    "sample_cap": SAMPLE_CAP if allow_additional_batch else None,
+                },
                 "versions": [
                     {"arm": arm, "revision": arm_revision, "content": group["content"],
                      "content_fingerprint": package_fingerprint(group["content"])}
@@ -195,6 +206,29 @@ class InstructionTests:
         row = db.execute("SELECT snapshot FROM instruction_test_evidence_snapshots WHERE test_id = ? "
                          "ORDER BY rowid DESC LIMIT 1", (test_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    @staticmethod
+    def _initial_batch_checkpoint(db, snapshot):
+        protocol = snapshot["protocol"]
+        size = protocol.get("additional_batch_size")
+        if not size or not protocol.get("decision_policy") or not snapshot["supersedes"]:
+            return None
+        initial = protocol["sample_cap"] - size
+        counts = (row["cohorts"]["participant"] for row in snapshot["rows"])
+        if sum(count["mature_arrivals"] + count["unresolved"] for count in counts) <= initial:
+            return None
+        # Use the saved review point, rather than reconstructing it from later outcomes.
+        row = db.execute("""
+            SELECT s.snapshot FROM instruction_test_evidence_snapshots s
+            WHERE s.test_id = ? AND (?, 0) = (
+                SELECT SUM(json_extract(value, '$.cohorts.participant.mature_arrivals')),
+                       SUM(json_extract(value, '$.cohorts.participant.unresolved'))
+                FROM json_each(s.snapshot, '$.rows')
+            )
+            ORDER BY s.rowid DESC LIMIT 1
+        """, (snapshot["test_id"], initial)).fetchone()
+        checkpoint = json.loads(row[0]) if row else None
+        return checkpoint if checkpoint and checkpoint["protocol"] == protocol else None
 
     def save_evidence_snapshot(self, campaign_id, revision, fingerprint, operation_id):
         self.drafts._package_scope(campaign_id, revision)
@@ -446,7 +480,17 @@ class InstructionTests:
                 review["assessment"] = assessment
                 review["assessment_verified"] = (review["evidence"].get("assignment_source") == "participant"
                                                  and assessment == saved_assessment)
-            return {**test, "evidence": evidence, "review": review,
+            snapshot = self._latest_snapshot(db, test_id)
+            checkpoint = self._initial_batch_checkpoint(db, snapshot) if snapshot else None
+            result = {**test, "evidence": evidence, "review": review,
                     "unknown_source_rows": self._assignment_rows(db, test, None),
-                    "evidence_snapshot": self._latest_snapshot(db, test_id),
+                    "evidence_snapshot": snapshot,
                     "needs_review": review is None or not review["assessment_verified"] or review["evidence"] != evidence}
+        batch_checkpoint_id = None
+        if checkpoint and recommend_instruction_action(checkpoint)["action"] == "collect":
+            batch_checkpoint_id = checkpoint["id"]
+        decision = recommend_instruction_action(snapshot, batch_checkpoint_id=batch_checkpoint_id) if snapshot else None
+        if (decision and decision["action"] in ("collect", "continue_batch")
+                and sum(row["arrivals"] for row in evidence["rows"]) > decision["assigned"]):
+            decision = {**decision, "action": "refresh_snapshot"}
+        return {**result, "evidence_decision": decision}
