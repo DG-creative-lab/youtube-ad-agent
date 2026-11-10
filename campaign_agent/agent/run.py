@@ -69,7 +69,7 @@ class AgentRuntime:
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
         self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path))
-        self.delivery = CampaignDelivery(self.drafts, reporting)
+        self.delivery = CampaignDelivery(self.drafts, self.setup, reporting)
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()

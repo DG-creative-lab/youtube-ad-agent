@@ -22,7 +22,7 @@ class ViewerMeasurement:
                 BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS viewer_visits (
                     id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    creative_ref TEXT NOT NULL, content_fingerprint TEXT
+                    creative_ref TEXT NOT NULL, content_fingerprint TEXT, ad_link_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS viewer_events (
                     seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
@@ -35,9 +35,11 @@ class ViewerMeasurement:
                     PRIMARY KEY (visit_id, example_ref)
                 );
             """)
-            columns = db.execute("PRAGMA table_info(viewer_visits)").fetchall()
-            if "content_fingerprint" not in {column[1] for column in columns}:
+            columns = {column[1] for column in db.execute("PRAGMA table_info(viewer_visits)")}
+            if "content_fingerprint" not in columns:
                 db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
+            if "ad_link_id" not in columns:
+                db.execute("ALTER TABLE viewer_visits ADD COLUMN ad_link_id TEXT")
 
     def connect(self):
         db = sqlite3.connect(self.path)
@@ -57,12 +59,13 @@ class ViewerMeasurement:
 
     def require_visit(self, db, origin, visit_id):
         visit = db.execute(
-            "SELECT content_fingerprint FROM viewer_visits WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
+            "SELECT content_fingerprint, ad_link_id FROM viewer_visits "
+            "WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
             self.visit_key(origin, visit_id),
         ).fetchone()
         if visit is None:
             raise ViewerNotFound("This visit is unavailable.")
-        return visit[0]
+        return visit
 
     def summarize(self, scope, comparisons, *, connection=None):
         """Count tagged visits and intended-example outcomes in one local snapshot."""
@@ -87,6 +90,7 @@ class ViewerMeasurement:
                     ) THEN 1 END)
                 FROM viewer_visits v
                 WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
+                    AND v.ad_link_id IS NULL
                     AND EXISTS (
                         SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
                     )
@@ -107,26 +111,43 @@ class ViewerMeasurement:
             })
         return observations
 
+    @staticmethod
+    def ad_link_activity(db, scope, link):
+        arrivals, completions = db.execute("""
+            SELECT COUNT(*), COUNT(c.visit_id)
+            FROM viewer_visits v
+            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
+            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
+            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
+                AND v.creative_ref = ? AND v.content_fingerprint = ?
+        """, (f"arrival:{link['comparison_ref']}", scope.client_id, scope.brand_id, link['id'],
+              link['creative_ref'], link['content_fingerprint'])).fetchone()
+        return {"arrivals": arrivals, "completions": completions}
+
     def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
-                     content_fingerprint=None, origin_unavailable=False, connection=None):
+                     content_fingerprint=None, origin_unavailable=False, ad_link_id=None, connection=None):
         if connection is None:
             with closing(self.connect()) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 return self.open_example(
                     creative_ref, example_ref, visit_id, content_fingerprint=content_fingerprint,
-                    origin_unavailable=origin_unavailable, connection=db,
+                    origin_unavailable=origin_unavailable, ad_link_id=ad_link_id, connection=db,
                 )
         origin, target = self.resolve(creative_ref, example_ref)
+        if ad_link_id is not None and (target != origin or origin_unavailable or content_fingerprint is None):
+            raise ViewerNotFound("This ad comparison is unavailable.")
         db = connection
         if visit_id is None:
             visit_id = uuid4().hex
             attribution = None if origin_unavailable else content_fingerprint
             db.execute(
-                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint) "
-                "VALUES (?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution),
+                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint, ad_link_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution, ad_link_id),
             )
         else:
-            attribution = self.require_visit(db, origin, visit_id)
+            attribution, saved_link = self.require_visit(db, origin, visit_id)
+            if saved_link != ad_link_id:
+                raise ViewerNotFound("This visit is unavailable.")
             # A visit with unknown content can resume, but later verification cannot attribute its old activity.
             if attribution is not None:
                 if attribution != content_fingerprint:

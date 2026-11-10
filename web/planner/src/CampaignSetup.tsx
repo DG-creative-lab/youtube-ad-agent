@@ -9,6 +9,7 @@ type Setup = {
   status: "validated" | "creating" | "created" | "unknown" | "verified" | "mismatch";
   plan: Configuration;
   approval: {approved_at: string} | null;
+  viewer_links?: {id: string}[];
   readback: {campaign_id: string; configuration: Configuration; groups: {
     context: string; ad_group_id: string; ad_id: string;
   }[]} | null;
@@ -16,6 +17,7 @@ type Setup = {
 type Props = {
   campaignId: string; revision: number; fingerprint: string;
   request: <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
+  onSetupChanged: () => void;
   onPackageConflict: (message: string) => void;
 };
 
@@ -48,7 +50,7 @@ function ConfigurationDetails({config}: {config: Configuration}) {
   </>;
 }
 
-export function CampaignSetup({campaignId, revision, fingerprint, request, onPackageConflict}: Props) {
+export function CampaignSetup({campaignId, revision, fingerprint, request, onSetupChanged, onPackageConflict}: Props) {
   const [setup, setSetup] = useState<Setup | null>(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -77,6 +79,7 @@ export function CampaignSetup({campaignId, revision, fingerprint, request, onPac
           ...(action !== "validate" && {setup_id: setup?.id}),
         }));
       }
+      onSetupChanged();
     } catch (failure) {
       if (failure instanceof Error && "status" in failure && failure.status === 409) {
         onPackageConflict(failure.message);
@@ -98,6 +101,8 @@ export function CampaignSetup({campaignId, revision, fingerprint, request, onPac
       <button onClick={() => void run("validate")} disabled={working}>Validate paused setup</button>
     ) : <>
       <p className="revision" role="status">{statuses[setup.status]}</p>
+      {setup.status === "verified" && !setup.viewer_links?.length &&
+        <p className="revision">This setup predates tagged viewer links. Approve a new package revision to rehearse with tagged destinations.</p>}
       <details className="approval-history" open={setup.status === "validated"}>
         <summary>Validated configuration</summary>
         <ConfigurationDetails config={setup.plan} />
