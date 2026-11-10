@@ -28,6 +28,7 @@ from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, package_fingerprint
+from campaign_agent.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
@@ -224,6 +225,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     fields.update({"review_id", "kind", "note", "operation_id"})
                 if is_instruction_evidence:
                     fields.add("operation_id")
+                if is_instruction_test and isinstance(data, dict) and "allow_additional_batch" in data:
+                    fields.add("allow_additional_batch")
                 if is_delivery_next_test:
                     fields.add("report_id")
                 if (not isinstance(data, dict) or set(data) != fields
@@ -511,6 +514,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "live": live, "maxDraftBytes": MAX_DRAFT_BYTES, "maxPlacements": MAX_PLACEMENTS,
                         "demoRequest": DEMO_REQUEST,
                         "googleAdsReporting": reporting is not None,
+                        "instructionTestLimits": {"initial": INITIAL_SAMPLE_SIZE, "batch": ADDITIONAL_BATCH_SIZE,
+                                                  "cap": SAMPLE_CAP, "batchCost": POLICY_V1["batch_cost"]},
                         "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
                         "openrouterDraftModels": list(agent.openrouter_drafts.models) if agent else [],
                         "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,

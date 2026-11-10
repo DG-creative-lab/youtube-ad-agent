@@ -42,9 +42,9 @@ class InstructionTestTests(unittest.TestCase):
         self.runtime.resume(self.runtime.start_next_test(self.campaign, 2, fingerprint, review["id"]))
         self.fingerprint = self.drafts.review_package(self.campaign, 3)["fingerprint"]
 
-    def start(self):
+    def start(self, **options):
         self.drafts.approve_package(self.campaign, 3, self.fingerprint)
-        self.test = self.tests.start(self.campaign, 3, self.fingerprint)
+        self.test = self.tests.start(self.campaign, 3, self.fingerprint, **options)
         return self.test
 
     def open(self, arm, participant=None, **kwargs):
@@ -61,6 +61,155 @@ class InstructionTestTests(unittest.TestCase):
 
     def read(self):
         return self.tests.read(self.campaign, 3, self.fingerprint)
+
+    def test_saved_decision_uses_pinned_allowance_and_stops_at_sample_cap(self):
+        test = self.start(allow_additional_batch=True)
+        ref = (self.campaign, 3, self.fingerprint)
+        self.assertEqual(self.tests.start(*ref, allow_additional_batch=True), test)
+        with self.assertRaisesRegex(PackageConflict, "pinned batch allowance"):
+            self.tests.start(*ref, allow_additional_batch=False)
+        self.assertIsNone(self.read()["evidence_decision"])
+
+        start = 1_800_000_000_000
+        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+            for arm, completions in (("original", 6), ("revised", 10)):
+                for index in range(20):
+                    visit = self.open(arm)
+                    if index < completions:
+                        self.complete(visit)
+                self.complete(self.open(arm, source="fixture"))
+        cutoff = start + 300_000
+        operation = uuid4().hex
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=cutoff * 1_000_000):
+            first = self.tests.save_evidence_snapshot(*ref, operation)
+        recommendation = self.read()["evidence_decision"]
+        self.assertEqual(recommendation["snapshot_id"], first["id"])
+        self.assertEqual((recommendation["action"], recommendation["assigned"], recommendation["sample_cap"]),
+                         ("collect", 40, 50))
+        self.assertGreater(recommendation["batch_gain"], recommendation["policy"]["batch_cost"])
+        reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests
+        self.assertEqual(reopened.save_evidence_snapshot(*ref, operation), first)
+        self.assertEqual(reopened.read(*ref)["evidence_decision"], recommendation)
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=cutoff * 1_000_000):
+            second = reopened.save_evidence_snapshot(*ref, uuid4().hex)
+        self.assertEqual(reopened.read(*ref)["evidence_decision"], {**recommendation, "snapshot_id": second["id"]})
+
+        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+            self.open("original")
+        self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
+            reopened.save_evidence_snapshot(*ref, uuid4().hex)
+        after = reopened.read(*ref)["evidence_decision"]
+        self.assertEqual((after["action"], after["assigned"], after["batch_remaining"]), ("continue_batch", 41, 9))
+        self.assertIsNone(after["batch_gain"])
+        self.assertEqual(after["batch_checkpoint_id"], second["id"])
+
+        batch_arrival = cutoff + 3
+        with patch("campaign_agent.measurement.time_ns", return_value=batch_arrival * 1_000_000):
+            for _ in range(9):
+                self.open("revised")
+        self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=batch_arrival * 1_000_000):
+            reopened.save_evidence_snapshot(*ref, uuid4().hex)
+        pending = reopened.read(*ref)["evidence_decision"]
+        self.assertEqual((pending["action"], pending["assigned"], pending["batch_remaining"]), ("wait_batch", 50, 0))
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(batch_arrival + 300_000) * 1_000_000):
+            reopened.save_evidence_snapshot(*ref, uuid4().hex)
+        final = reopened.read(*ref)["evidence_decision"]
+        self.assertEqual((final["action"], final["batch_status"]), ("keep", "sample_cap"))
+        self.assertIsNone(final["batch_gain"])
+        self.assertIsNone(self.drafts.read(4))
+
+    def test_arrivals_before_initial_outcomes_resolve_do_not_start_batch(self):
+        self.start(allow_additional_batch=True)
+        ref = (self.campaign, 3, self.fingerprint)
+        arrival = 1_800_000_000_000
+        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+            for arm, completions in (("original", 6), ("revised", 10)):
+                for index in range(20):
+                    visit = self.open(arm)
+                    if index < completions:
+                        self.complete(visit)
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=arrival * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["action"], decision["assigned"]), ("wait_for_evidence", 40))
+        with patch("campaign_agent.measurement.time_ns", return_value=(arrival + 1) * 1_000_000):
+            self.open("original")
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 1) * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["action"], decision["assigned"]), ("wait_for_evidence", 41))
+        self.assertIsNone(decision["batch_remaining"])
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 300_000) * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["action"], decision["batch_status"]), ("wait_for_evidence", "no_batch_recommendation"))
+        self.assertIsNone(decision["batch_checkpoint_id"])
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 300_001) * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        self.assertEqual(self.read()["evidence_decision"]["action"], "keep")
+
+    def test_arrivals_after_keep_decision_do_not_start_batch(self):
+        self.start(allow_additional_batch=True)
+        ref = (self.campaign, 3, self.fingerprint)
+        arrival = 1_800_000_000_000
+        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+            for arm in ("original", "revised"):
+                for _ in range(20):
+                    self.open(arm)
+        cutoff = arrival + 300_000
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=cutoff * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["action"], decision["batch_status"]), ("keep", "evaluated"))
+        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+            self.open("original")
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["action"], decision["batch_status"]), ("wait_for_evidence", "no_batch_recommendation"))
+        self.assertIsNone(decision["batch_remaining"])
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 300_001) * 1_000_000):
+            self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        self.assertEqual(self.read()["evidence_decision"]["action"], "keep")
+
+    def test_first_snapshot_at_sample_cap_reports_missing_batch_checkpoint(self):
+        self.start(allow_additional_batch=True)
+        ref = (self.campaign, 3, self.fingerprint)
+        arrival = 1_800_000_000_000
+        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+            for arm, completions in (("original", 2), ("revised", 20)):
+                for index in range(25):
+                    visit = self.open(arm)
+                    if index < completions:
+                        self.complete(visit)
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 300_000) * 1_000_000):
+            snapshot = self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        self.assertIsNone(snapshot["supersedes"])
+        decision = self.read()["evidence_decision"]
+        self.assertEqual((decision["assigned"], decision["sample_cap"]), (50, 50))
+        self.assertEqual((decision["action"], decision["batch_status"]), ("reuse", "no_batch_recommendation"))
+        self.assertIsNone(decision["batch_checkpoint_id"])
+        self.assertIsNone(decision["batch_gain"])
+
+    def test_snapshot_from_pre_policy_test_remains_readable_without_recommendation(self):
+        test = self.start()
+        with closing(self.viewer.connect()) as db, db:
+            db.execute(
+                "UPDATE instruction_tests SET snapshot = json_remove(snapshot, "
+                "'$.evidence_protocol.decision_policy', '$.evidence_protocol.sample_cap') WHERE id = ?",
+                (test["id"],),
+            )
+        self.complete(self.open("revised"))
+        ref = (self.campaign, 3, self.fingerprint)
+        snapshot = self.tests.save_evidence_snapshot(*ref, uuid4().hex)
+        self.assertNotIn("decision_policy", snapshot["protocol"])
+        reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests.read(*ref)
+        self.assertEqual(reopened["evidence_snapshot"], snapshot)
+        self.assertEqual(reopened["evidence_decision"], {
+            "snapshot_id": snapshot["id"], "action": "unavailable", "reason": "unpinned_policy",
+        })
 
     def test_learning_snapshot_is_cumulative_idempotent_and_separates_assignment_sources(self):
         test = self.start()
