@@ -63,6 +63,7 @@ type Run = {
 };
 
 const stepLabels = {
+  recommend_delivery_next_test: "Recommend the next test from delivery",
   review_google_ads_delivery: "Review Google Ads delivery",
   load_context: "Load campaign brief",
   propose_placements: "Classify sample placements",
@@ -142,7 +143,7 @@ function App() {
   const [packageError, setPackageError] = useState("");
   const [packageChanged, setPackageChanged] = useState(false);
   const [reviewRefresh, setReviewRefresh] = useState(0);
-  const [setupRefresh, setSetupRefresh] = useState(0);
+  const [deliveryRefresh, setDeliveryRefresh] = useState(0);
   const [historicalSnapshot, setHistoricalSnapshot] = useState<{fingerprint: string; data: unknown}>();
   const [historyError, setHistoryError] = useState("");
 
@@ -690,14 +691,14 @@ function App() {
                 {activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
-                    onSetupChanged={() => setSetupRefresh(current => current + 1)}
+                    onSetupChanged={() => setDeliveryRefresh(current => current + 1)}
                     onPackageConflict={message => {
                       setPackageChanged(true);
                       setPackageError(message);
                     }} />
                 )}
                 {mode && activePackage?.approval && !needsLatest && !busy && (
-                  <GoogleAdsDelivery key={`delivery:${activePackage.fingerprint}:${setupRefresh}`} campaignId={activePackage.package.campaign_id}
+                  <GoogleAdsDelivery key={`delivery:${activePackage.fingerprint}:${deliveryRefresh}`} campaignId={activePackage.package.campaign_id}
                     viewerOrigin={mode.viewerOrigin} googleAds={Boolean(mode.googleAdsReporting)}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onPackageConflict={message => {
@@ -710,6 +711,7 @@ function App() {
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
                     mainModel={inheritedModel}
+                    onCorrectionSaved={() => setDeliveryRefresh(current => current + 1)}
                     onPrepareNextTest={(reviewId, selection) => void prepare({kind: "next_test", reviewId, selection})}
                     onPackageConflict={message => {
                       setPackageChanged(true);

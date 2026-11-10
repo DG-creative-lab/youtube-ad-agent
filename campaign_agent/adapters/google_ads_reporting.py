@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from functools import partial
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from campaign_agent.campaign_setup import SetupProviderError
 from .google_ads_sandbox import GoogleAdsSandbox, RESOURCE_ID, VIDEO_ID, query_rows, verify_test_account
@@ -40,15 +41,22 @@ class GoogleAdsReporting:
                 or not all(RESOURCE_ID.fullmatch(value) for value in [campaign_id, *ids])):
             raise ValueError('Choose the verified Google Ads test campaign.')
         now = datetime.now(timezone.utc)
-        start, end = (now.date() - timedelta(days=6)).isoformat(), now.date().isoformat()
-        condition = (f' WHERE campaign.id = {campaign_id} AND ad_group.id IN ({", ".join(ids)})'
-                     f" AND segments.date BETWEEN '{start}' AND '{end}'")
+        day, zone = now.date(), None
         totals, placements = {}, []
         coverage, placement_coverage = 'unavailable', 'unavailable'
         try:
             with self.connect() as post:
                 query = partial(query_rows, post)
-                verify_test_account(query, self.manager_id, self.account_id)
+                customer = verify_test_account(query, self.manager_id, self.account_id)
+                try:
+                    zone = ZoneInfo(customer.get('timeZone') or '')
+                except (ZoneInfoNotFoundError, TypeError, ValueError):
+                    pass
+                if zone is not None:
+                    day = now.astimezone(zone).date()
+                start, end = day - timedelta(days=7), day - timedelta(days=1)
+                condition = (f' WHERE campaign.id = {campaign_id} AND ad_group.id IN ({", ".join(ids)})'
+                             f" AND segments.date BETWEEN '{start}' AND '{end}'")
                 search = partial(query, self.account_id)
                 rows = search('SELECT campaign.id, ad_group.id, ' + METRICS + ' FROM ad_group' + condition)
                 totals = self._totals(rows, campaign_id, ids)
@@ -64,7 +72,9 @@ class GoogleAdsReporting:
             any(row['metrics'].values()) for row in placements)
         return {
             'source': 'Google Ads test account', 'grain': 'Ad group', 'placement_grain': 'Ad group and video',
-            'window': {'start': start, 'end': end}, 'captured_at': now.isoformat(), 'currency': 'GBP',
+            'window': {'start': (day - timedelta(days=7)).isoformat(), 'end': (day - timedelta(days=1)).isoformat(),
+                       'time_zone': zone.key if zone else None},
+            'captured_at': now.isoformat(), 'currency': 'GBP',
             'coverage': coverage, 'placement_coverage': placement_coverage, 'has_delivery': has_delivery,
             'placements': placements,
             'groups': [{**group, 'metrics': totals.get(group['ad_group_id'])} for group in binding['groups']],

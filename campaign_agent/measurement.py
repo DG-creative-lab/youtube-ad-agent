@@ -3,6 +3,7 @@
 from contextlib import closing
 import re
 import sqlite3
+from time import time_ns
 from uuid import uuid4
 
 from .creatives import EXAMPLES
@@ -22,7 +23,8 @@ class ViewerMeasurement:
                 BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS viewer_visits (
                     id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    creative_ref TEXT NOT NULL, content_fingerprint TEXT, ad_link_id TEXT
+                    creative_ref TEXT NOT NULL, content_fingerprint TEXT, ad_link_id TEXT,
+                    arrived_ms INTEGER, rehearsal INTEGER
                 );
                 CREATE TABLE IF NOT EXISTS viewer_events (
                     seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
@@ -31,7 +33,7 @@ class ViewerMeasurement:
                 );
                 CREATE TABLE IF NOT EXISTS viewer_completions (
                     visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
-                    example_ref TEXT NOT NULL, first_choice TEXT NOT NULL,
+                    example_ref TEXT NOT NULL, first_choice TEXT NOT NULL, completed_ms INTEGER,
                     PRIMARY KEY (visit_id, example_ref)
                 );
             """)
@@ -40,6 +42,11 @@ class ViewerMeasurement:
                 db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
             if "ad_link_id" not in columns:
                 db.execute("ALTER TABLE viewer_visits ADD COLUMN ad_link_id TEXT")
+            for column in ("arrived_ms", "rehearsal"):
+                if column not in columns:
+                    db.execute(f"ALTER TABLE viewer_visits ADD COLUMN {column} INTEGER")
+            if "completed_ms" not in {column[1] for column in db.execute("PRAGMA table_info(viewer_completions)")}:
+                db.execute("ALTER TABLE viewer_completions ADD COLUMN completed_ms INTEGER")
 
     def connect(self):
         db = sqlite3.connect(self.path)
@@ -124,14 +131,34 @@ class ViewerMeasurement:
               link['creative_ref'], link['content_fingerprint'])).fetchone()
         return {"arrivals": arrivals, "completions": completions}
 
+    @staticmethod
+    def ad_link_window_activity(db, scope, link, start_ms, end_ms):
+        rows = db.execute("""
+            SELECT v.rehearsal, COUNT(*), COUNT(c.visit_id)
+            FROM viewer_visits v
+            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
+            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
+                AND c.completed_ms >= v.arrived_ms AND c.completed_ms < ?
+            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
+                AND v.creative_ref = ? AND v.content_fingerprint = ?
+                AND v.arrived_ms >= ? AND v.arrived_ms < ? AND v.rehearsal IN (0, 1)
+            GROUP BY v.rehearsal
+        """, (f"arrival:{link['comparison_ref']}", end_ms, scope.client_id, scope.brand_id, link['id'],
+              link['creative_ref'], link['content_fingerprint'], start_ms, end_ms))
+        cohorts = {rehearsal: (arrivals, completions) for rehearsal, arrivals, completions in rows}
+        arrivals, completions = cohorts.get(0, (0, 0))
+        rehearsals, rehearsal_completions = cohorts.get(1, (0, 0))
+        return {"arrivals": arrivals, "completions": completions,
+                "rehearsal_arrivals": rehearsals, "rehearsal_completions": rehearsal_completions}
+
     def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
-                     content_fingerprint=None, origin_unavailable=False, ad_link_id=None, connection=None):
+                     content_fingerprint=None, origin_unavailable=False, ad_link_id=None, rehearsal=False, connection=None):
         if connection is None:
             with closing(self.connect()) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 return self.open_example(
                     creative_ref, example_ref, visit_id, content_fingerprint=content_fingerprint,
-                    origin_unavailable=origin_unavailable, ad_link_id=ad_link_id, connection=db,
+                    origin_unavailable=origin_unavailable, ad_link_id=ad_link_id, rehearsal=rehearsal, connection=db,
                 )
         origin, target = self.resolve(creative_ref, example_ref)
         if ad_link_id is not None and (target != origin or origin_unavailable or content_fingerprint is None):
@@ -141,8 +168,10 @@ class ViewerMeasurement:
             visit_id = uuid4().hex
             attribution = None if origin_unavailable else content_fingerprint
             db.execute(
-                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint, ad_link_id) "
-                "VALUES (?, ?, ?, ?, ?, ?)", (*self.visit_key(origin, visit_id), attribution, ad_link_id),
+                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint, "
+                "ad_link_id, arrived_ms, rehearsal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (*self.visit_key(origin, visit_id), attribution, ad_link_id, time_ns() // 1_000_000,
+                 int(rehearsal) if ad_link_id is not None else None),
             )
         else:
             attribution, saved_link = self.require_visit(db, origin, visit_id)
@@ -229,7 +258,8 @@ class ViewerMeasurement:
             )
             if kind == "choose":
                 db.execute(
-                    "INSERT INTO viewer_completions VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                    (visit_id, example_ref, take),
+                    "INSERT INTO viewer_completions (visit_id, example_ref, first_choice, completed_ms) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (visit_id, example_ref, take, time_ns() // 1_000_000),
                 )
             return self.state(db, visit_id, example_ref)

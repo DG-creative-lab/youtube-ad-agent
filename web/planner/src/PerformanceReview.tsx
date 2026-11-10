@@ -47,6 +47,7 @@ type Props = {
   groups: {creative_version: string; title: string}[];
   request: <T>(path: string, body?: Record<string, string | number>) => Promise<T>;
   onPackageConflict: (message: string) => void;
+  onCorrectionSaved: () => void;
   onPrepareNextTest: (reviewId: string, selection: ReviewSelection) => void;
   mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
 };
@@ -55,7 +56,7 @@ const endpoint = "/api/campaign/performance";
 const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1});
 
 export function PerformanceReview({campaignId, revision, fingerprint, groups, request, onPackageConflict,
-                                   onPrepareNextTest, mainModel}: Props) {
+                                   onCorrectionSaved, onPrepareNextTest, mainModel}: Props) {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [scenario, setScenario] = useState("");
   const [result, setResult] = useState<PerformanceResult | null>(null);
@@ -127,6 +128,7 @@ export function PerformanceReview({campaignId, revision, fingerprint, groups, re
         operation_id: operation,
       });
       setSavedCorrection(saved);
+      onCorrectionSaved();
       correctionOperation.current = null;
       setCorrectionKind("");
       setNote("");

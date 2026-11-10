@@ -75,6 +75,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
             rows = [{'customerClient': {'id': ACCOUNT, 'level': '1', 'testAccount': True}}]
         elif query.endswith('FROM customer'):
             rows = [{'customer': {'id': account, 'testAccount': self.test_account, 'manager': account == MANAGER,
+                                  'timeZone': 'Europe/London',
                                   'currencyCode': self.manager_currency if account == MANAGER else self.client_currency}}]
         else:
             self.assertEqual(account, ACCOUNT)

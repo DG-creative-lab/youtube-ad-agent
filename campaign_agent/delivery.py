@@ -1,13 +1,15 @@
 """Bind Google Ads delivery snapshots to a current, verified campaign setup."""
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import sqlite3
 from typing import Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scripts.campaign_drafts import PackageConflict
 from .access import LOCAL_BRAND
 from .campaign_setup import CampaignSetup
+from .delivery_next_test import next_action, respect_correction
 from .handoff import package_fingerprint
 from .measurement import ViewerMeasurement
 
@@ -20,12 +22,31 @@ class CampaignReporting(Protocol):
     def snapshot(self, binding: dict) -> dict: ...
 
 
+def viewer_window(report):
+    window = report['window']
+    if not window or not window.get('time_zone'):
+        return None
+    try:
+        zone = ZoneInfo(window['time_zone'])
+        start = datetime.combine(date.fromisoformat(window['start']), time.min, zone)
+        end = datetime.combine(date.fromisoformat(window['end']) + timedelta(days=1), time.min, zone)
+        captured = datetime.fromisoformat(report['captured_at'])
+        if not start < end <= captured:
+            return None
+    except (ValueError, KeyError, TypeError, ZoneInfoNotFoundError, OverflowError):
+        return None
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+
 class CampaignDelivery:
-    def __init__(self, drafts, simulated_setup, reporting: CampaignReporting | None = None):
-        self.drafts, self.simulated_setup, self.reporting = drafts, simulated_setup, reporting
+    def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None):
+        self.drafts, self.simulated_setup = drafts, simulated_setup
+        self.performance, self.reporting = performance, reporting
         with closing(sqlite3.connect(drafts.path)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_reports (
                 id TEXT PRIMARY KEY, setup_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_recommendations (
+                id TEXT PRIMARY KEY, report_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')
 
     def binding(self, db, campaign_id, revision, fingerprint):
         scope = self.drafts._package_scope(campaign_id, revision)
@@ -66,11 +87,26 @@ class CampaignDelivery:
             db.execute('BEGIN')
             binding = self.binding(db, campaign_id, revision, fingerprint)
             if binding is None:
-                return {'enabled': enabled, 'available': False, 'report': None, 'groups': []}
-            row = db.execute('SELECT snapshot FROM campaign_delivery_reports WHERE setup_id=? ORDER BY rowid DESC LIMIT 1',
-                             (binding['setup_id'],)).fetchone()
-            return {'enabled': enabled, 'available': True, 'report': json.loads(row[0]) if row else None,
+                return {'enabled': enabled, 'available': False, 'report': None, 'recommendation': None, 'groups': []}
+            report = self.saved_report(db, binding)
+            recommendation = None
+            if report:
+                row = db.execute('SELECT snapshot FROM campaign_delivery_recommendations WHERE report_id=? '
+                                 'ORDER BY rowid DESC LIMIT 1', (report['id'],)).fetchone()
+                if row:
+                    recommendation = json.loads(row[0])
+                    if recommendation.get('creative_version'):
+                        package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
+                        current = self.performance.correction_for_comparison(db, package, recommendation['creative_version'])
+                        recommendation['needs_refresh'] = current != recommendation.get('correction')
+            return {'enabled': enabled, 'available': True, 'report': report, 'recommendation': recommendation,
                     'groups': binding['groups']}
+
+    @staticmethod
+    def saved_report(db, binding):
+        row = db.execute('SELECT snapshot FROM campaign_delivery_reports WHERE setup_id=? ORDER BY rowid DESC LIMIT 1',
+                         (binding['setup_id'],)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def capture(self, campaign_id, revision, fingerprint, *, setup_id=None):
         with closing(sqlite3.connect(self.drafts.path)) as db, db:
@@ -93,16 +129,40 @@ class CampaignDelivery:
         if binding is None or binding != report['binding']:
             raise PackageConflict('The Google Ads setup changed. Review delivery again from the current package.')
         metrics = {group['ad_group_id']: group['metrics'] for group in report['groups']}
+        window = viewer_window(report)
         groups = []
         for group in binding['groups']:
             link = group['viewer_link']
             activity = ViewerMeasurement.ad_link_activity(db, LOCAL_BRAND, link) if link else None
-            groups.append({**group, 'metrics': metrics.get(group['ad_group_id']), 'viewer_activity': activity})
+            window_activity = ViewerMeasurement.ad_link_window_activity(db, LOCAL_BRAND, link, *window) if link and window else None
+            groups.append({**group, 'metrics': metrics.get(group['ad_group_id']),
+                           'viewer_activity': activity, 'window_activity': window_activity})
         report = {**report, 'revision': revision, 'fingerprint': fingerprint, 'groups': groups}
         report['id'] = package_fingerprint(report)
         db.execute('INSERT INTO campaign_delivery_reports VALUES (?,?,?) ON CONFLICT(id) DO NOTHING',
                    (report['id'], binding['setup_id'], json.dumps(report)))
         return report
+
+    def recommend(self, campaign_id, revision, fingerprint, report_id, *, connection=None):
+        if connection is None:
+            with closing(sqlite3.connect(self.drafts.path)) as db, db:
+                db.execute('BEGIN IMMEDIATE')
+                return self.recommend(campaign_id, revision, fingerprint, report_id, connection=db)
+        db = connection
+        binding = self.binding(db, campaign_id, revision, fingerprint)
+        report = self.saved_report(db, binding) if binding else None
+        if report is None or report['id'] != report_id:
+            raise PackageConflict('Use the latest saved delivery review for the approved package.')
+        proposal = next_action(report)
+        if proposal.get('creative_version'):
+            package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
+            correction = self.performance.correction_for_comparison(db, package, proposal['creative_version'])
+            proposal = respect_correction(proposal, correction)
+        record = {**proposal, 'report_id': report_id, 'window': report['window']}
+        record['id'] = package_fingerprint(record)
+        db.execute('INSERT INTO campaign_delivery_recommendations VALUES (?,?,?) ON CONFLICT(id) DO NOTHING',
+                   (record['id'], report_id, json.dumps(record)))
+        return record
 
     def review(self, campaign_id, revision, fingerprint):
         report = self.capture(campaign_id, revision, fingerprint)
@@ -142,4 +202,9 @@ def delivery_message(report):
             delivery = f"Google Ads reported {metrics['impressions']} impressions, {metrics['clicks']} clicks and £{spend:.2f} spend"
         lines.append(f"{group['name']}: {delivery}. Viewer link arrivals: {activity['arrivals']}. "
                      f"Comparison completions: {activity['completions']}.")
+        window_activity = group.get('window_activity')
+        if window_activity is not None:
+            lines.append(f"Same-window eligible arrivals: {window_activity['arrivals']}. "
+                         f"Completions: {window_activity['completions']}. "
+                         f"Rehearsal arrivals: {window_activity['rehearsal_arrivals']}.")
     return ' '.join([summary, *lines])

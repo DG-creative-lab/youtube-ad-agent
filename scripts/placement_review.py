@@ -100,6 +100,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                        '/api/campaign/setup/create': agent.setup.create,
                        '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})
     delivery_path = '/api/campaign/google-ads-delivery'
+    delivery_next_test_path = delivery_path + '/recommend'
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -151,7 +152,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.post_catalog()
                 return
             if (self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
-                              "/api/campaign/correction", "/api/campaign/instruction-test", delivery_path}
+                              "/api/campaign/correction", "/api/campaign/instruction-test", delivery_path,
+                              delivery_next_test_path}
                     or self.path in setup_commands):
                 self.post_package()
                 return
@@ -205,6 +207,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 is_performance = self.path.endswith("/performance")
                 is_correction = self.path.endswith("/correction")
                 is_instruction_test = self.path.endswith("/instruction-test")
+                is_delivery_next_test = self.path == delivery_next_test_path
                 setup_command = setup_commands.get(self.path)
                 needs_setup_id = setup_command is not None and not self.path.endswith('/validate')
                 if needs_setup_id:
@@ -213,12 +216,16 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     fields.add("scenario")
                 if is_correction:
                     fields.update({"review_id", "kind", "note", "operation_id"})
+                if is_delivery_next_test:
+                    fields.add("report_id")
                 if (not isinstance(data, dict) or set(data) != fields
                         or not isinstance(data["fingerprint"], str)
                         or not re.fullmatch(r"[0-9a-f]{64}", data["fingerprint"])
                         or (needs_setup_id and (not isinstance(data['setup_id'], str)
                             or not re.fullmatch(r'[0-9a-f]{64}', data['setup_id'])))
                         or (is_performance and not isinstance(data["scenario"], str))
+                        or (is_delivery_next_test and (not isinstance(data["report_id"], str)
+                            or not re.fullmatch(r"[0-9a-f]{64}", data["report_id"])))
                         or (is_correction and (not isinstance(data["review_id"], str)
                             or not re.fullmatch(r"[0-9a-f]{64}", data["review_id"])))):
                     raise ValueError("Send a valid package reference.")
@@ -226,6 +233,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     command = setup_command
                 elif self.path == delivery_path:
                     command = agent.delivery.review
+                elif is_delivery_next_test:
+                    command = agent.delivery.recommend
                 elif is_instruction_test:
                     command = instruction_tests.start
                 elif is_correction:
@@ -396,8 +405,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             return self.open_comparison(data, content, references)
 
         def open_ad_comparison(self, data):
+            rehearsal = data.pop("rehearsal", False)
             if (set(data) != {"attribution", "visit_id"} or not isinstance(data["attribution"], str)
                     or not re.fullmatch(r"[0-9a-f]{64}", data["attribution"])
+                    or type(rehearsal) is not bool
                     or (data["visit_id"] is not None and not isinstance(data["visit_id"], str))):
                 raise ValueError("Choose a valid ad comparison link.")
             if agent is None:
@@ -410,11 +421,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 result = self.open_comparison(
                     {"creative_ref": link["creative_ref"], "example_ref": link["comparison_ref"],
                      "visit_id": data["visit_id"]}, link["content_fingerprint"], None,
-                    ad_link_id=link["id"], connection=db,
+                    ad_link_id=link["id"], rehearsal=rehearsal, connection=db,
                 )
                 return {**result, "creative_ref": link["creative_ref"]}
 
-        def open_comparison(self, data, fingerprint, references, *, ad_link_id=None, connection=None):
+        def open_comparison(self, data, fingerprint, references, *, ad_link_id=None, rehearsal=False, connection=None):
             if fingerprint is None:
                 return viewer.open_example(**data)
             origin, example = viewer.resolve(data["creative_ref"], data["example_ref"])
@@ -437,7 +448,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 **{**data, "example_ref": selected_ref},
                 content_fingerprint=fingerprint,
                 origin_unavailable=origin.ref not in verified,
-                ad_link_id=ad_link_id, connection=connection,
+                ad_link_id=ad_link_id, rehearsal=rehearsal, connection=connection,
             )
             content = verified[selected_ref]
             comparison = result["example"]
