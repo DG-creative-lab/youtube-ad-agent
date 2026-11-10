@@ -11,7 +11,7 @@ from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
 from campaign_agent.creatives import render_instruction_choices
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
-from campaign_agent.handoff import MEDIA_DIR, package_fingerprint
+from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
@@ -61,16 +61,17 @@ class RecordedInference:
 
 
 class AgentRuntime:
-    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=MEDIA_DIR,
+    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
-                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None):
+                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
+                 demo_scenario=None):
         operator.require_brand(LOCAL_BRAND)
         self.operator = operator
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
         self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path))
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
-        self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting)
+        self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting, demo_scenario=demo_scenario)
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.model = model or RecordedInference()
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)

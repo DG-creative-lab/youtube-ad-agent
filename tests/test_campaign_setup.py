@@ -71,6 +71,44 @@ class CampaignSetupTests(unittest.TestCase):
             create.assert_not_called()
         self.assertIsNone(self.setup.read(*self.reference)['approval'])
 
+    def test_demo_delivery_stays_scoped_to_its_scenario_and_separate_from_viewer_counts(self):
+        plan = self.validate()
+        wait = self.case.reopen(demo_scenario='wait')
+        self.assertFalse(wait.delivery.read(*self.reference)['available'])
+        blocked_run = wait.planner.start('Review demo delivery.', 'simulated', uuid4().hex, uuid4().hex, self.case.catalog)
+        self.setup.create(*self.reference, plan['id'])
+        blocked = self.case.finish(blocked_run, wait)
+        self.assertEqual(blocked['status'], 'needs_input')
+        self.assertEqual(blocked['planner']['delivery_demo_scenario'], 'wait')
+        self.assertIsNone(blocked['result']['delivery_report_id'])
+        self.assertIsNone(wait.delivery.read(*self.reference)['report'])
+        wait_report = wait.delivery.review(*self.reference)
+        self.assertEqual(wait.delivery.recommend(*self.reference, wait_report['id'])['kind'], 'wait')
+
+        run = wait.planner.start('Review demo delivery.', 'simulated', uuid4().hex, uuid4().hex, self.case.catalog)
+        propose = self.case.reopen(demo_scenario='propose')
+        self.assertEqual(self.case.finish(run, propose)['status'], 'needs_input')
+        self.assertIsNone(propose.delivery.read(*self.reference)['report'])
+        with self.assertRaises(PackageConflict):
+            propose.delivery.recommend(*self.reference, wait_report['id'])
+
+        run = propose.planner.start('Review demo delivery.', 'simulated', uuid4().hex, uuid4().hex, self.case.catalog)
+        result = self.case.finish(run, propose)
+        self.assertEqual(result['planner']['execution'], 'application')
+        self.assertEqual(result['planner']['delivery_demo_scenario'], 'propose')
+        self.assertEqual(result['planner']['turns'][0]['inference']['mode'], 'application')
+        report = propose.delivery.read(*self.reference)['report']
+        self.assertEqual(result['result']['delivery_report_id'], report['id'])
+        self.assertIn('Authored delivery fixture', result['result']['message'])
+        self.assertEqual(report['groups'][0]['fixture_activity'], {'arrivals': 4, 'completions': 1})
+        self.assertEqual(report['groups'][0]['viewer_activity'], {'arrivals': 0, 'completions': 0})
+        self.assertIsNone(report['groups'][0]['window_activity'])
+        recommendation = propose.delivery.recommend(*self.reference, report['id'])
+        self.assertEqual(recommendation['kind'], 'comparison_test')
+        self.assertIn('authored fixture', recommendation['reason'])
+        self.assertIsNone(self.runtime.delivery.read(*self.reference)['report'])
+        self.assertEqual(self.case.reopen(demo_scenario='wait').delivery.read(*self.reference)['report'], wait_report)
+
     def test_lost_creation_receipt_is_resolved_through_readback(self):
         plan = self.validate()
         original_create = self.setup.provider.create_paused

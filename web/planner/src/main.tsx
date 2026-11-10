@@ -51,13 +51,20 @@ type Mode = {
   agentPlanner?: PlannerOptions;
   examples: {creative: string; ref: string; title: string}[];
 };
-type RunResult = {revision: number; ambiguous: Placement[]; outcome?: string; message?: string; needs_verification?: boolean};
+type RunResult = {
+  revision: number; ambiguous: Placement[]; outcome?: string; message?: string; needs_verification?: boolean;
+  delivery_report_id?: string | null;
+};
 type Run = {
   run_id: string;
   request: string;
   status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
   result?: RunResult | null;
-  planner?: {session_id: string; settings: {mode: string; model: string}; draft_permission?: DraftPermission; max_turns: number; turns: unknown[]; routing: {classifier: string}};
+  planner?: {
+    session_id: string; settings: {mode: string; model: string}; draft_permission?: DraftPermission;
+    max_turns: number; turns: unknown[]; routing: {classifier: string};
+    execution: "application" | "model"; delivery_demo_scenario: string | null;
+  };
   steps: {tool: string; result: unknown}[];
   inference?: {settings: {mode: string; model?: string}};
 };
@@ -467,6 +474,9 @@ function App() {
     onCatalogs={catalogs => setMode(current => current?.agentPlanner
       ? {...current, agentPlanner: {...current.agentPlanner, catalogs}} : current)} />;
   const result = review(run);
+  const planner = run?.planner;
+  const applicationRun = planner?.execution === "application";
+  const usedDeliveryFixture = Boolean(planner?.delivery_demo_scenario && run?.result?.delivery_report_id);
   const waiting = run?.status === "waiting_for_evidence";
   const waitPlanned = (run?.steps[0]?.result as {next_action?: string} | undefined)?.next_action === "wait";
   const reviewingTest = run?.request === "Review the original and revised instruction test.";
@@ -740,12 +750,17 @@ function App() {
                     : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
                     : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
                 </p>
-                {run?.planner ? <><p className="revision">Main model · {run.planner.settings.model}<br />
-                  Allowed changes · {draftPermissionLabels[run.planner.draft_permission ?? "none"]}<br />
-                  Automatic specialist · {run.planner.routing.classifier}<br />
-                  {run.planner.turns.length} of {run.planner.max_turns} model turns</p>
+                {run && planner ? <><p className="revision">
+                  {!applicationRun && <>Main model · {planner.settings.model}<br /></>}
+                  Allowed changes · {draftPermissionLabels[planner.draft_permission ?? "none"]}<br />
+                  {applicationRun ? "0 model turns" : <>
+                    Automatic specialist · {planner.routing.classifier}<br />
+                    {planner.turns.length} of {planner.max_turns} model turns
+                  </>}</p>
                   <ol>{run.steps.map((step, index) => <li key={index} className="done">
-                    <span className="step-number" aria-hidden="true">✓</span>{step.tool.replaceAll("_", " ")}
+                    <span className="step-number" aria-hidden="true">✓</span>
+                    {step.tool === "review_google_ads_delivery" && planner.delivery_demo_scenario
+                      ? "Review demo delivery" : step.tool.replaceAll("_", " ")}
                     {(step.result as {error?: string}).error && <span> · Tool rejected</span>}
                   </li>)}</ol>
                 </> : <ol>
@@ -762,7 +777,9 @@ function App() {
                     <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>
                   </details>
                 )}
-                <p className="provenance">{run?.planner ? `${run.planner.settings.mode === "simulated" ? "Simulated main model" : "OpenRouter main model"} · Simulated specialist responses`
+                <p className="provenance">{planner ? (applicationRun
+                  ? (usedDeliveryFixture ? "Application command · Authored delivery fixture" : "Application command")
+                  : `${planner.settings.mode === "simulated" ? "Simulated main model" : "OpenRouter main model"} · Simulated specialist responses`)
                   : waiting ? "No draft or drafting inference requested"
                   : run?.inference?.settings.mode === "openrouter"
                   ? `OpenRouter inference · ${run.inference.settings.model} · Fictional placements`

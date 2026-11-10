@@ -127,16 +127,20 @@ class PlacementAgent:
                        **self.review_tools.pin(db, current),
                        'routing': {'classifier': 'simulated_decision', 'max_classifier_calls': 1}, 'max_turns': MAX_TURNS}
             request_text = ' '.join(request.split())
+            offline_request = request_text.casefold().rstrip('.!?')
             delivery_next_test = DELIVERY_NEXT_TEST_REQUEST.fullmatch(request_text) is not None
+            demo_scenario = self.owner.delivery.demo_scenario
             if (delivery_next_test or DELIVERY_REQUEST.fullmatch(request_text)
-                    or (self.owner.delivery.reporting is None
-                        and request_text.casefold().rstrip('.!?') == 'review ad viewer activity')):
+                    or (self.owner.delivery.reporting is None and offline_request == 'review ad viewer activity')
+                    or (demo_scenario and offline_request == 'review demo delivery')):
                 try:
                     binding = self.owner.delivery.binding(db, self.drafts.campaign_id, current['revision'],
                                                           context['fingerprint'])
                 except PackageConflict:
                     binding = None
                 context.update(delivery_request=True, delivery_setup_id=binding['setup_id'] if binding else None)
+                if demo_scenario:
+                    context['delivery_demo_scenario'] = demo_scenario
                 if delivery_next_test:
                     report = self.owner.delivery.saved_report(db, binding) if binding else None
                     context.update(delivery_next_test=True, delivery_report_id=report['id'] if report else None)
@@ -276,7 +280,7 @@ class PlacementAgent:
                 try:
                     captured_review = self.owner.delivery.capture(
                         self.drafts.campaign_id, source['revision'], source['fingerprint'],
-                        setup_id=source['delivery_setup_id'])
+                        setup_id=source['delivery_setup_id'], demo_scenario=source.get('delivery_demo_scenario'))
                 except PackageConflict:
                     pass
             with closing(sqlite3.connect(self.path)) as db, db:
@@ -435,4 +439,6 @@ class PlacementAgent:
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
                                 'draft_permission': source.get('draft_permission', 'none'),
+                                'execution': 'application' if source.get('delivery_request') else 'model',
+                                'delivery_demo_scenario': source.get('delivery_demo_scenario'),
                                 'routing': source['routing'], 'max_turns': source['max_turns'], 'turns': turns}}

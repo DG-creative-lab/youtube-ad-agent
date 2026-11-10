@@ -21,12 +21,13 @@ if not __package__:
     sys.path.insert(0, str(ROOT))
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import caption_bytes, media_sha256, package_fingerprint
+from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, package_fingerprint
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
@@ -37,6 +38,7 @@ YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 JEV_MODEL = "typesafe/jev-1.14"
 DEFAULT_VIEWER_PORT = 8766
+PORTABLE_DEMO_DB = ROOT / '.local/portable-demo.sqlite3'
 ROUTES = {
     "video-editing": "Tutorial about editing video, voiceover timing, or placing narration on a video timeline.",
     "audiobook": "Tutorial about producing audiobooks or directing a narrator to interpret a story.",
@@ -72,11 +74,13 @@ def youtube_search(key, query, page):
 
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None):
+          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
         raise ValueError("The planner and viewer must use different ports.")
+    if demo_scenario and (live or reporting is not None or openrouter_review_models or openrouter_draft_models or main_models):
+        raise ValueError('The portable demo uses offline search, models and reporting.')
     key = None
     if live:
         try:
@@ -85,11 +89,11 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 raise ValueError("Missing key")
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
-    drafts = CampaignDrafts(draft_path, live)
+    drafts = CampaignDrafts(draft_path, live, media_dir=DEMO_MEDIA_DIR if demo_scenario else None)
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
                                           openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
                                           openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
-                                          main_models=main_models, reporting=reporting)
+                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario)
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
@@ -788,7 +792,10 @@ def main():
                      help=f"Fixed port for viewer links (default: {DEFAULT_VIEWER_PORT}).")
     web.add_argument("--live-youtube", action="store_true", help="Use the existing YouTube Data key for public search.")
     web.add_argument("--draft-db", type=Path, help="Use a separate local campaign database.")
-    web.add_argument("--google-ads-reporting-config", type=Path, help="Opt in to read-only Google Ads test reporting.")
+    delivery_mode = web.add_mutually_exclusive_group()
+    delivery_mode.add_argument("--google-ads-reporting-config", type=Path, help="Opt in to read-only Google Ads test reporting.")
+    delivery_mode.add_argument("--portable-demo", choices=SCENARIOS,
+                               help="Use bundled media and an authored delivery scenario in a separate local demo database.")
     web.add_argument("--openrouter-review-model", action="append", default=[],
                      help="Explicitly enable a :free model for reviews. One request per run, with a zero-price cap.")
     web.add_argument("--openrouter-draft-model", action="append", default=[],
@@ -802,7 +809,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "serve":
-            path = args.draft_db or DEFAULT_DRAFT_PATH
+            path = args.draft_db or (PORTABLE_DEMO_DB if args.portable_demo else DEFAULT_DRAFT_PATH)
             reporting = None
             if args.google_ads_reporting_config:
                 if args.live_youtube or path.resolve() == DEFAULT_DRAFT_PATH.resolve() or not path.is_file():
@@ -810,7 +817,8 @@ def main():
                 reporting = google_ads_reporting(args.google_ads_reporting_config)
             serve(args.port, args.live_youtube, path, viewer_port=args.viewer_port,
                   openrouter_review_models=args.openrouter_review_model,
-                  openrouter_draft_models=args.openrouter_draft_model, main_models=args.agent_model, reporting=reporting)
+                  openrouter_draft_models=args.openrouter_draft_model, main_models=args.agent_model, reporting=reporting,
+                  demo_scenario=args.portable_demo)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
     except sqlite3.Error:
