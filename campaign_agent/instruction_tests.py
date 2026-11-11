@@ -486,11 +486,13 @@ class InstructionTests:
                     "unknown_source_rows": self._assignment_rows(db, test, None),
                     "evidence_snapshot": snapshot,
                     "needs_review": review is None or not review["assessment_verified"] or review["evidence"] != evidence}
-        batch_checkpoint_id = None
-        if checkpoint and recommend_instruction_action(checkpoint)["action"] == "collect":
-            batch_checkpoint_id = checkpoint["id"]
-        decision = recommend_instruction_action(snapshot, batch_checkpoint_id=batch_checkpoint_id) if snapshot else None
-        if (decision and decision["action"] in ("collect", "continue_batch")
+        decision = self.snapshot_decision(snapshot, checkpoint) if snapshot else None
+        if (decision and decision["action"] in ("reuse", "collect", "continue_batch")
                 and sum(row["arrivals"] for row in evidence["rows"]) > decision["assigned"]):
             decision = {**decision, "action": "refresh_snapshot"}
         return {**result, "evidence_decision": decision}
+
+    @staticmethod
+    def snapshot_decision(snapshot, checkpoint):
+        checkpoint_id = checkpoint["id"] if checkpoint and recommend_instruction_action(checkpoint)["action"] == "collect" else None
+        return recommend_instruction_action(snapshot, batch_checkpoint_id=checkpoint_id)

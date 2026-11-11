@@ -11,7 +11,7 @@ from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RecordedInferen
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerNotFound
-from scripts.campaign_drafts import PackageConflict
+from scripts.campaign_drafts import POLICY, PackageConflict
 
 
 class InstructionTestTests(unittest.TestCase):
@@ -61,6 +61,149 @@ class InstructionTestTests(unittest.TestCase):
 
     def read(self):
         return self.tests.read(self.campaign, 3, self.fingerprint)
+
+    def save_reuse_finding(self):
+        self.start(allow_additional_batch=True)
+        arrival = 1_800_000_000_000
+        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+            for arm, completions in (("original", 2), ("revised", 18)):
+                for index in range(20):
+                    visit = self.open(arm)
+                    if index < completions:
+                        self.complete(visit)
+        self.source_ref = (self.campaign, 3, self.fingerprint)
+        self.finding_cutoff = arrival + 300_000
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=self.finding_cutoff * 1_000_000):
+            snapshot = self.tests.save_evidence_snapshot(*self.source_ref, uuid4().hex)
+        return self.runtime.instruction_findings.save(*self.source_ref, snapshot_id=snapshot["id"])
+
+    def fresh_brief(self, context="video-editing"):
+        current = self.drafts.read()
+        review = self.drafts.review_package(self.campaign, current["revision"])
+        brief = self.drafts.start_brief(
+            self.campaign, current["revision"], review["fingerprint"],
+            title="Fresh narration brief", goal="Evaluate the next narration campaign.", context=context,
+        )
+        fingerprint = self.drafts.review_package(self.campaign, brief["revision"])["fingerprint"]
+        return self.campaign, brief["revision"], fingerprint
+
+    def test_finding_reuses_exact_tested_wording_after_restart_and_requires_package_approval(self):
+        finding = self.save_reuse_finding()
+        self.assertEqual(self.runtime.instruction_findings.save(*self.source_ref, snapshot_id=finding["snapshot_id"]),
+                         finding)
+        target = self.fresh_brief()
+        reopened = AgentRuntime(self.path, media_dir=self.media)
+        eligible = reopened.instruction_findings.read(*target)
+        self.assertEqual(eligible["finding"], finding)
+        self.assertEqual([(arm["completions"], arm["mature_arrivals"]) for arm in finding["decision"]["arms"]],
+                         [(2, 20), (18, 20)])
+        old = reopened.drafts.review_package(*target[:2])["package"]
+        self.assertNotEqual(old["brief"], finding["source_brief"])
+        self.assertEqual(old["groups"][0]["content"]["instruction"], finding["before"])
+        request = {"finding_id": finding["id"], "correction_id": eligible["correction"]["id"],
+                   "draft_permission": "instruction_test"}
+        saved = reopened.instruction_findings.apply(*target, **request)
+        reviewed = reopened.drafts.review_package(self.campaign, saved["revision"])
+        self.assertEqual(saved["revision"], target[1] + 1)
+        self.assertEqual(reviewed["package"]["instruction_reuse"], eligible)
+        self.assertEqual(reviewed["package"]["groups"][0]["content"],
+                         {**old["groups"][0]["content"], "instruction": finding["after"]})
+        self.assertEqual(saved["placements"], self.drafts.read(target[1])["placements"])
+        self.assertIsNone(reviewed["approval"])
+        with self.assertRaisesRegex(PackageConflict, "Approve this revision"):
+            reopened.drafts.export_setup(self.campaign, saved["revision"], reviewed["fingerprint"])
+        with self.assertRaisesRegex(PackageConflict, "package has changed"):
+            reopened.instruction_findings.apply(*target, **request)
+        self.assertIsNone(self.drafts.read(saved["revision"] + 1))
+
+    def test_matching_brief_denies_writes_without_instruction_permission_or_current_policy(self):
+        finding = self.save_reuse_finding()
+        target = self.fresh_brief()
+        service = self.runtime.instruction_findings
+        correction_id = service.read(*target)["correction"]["id"]
+        request = {"finding_id": finding["id"], "correction_id": correction_id}
+        with self.assertRaises(PermissionError):
+            service.apply(*target, **request)
+        with self.assertRaises(PermissionError):
+            service.apply(*target, **request, draft_permission="placements")
+        with patch("campaign_agent.learning.POLICY", {**POLICY, "revision": POLICY["revision"] + 1}):
+            self.assertIsNone(service.read(*target))
+            with self.assertRaises(PackageConflict):
+                service.apply(*target, **request, draft_permission="instruction_test")
+        self.drafts.approve_package(*target)
+        review = self.runtime.performance.review(*target, "balanced")
+        self.runtime.performance.save_correction(
+            *target, review["id"], "keep_comparison", "Preserve the full comparison.", uuid4().hex,
+        )
+        self.assertIsNone(service.read(*target))
+        with self.assertRaises(PackageConflict):
+            service.apply(*target, **request, draft_permission="instruction_test")
+        self.assertIsNone(self.drafts.read(target[1] + 1))
+
+    def test_matching_brief_rejects_a_finding_after_new_participant_evidence(self):
+        finding = self.save_reuse_finding()
+        target = self.fresh_brief()
+        service = self.runtime.instruction_findings
+        correction_id = service.read(*target)["correction"]["id"]
+        self.open("original", source="rehearsal")
+        self.assertIsNotNone(service.read(*target))
+        self.open("original")
+        self.assertEqual(self.read()["evidence_decision"]["action"], "refresh_snapshot")
+        self.assertIsNone(service.read(*target))
+        with self.assertRaises(PackageConflict):
+            service.apply(*target, finding_id=finding["id"], correction_id=correction_id,
+                          draft_permission="instruction_test")
+        self.assertIsNone(self.drafts.read(target[1] + 1))
+
+    def test_mismatched_context_and_brand_cannot_retrieve_or_apply_finding(self):
+        finding = self.save_reuse_finding()
+        editing = self.fresh_brief()
+        service = self.runtime.instruction_findings
+        correction_id = service.read(*editing)["correction"]["id"]
+        audiobook = self.fresh_brief("audiobook")
+        request = {"finding_id": finding["id"], "correction_id": correction_id, "draft_permission": "instruction_test"}
+        self.assertIsNone(service.read(*audiobook))
+        with self.assertRaises(PackageConflict):
+            service.apply(*audiobook, **request)
+        self.assertIsNone(self.drafts.read(audiobook[1] + 1))
+        editing = self.fresh_brief()
+        preview = self.media / EXAMPLES[0].preview
+        original_media = preview.read_bytes()
+        preview.write_bytes(b"different preview")
+        changed = (*editing[:2], self.drafts.review_package(*editing[:2])["fingerprint"])
+        self.assertIsNone(service.read(*changed))
+        with self.assertRaises(PackageConflict):
+            service.apply(*changed, **request)
+        preview.write_bytes(original_media)
+        self.assertEqual(service.read(*editing)["finding"], finding)
+        with closing(self.viewer.connect()) as db, db:
+            db.execute("UPDATE instruction_findings SET brand_id = 'another-brand' WHERE id = ?", (finding["id"],))
+        self.assertIsNone(service.read(*editing))
+        with self.assertRaises(PackageConflict):
+            service.apply(*editing, **request)
+        self.assertIsNone(self.drafts.read(editing[1] + 1))
+
+    def test_superseded_and_retired_findings_do_not_revive(self):
+        old = self.save_reuse_finding()
+        service = self.runtime.instruction_findings
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(self.finding_cutoff + 1) * 1_000_000):
+            new_snapshot = self.tests.save_evidence_snapshot(*self.source_ref, uuid4().hex)
+        with self.assertRaisesRegex(PackageConflict, "current snapshot"):
+            service.save(*self.source_ref, snapshot_id=old["snapshot_id"])
+        new = service.save(*self.source_ref, snapshot_id=new_snapshot["id"])
+        target = self.fresh_brief()
+        eligible = service.read(*target)
+        self.assertEqual(eligible["finding"]["id"], new["id"])
+        request = {"correction_id": eligible["correction"]["id"], "draft_permission": "instruction_test"}
+        with self.assertRaises(PackageConflict):
+            service.apply(*target, finding_id=old["id"], **request)
+        service.retire(*target, finding_id=new["id"])
+        reopened = AgentRuntime(self.path, media_dir=self.media).instruction_findings
+        self.assertIsNone(reopened.read(*target))
+        for finding_id in (old["id"], new["id"]):
+            with self.assertRaises(PackageConflict):
+                reopened.apply(*target, finding_id=finding_id, **request)
+        self.assertIsNone(self.drafts.read(target[1] + 1))
 
     def test_saved_decision_uses_pinned_allowance_and_stops_at_sample_cap(self):
         test = self.start(allow_additional_batch=True)

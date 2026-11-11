@@ -90,6 +90,7 @@ def sample_package(draft, media_dir):
         },
         "groups": groups,
         **({"instruction_test": draft["instruction_test"]} if "instruction_test" in draft else {}),
+        **({"instruction_reuse": draft["instruction_reuse"]} if "instruction_reuse" in draft else {}),
     }
 
 

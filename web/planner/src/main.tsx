@@ -11,6 +11,8 @@ import type {Conversation, ConversationSummary} from "./CampaignChat";
 import type {PlannerOptions} from "./AgentComposer";
 import {InstructionTest} from "./InstructionTest";
 import type {InstructionTestLimits, ReviewSelection} from "./InstructionTest";
+import {BriefLearning} from "./BriefLearning";
+import type {InstructionReuse} from "./BriefLearning";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -20,6 +22,7 @@ type Draft = {
   revision: number;
   brief: {title: string; contexts: Record<string, Context>};
   placements: Placement[];
+  instruction_reuse?: InstructionReuse;
   instruction_test?: {
     review_id: string; source_revision: number; creative_version: string; source_test_id?: string;
     before: string; after: string; reason: string; measure: string;
@@ -591,6 +594,12 @@ function App() {
                   <span className="label">02 / Review</span>
                   <h2 id="draft-heading">Campaign draft</h2>
                   {draft && <p className="revision">Revision {draft.revision} · {draft.placements.length} placements</p>}
+                  {draft && activePackage && !needsLatest && <BriefLearning<Draft>
+                    key={`brief:${activePackage.fingerprint}:${deliveryRefresh}:${reviewRefresh}`}
+                    campaignId={draft.campaign_id} revision={draft.revision} fingerprint={activePackage.fingerprint}
+                    reviewFinding={!draft.instruction_test && activePackage.package.groups.length === 1}
+                    applied={draft.instruction_reuse} disabled={busy || !!packageAction}
+                    request={request} onDraft={setDraft} onReload={() => void loadLatest()} />}
                   {draft?.instruction_test && <section className="context" aria-labelledby="instruction-test-heading">
                     <h3 id="instruction-test-heading">Revised comparison instructions</h3>
                     <p className="revision">Prepared from revision {draft.instruction_test.source_revision},

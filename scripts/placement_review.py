@@ -107,6 +107,13 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     delivery_path = '/api/campaign/google-ads-delivery'
     delivery_next_test_path = delivery_path + '/recommend'
     instruction_evidence_path = '/api/campaign/instruction-test/evidence'
+    finding_path = '/api/campaign/instruction-finding'
+    brief_commands = ({
+        '/api/campaign/brief': (drafts.start_brief, {"title", "goal", "context"}),
+        finding_path + '/save': (agent.instruction_findings.save, {"snapshot_id"}),
+        finding_path + '/apply': (agent.instruction_findings.apply, {"finding_id", "correction_id", "draft_permission"}),
+        finding_path + '/retire': (agent.instruction_findings.retire, {"finding_id"}),
+    } if agent else {})
     operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
@@ -160,7 +167,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if (self.path in {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/performance",
                               "/api/campaign/correction", "/api/campaign/instruction-test", delivery_path,
                               delivery_next_test_path, instruction_evidence_path}
-                    or self.path in setup_commands):
+                    or self.path in setup_commands or self.path in brief_commands):
                 self.post_package()
                 return
             if self.path != "/api/campaign":
@@ -216,7 +223,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 is_instruction_evidence = self.path == instruction_evidence_path
                 is_delivery_next_test = self.path == delivery_next_test_path
                 setup_command = setup_commands.get(self.path)
+                brief_command = brief_commands.get(self.path)
                 needs_setup_id = setup_command is not None and not self.path.endswith('/validate')
+                if brief_command is not None:
+                    fields.update(brief_command[1])
                 if needs_setup_id:
                     fields.add('setup_id')
                 if is_performance:
@@ -240,7 +250,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         or (is_correction and (not isinstance(data["review_id"], str)
                             or not re.fullmatch(r"[0-9a-f]{64}", data["review_id"])))):
                     raise ValueError("Send a valid package reference.")
-                if setup_command is not None:
+                if brief_command is not None:
+                    command = brief_command[0]
+                elif setup_command is not None:
                     command = setup_command
                 elif self.path == delivery_path:
                     command = agent.delivery.review
@@ -564,11 +576,13 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 if self.check_operator():
                     self.read_campaign(url.query, package=url.path.endswith("/package"))
                 return
-            if url.path in {"/api/campaign/performance", "/api/campaign/instruction-test", "/api/campaign/setup", delivery_path}:
+            if url.path in {"/api/campaign/performance", "/api/campaign/instruction-test", "/api/campaign/setup",
+                            delivery_path, finding_path}:
                 if self.check_operator():
                     commands = ({"/api/campaign/performance": performance.read,
                                  "/api/campaign/instruction-test": instruction_tests.read,
                                  "/api/campaign/setup": agent.setup.read,
+                                 finding_path: agent.instruction_findings.read,
                                  delivery_path: agent.delivery.read} if agent else {})
                     self.read_package_record(url.query, commands.get(url.path))
                 return
@@ -657,6 +671,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 result = command(drafts.campaign_id, int(revision), fingerprint)
             except PackageConflict as exc:
                 self.send(409, {"error": str(exc)})
+            except PermissionError:
+                self.send(403, {"error": "The package is unavailable to this operator."})
             except sqlite3.Error:
                 self.send(503, {"error": "Could not load the package record. Try again."})
             else:

@@ -15,6 +15,7 @@ from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
+from campaign_agent.learning import InstructionFindings
 from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
@@ -73,6 +74,7 @@ class AgentRuntime:
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
         self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting, demo_scenario=demo_scenario)
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
+        self.instruction_findings = InstructionFindings(self.instruction_tests)
         self.model = model or RecordedInference()
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
         self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
@@ -443,7 +445,8 @@ class AgentRuntime:
             context, proposals = history[0]["result"], history[1]["result"]
             selected = list(context["placements"])
             existing = {row["id"] for row in selected}
-            selected.extend(row for row in proposals if row["creative"] != "review" and row["id"] not in existing)
+            selected.extend(row for row in proposals
+                            if row["creative"] in context["brief"]["contexts"] and row["id"] not in existing)
             return self.drafts.save({"campaign_id": context["campaign_id"],
                                      "revision": context["revision"], "placements": selected},
                                     connection=db)
