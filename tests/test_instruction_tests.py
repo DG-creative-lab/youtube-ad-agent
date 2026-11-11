@@ -62,6 +62,42 @@ class InstructionTestTests(unittest.TestCase):
     def read(self):
         return self.tests.read(self.campaign, 3, self.fingerprint)
 
+    def test_offline_comparison_projection_matches_application_snapshot_and_native_counts(self):
+        from scripts.compare_instruction_policies import evidence_at, load_spec
+
+        self.start()
+        visits = [
+            {"arm": "original", "source": "participant", "arrived_ms": 0, "completed_ms": 2000},
+            {"arm": "revised", "source": "participant", "arrived_ms": 0, "completed_ms": 301000},
+            {"arm": "original", "source": "participant", "arrived_ms": 1000, "completed_ms": None},
+            {"arm": "revised", "source": "participant", "arrived_ms": None, "completed_ms": 2000},
+            {"arm": "revised", "source": "rehearsal", "arrived_ms": 0, "completed_ms": 2000},
+            {"arm": "revised", "source": "fixture", "arrived_ms": 0, "completed_ms": 2000},
+            {"arm": "original", "source": "unknown", "arrived_ms": 0, "completed_ms": None},
+        ]
+        epoch = 1_700_000_000_000
+        for index, event in enumerate(visits):
+            event.update(id=index, admitted_ms=event["arrived_ms"] or 0, batch=0)
+            with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["admitted_ms"]) * 1_000_000):
+                source = event["source"] if event["source"] != "unknown" else "participant"
+                visit = self.open(event["arm"], source=source)
+            if event["completed_ms"] is not None:
+                with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["completed_ms"]) * 1_000_000):
+                    self.complete(visit)
+                    self.complete(visit)
+            with closing(self.viewer.connect()) as db, db:
+                if event["arrived_ms"] is None:
+                    db.execute("UPDATE viewer_visits SET arrived_ms = NULL WHERE id = ?", (visit["visit_id"],))
+                if event["source"] == "unknown":
+                    db.execute("UPDATE instruction_test_assignments SET source = NULL WHERE visit_id = ?", (visit["visit_id"],))
+        cutoff = 650000
+        with patch("campaign_agent.instruction_tests.time_ns", return_value=(epoch + cutoff) * 1_000_000):
+            saved = self.tests.save_evidence_snapshot(self.campaign, 3, self.fingerprint, uuid4().hex)
+        projected, native = evidence_at(load_spec(), visits, cutoff)
+        self.assertEqual([row["cohorts"] for row in saved["rows"]], [row["cohorts"] for row in projected["rows"]])
+        actual = [{key: row[key] for key in ("arm", "arrivals", "completions")} for row in self.read()["evidence"]["rows"]]
+        self.assertEqual(actual, native)
+
     def save_reuse_finding(self):
         self.start(allow_additional_batch=True)
         arrival = 1_800_000_000_000

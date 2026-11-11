@@ -1,0 +1,47 @@
+{
+  "version": "instruction-policy-comparison-v1",
+  "split": "held-out simulation seeds; rules frozen before scoring",
+  "seed_start": 41000,
+  "repetitions": 24,
+  "initial_visits": 40,
+  "batch_visits": 10,
+  "sample_cap": 50,
+  "observation_window_ms": 300000,
+  "initial_review_ms": 340000,
+  "batch_arrival_ms": 341000,
+  "arrival_interval_ms": 1000,
+  "assessment_version": "evidence-reasons-v2",
+  "assessment_minimum_per_arm": 20,
+  "cutoffs_ms": [0, 9000, 39000, 340000, 341000, 350000, 650000],
+  "bayesian_policy": {
+    "version": "instruction-beta-v1",
+    "prior_alpha": 1,
+    "prior_beta": 1,
+    "minimum_lift": 0.05,
+    "reuse_if_worthwhile": 1.0,
+    "reuse_otherwise": -9.0,
+    "keep_if_worthwhile": 0.0,
+    "keep_otherwise": 0.0,
+    "batch_cost": 0.01
+  },
+  "fixed_policy": {
+    "version": "fixed-lift-v1",
+    "reuse_lift": 0.05,
+    "collect_band": [0.0, 0.1]
+  },
+  "scenarios": [
+    {"id": "no-effect", "probabilities": [0.3, 0.3], "initial_count": 40},
+    {"id": "harm", "probabilities": [0.5, 0.25], "initial_count": 40},
+    {"id": "clear-benefit", "probabilities": [0.2, 0.55], "initial_count": 40},
+    {"id": "small-benefit", "probabilities": [0.3, 0.37], "initial_count": 40},
+    {"id": "below-target", "probabilities": [0.3, 0.33], "initial_count": 40},
+    {"id": "at-target", "probabilities": [0.3, 0.35], "initial_count": 40},
+    {"id": "low-rates", "probabilities": [0.02, 0.1], "initial_count": 40},
+    {"id": "delayed", "probabilities": [0.2, 0.55], "initial_count": 40, "completion_delay_ms": 295000},
+    {"id": "late-conflict", "probabilities": [0.3, 0.3], "initial_count": 40, "late_probabilities": [0.0, 0.4]},
+    {"id": "sparse", "probabilities": [0.0, 0.9], "initial_count": 10},
+    {"id": "absent", "probabilities": [0.2, 0.55], "initial_count": 0},
+    {"id": "missing-time", "probabilities": [0.2, 0.55], "initial_count": 40, "missing_first_arrival": true},
+    {"id": "cohort-conflict", "probabilities": [0.3, 0.3], "initial_count": 40, "other_cohorts": true}
+  ]
+}
