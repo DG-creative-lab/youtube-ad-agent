@@ -73,6 +73,16 @@ For a test with a policy pinned at start, the snapshot also shows an offline rec
 
 When the snapshot proposes reuse, choose **Save reuse finding**. In **Campaign draft**, open **Start a fresh brief**, enter the new title and goal, and choose the same comparison context. The sample workspace starts a separate brief revision and retains the previous approval history. A matching brief shows the tested wording, participant counts, and uncertainty. **Prepare wording draft** applies the wording to a new revision for package approval. **Retire finding** removes it from future reuse. A newer evidence snapshot or new participant visits can make a saved finding ineligible.
 
+### Compare instruction policies offline
+
+Run the versioned Bayesian policy and the fixed-lift baseline on the same simulated participant streams. The existing instruction-test assessment retains its native actions. The [saved comparison report](docs/instruction-policy-comparison.md) includes wrong reuse, missed improvements, extra visits, waiting, decision value, ties and baseline wins. Its rules and scenario assumptions are pinned in [the comparison specification](examples/instruction-policy-comparison.json).
+
+```sh
+python3 -B scripts/compare_instruction_policies.py --output /tmp/instruction-policy-comparison.md --json /tmp/instruction-policy-comparison.json
+```
+
+The command also exercises finding reuse after reopening a temporary SQLite database. To keep that example for the planner, add `--walkthrough-db /tmp/policy-walkthrough.sqlite3` with a new path, then run `python3 scripts/placement_review.py serve --portable-demo propose --draft-db /tmp/policy-walkthrough.sqlite3`. The report uses authored outcomes and the declared illustrative payoffs.
+
 ### Main model and placement discovery
 
 For an approved package, choose **Changes → Instruction-test draft** and try **“Review this campaign performance and prepare the next instruction test if the evidence supports it.”** The chat agent reviews labelled sample delivery alongside recorded local viewer activity and the saved buyer correction. An eligible comparison review with **Keep both takes unchanged** can produce an unapproved instruction-only draft. The transcript's **Review evidence** disclosure retains the source counts and correction; the campaign workspace shows the revised instructions and approval state. You can also ask for a review alone, then choose the draft permission for a follow-up **“Prepare it.”**
