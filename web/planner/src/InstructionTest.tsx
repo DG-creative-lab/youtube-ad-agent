@@ -101,7 +101,7 @@ function SnapshotDecision({decision}: {decision: EvidenceDecision}) {
   };
   return <section aria-label="Snapshot recommendation">
     <h3>{titles[decision.action]}</h3>
-    {decision.action === "refresh_snapshot" && <p>More participant visits arrived after this snapshot. Save a fresh snapshot to check the batch status.</p>}
+    {decision.action === "refresh_snapshot" && <p>More participant visits arrived after this snapshot. Save a fresh snapshot to review the new evidence.</p>}
     {decision.action === "continue_batch" && <p>Remaining participant visits in this batch: {decision.batch_remaining}. Save a fresh snapshot once the batch outcomes resolve.</p>}
     {(decision.action === "wait_batch" || (decision.action === "wait_for_evidence" && !initialSamplePending)) && <p>Save a fresh snapshot once the outstanding participant outcomes resolve.</p>}
     <p className="revision">Estimated lift over the original wording is {points.format(decision.mean_lift * 100)} percentage points.
@@ -127,6 +127,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
   const [working, setWorking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [savedFindingSnapshot, setSavedFindingSnapshot] = useState<string>();
   const [allowAdditionalBatch, setAllowAdditionalBatch] = useState(false);
   const query = new URLSearchParams({revision: String(revision), fingerprint}).toString();
 
@@ -171,6 +172,23 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
   function review() {
     if (!test || working) return;
     onReview(test.id, {...mainModel, operation_id: crypto.randomUUID().replaceAll("-", "")});
+  }
+
+  async function saveFinding() {
+    const snapshotId = test?.evidence_snapshot?.id;
+    if (working || !snapshotId) return;
+    setWorking(true);
+    setError("");
+    try {
+      await request("/api/campaign/instruction-finding/save", {
+        campaign_id: campaignId, revision, fingerprint, snapshot_id: snapshotId,
+      });
+      setSavedFindingSnapshot(snapshotId);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not save the finding.");
+    } finally {
+      setWorking(false);
+    }
   }
 
   const canDraft = test?.review?.assessment.kind === "prepare_another_test";
@@ -245,6 +263,10 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
                   </div>)}
                 </dl>
                 {test.evidence_decision && <SnapshotDecision decision={test.evidence_decision} />}
+                {test.evidence_decision?.action === "reuse" && test.evidence_decision.batch_status !== "no_batch_recommendation" &&
+                  (savedFindingSnapshot === test.evidence_snapshot.id
+                    ? <p role="status" className="revision">Finding saved. Start a fresh brief to review it.</p>
+                    : <button disabled={working} onClick={() => void saveFinding()}>Save reuse finding</button>)}
               </div>}
             </> : <p className="revision">Start a new experiment to save evidence with a pinned observation window.</p>}
           </details>

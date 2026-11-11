@@ -319,6 +319,28 @@ class CampaignDrafts:
             raise ValueError("Provide revised comparison instructions of up to 500 characters.")
         return instruction.strip()
 
+    def start_brief(self, campaign_id, revision, fingerprint, *, title, goal, context):
+        """Start a brief from the approved comparison catalog in the sample workspace."""
+        if (not isinstance(title, str) or not 0 < len(title.strip()) <= 120
+                or not isinstance(goal, str) or not 0 < len(goal.strip()) <= 500
+                or not isinstance(context, str) or context not in BRIEF["contexts"]):
+            raise ValueError("Enter a brief title, goal and supported comparison context.")
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            review, _ = self._package_review(db, campaign_id, revision)
+            if review["current_revision"] != revision or review["fingerprint"] != fingerprint:
+                raise PackageConflict("The package has changed. Load and review the latest draft.")
+            current = self._read(db)
+            saved = {
+                "campaign_id": campaign_id, "revision": revision + 1, "policy": POLICY,
+                "brief": {**BRIEF, "id": uuid4().hex, "title": title.strip(), "goal": goal.strip(),
+                          "contexts": {context: BRIEF["contexts"][context]}},
+                "placements": [row for row in current["placements"] if row["creative"] == context],
+            }
+            db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
+                       (campaign_id, saved["revision"], json.dumps(saved)))
+        return saved
+
     def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
         """Persist one instruction change in the caller's validated review transaction."""
         self._package_scope(package["campaign_id"], package["revision"])
@@ -343,16 +365,23 @@ class CampaignDrafts:
             test.update(source_test_id=review["test_id"], review_type="instruction_test")
         if inference is not None:
             test["inference"] = inference
+        return self._save_instruction_revision(db, current, group, instruction, {"instruction_test": test})
+
+    def _save_instruction_revision(self, db, current, group, instruction, provenance):
+        """Write the wording, its viewer version and provenance in the caller's transaction."""
         saved = {
             **current, "revision": current["revision"] + 1,
             "comparison_instructions": {**current.get("comparison_instructions", {}),
                                         group["creative_version"]: instruction},
-            "instruction_test": test,
+            **provenance,
         }
+        if "instruction_test" in provenance:
+            saved.pop("instruction_reuse", None)
         db.executemany(
             "INSERT INTO comparison_instruction_versions VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
             [(LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, group["creative_version"], group["comparison_version"],
-              package_fingerprint({"instruction": text}), text) for text in (test["before"], instruction)],
+              package_fingerprint({"instruction": text}), text)
+             for text in (group["content"]["instruction"], instruction)],
         )
         db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
                    (self.campaign_id, saved["revision"], json.dumps(saved)))

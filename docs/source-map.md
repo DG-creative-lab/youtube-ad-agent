@@ -20,6 +20,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [campaign_agent/creatives.py](../campaign_agent/creatives.py) | Published examples and the approved neutral instruction components used to validate and assemble provider proposals. |
 | [campaign_agent/instruction_tests.py](../campaign_agent/instruction_tests.py) | Approved test pairs, stable viewer assignments, saved agent assessments and cumulative learning evidence snapshots. |
 | [campaign_agent/instruction_policy.py](../campaign_agent/instruction_policy.py) | Offline posterior and value of one more batch from the latest saved participant snapshot and pinned test limits. |
+| [campaign_agent/learning.py](../campaign_agent/learning.py) | Scoped instruction findings, source freshness, retirement, and reuse through the campaign draft writer. |
 | [campaign_agent/handoff.py](../campaign_agent/handoff.py) | Package content fingerprints, media references and the manual setup export. |
 | [campaign_agent/campaign_setup.py](../campaign_agent/campaign_setup.py) | Setup validation, exact-plan approval, one creation attempt and provider read-back. The simulated adapter stores its campaign separately from the approved plan. |
 | [campaign_agent/adapters/google_ads_sandbox.py](../campaign_agent/adapters/google_ads_sandbox.py) | Test account verification, Demand Gen request construction, validation and read-back. [scripts/google_ads_sandbox.py](../scripts/google_ads_sandbox.py) is the opt-in entry point. |
