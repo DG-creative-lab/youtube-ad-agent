@@ -7,7 +7,7 @@ import sqlite3
 from typing import Protocol
 from uuid import uuid4
 
-from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.creatives import render_instruction_choices
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
@@ -65,13 +65,16 @@ class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
-                 demo_scenario=None):
-        operator.require_brand(LOCAL_BRAND)
+                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None):
+        operator.require_brand(context.scope)
         self.operator = operator
+        self.scope = context.scope
         self.path = Path(path)
-        self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir)
+        self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
+                                     context=context, campaign_id=campaign_id, access=access, examples=examples)
         self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path))
-        self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path))
+        self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
+                                                                            campaign_id=self.drafts.campaign_id))
         self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting, demo_scenario=demo_scenario)
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
         self.instruction_findings = InstructionFindings(self.instruction_tests)
@@ -79,12 +82,17 @@ class AgentRuntime:
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
         self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
         with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_runs (
                     id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    actor_id TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL
+                    actor_id TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, campaign_id TEXT NOT NULL
                 )
             """)
+            if "campaign_id" not in {row[1] for row in db.execute("PRAGMA table_info(agent_runs)")}:
+                db.execute("ALTER TABLE agent_runs ADD COLUMN campaign_id TEXT")
+                db.execute("UPDATE agent_runs SET campaign_id='tts-sample' WHERE client_id=? AND brand_id=?",
+                           (LOCAL_CONTEXT.scope.client_id, LOCAL_CONTEXT.scope.brand_id))
             db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_steps (
                     run_id TEXT NOT NULL, position INTEGER NOT NULL, tool TEXT NOT NULL,
@@ -106,17 +114,24 @@ class AgentRuntime:
         self.planner = PlacementAgent(self, main_models, transport=main_transport,
                                       simulator=planner_simulator, classifier=placement_classifier)
 
+    def require(self, capability):
+        self.operator.require_brand(self.scope)
+        if self.operator.id != self.drafts.operator.id:
+            raise PermissionError("The run actor changed. Resolve a new application context.")
+        self.drafts.require(capability)
+
     def start(self, request, *, run_id=None):
+        self.require("youtube:agent.run")
         if request != DEMO_REQUEST:
             raise ValueError("The offline recording supports the documented demo request only.")
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:campaign.read")
         run_id = uuid4().hex if run_id is None else run_id
         if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
             raise ValueError("Invalid run ID.")
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-                       (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
-                        self.operator.id, request, "running"))
+            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+                       (run_id, self.scope.client_id, self.scope.brand_id,
+                        self.operator.id, request, "running", self.drafts.campaign_id))
             self._owned_run(db, run_id)
         return run_id
 
@@ -143,7 +158,8 @@ class AgentRuntime:
         return self.performance.instruction_test_context(db, **source)
 
     def _start_test_preparation(self, source, *, mode, model, operation_id):
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:agent.run")
+        self.require("youtube:campaign.read")
         if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
             raise ValueError("Choose offline or OpenRouter drafting.")
         if mode == "offline" and model is not None:
@@ -151,7 +167,7 @@ class AgentRuntime:
         settings = {"mode": "offline"} if mode == "offline" else self.openrouter_drafts.settings(model)
         if mode == "openrouter" and operation_id is None:
             raise ValueError("Use a valid drafting operation ID.")
-        identity = {"client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id,
+        identity = {"client": self.scope.client_id, "brand": self.scope.brand_id,
                     "actor": self.operator.id, "request": NEXT_TEST_REQUEST}
         if operation_id is not None:
             if not isinstance(operation_id, str) or not RUN_ID.fullmatch(operation_id):
@@ -170,26 +186,28 @@ class AgentRuntime:
                     raise ValueError("This drafting operation was already used for a different request.")
                 return run_id
             self._next_test_context(db, source)
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?)",
-                       (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
-                        self.operator.id, NEXT_TEST_REQUEST, "running"))
+            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (run_id, self.scope.client_id, self.scope.brand_id,
+                        self.operator.id, NEXT_TEST_REQUEST, "running", self.drafts.campaign_id))
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?)", (run_id, json.dumps(source)))
             db.execute("INSERT INTO agent_review_inference (run_id, settings) VALUES (?, ?)",
                        (run_id, json.dumps(settings)))
         return run_id
 
     def _owned_run(self, db, run_id):
+        self.require("youtube:campaign.read")
         row = db.execute(
             "SELECT request, status FROM agent_runs WHERE id = ? AND client_id = ? "
-            "AND brand_id = ? AND actor_id = ?",
-            (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.operator.id),
+            "AND brand_id = ? AND actor_id = ? AND campaign_id = ?",
+            (run_id, self.scope.client_id, self.scope.brand_id, self.operator.id, self.drafts.campaign_id),
         ).fetchone()
         if row is None:
             raise PermissionError("The run is unavailable to this operator.")
         return row
 
     def start_instruction_review(self, test_id, *, mode="offline", model=None, operation_id=None):
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:agent.run")
+        self.require("youtube:campaign.read")
         if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
             raise ValueError("Choose offline or OpenRouter reviews.")
         if mode == "offline" and model is not None:
@@ -202,7 +220,7 @@ class AgentRuntime:
         if operation_id is not None:
             if not isinstance(operation_id, str) or not RUN_ID.fullmatch(operation_id):
                 raise ValueError("Use a valid review operation ID.")
-            run_id = package_fingerprint({"scope": vars(LOCAL_BRAND), "actor": self.operator.id,
+            run_id = package_fingerprint({"scope": vars(self.scope), "actor": self.operator.id,
                                           "request": REVIEW_TEST_REQUEST, "operation_id": operation_id})[:32]
             with closing(sqlite3.connect(self.path)) as db:
                 row = db.execute(
@@ -222,9 +240,9 @@ class AgentRuntime:
             })[:32]
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                       (run_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
-                        self.operator.id, REVIEW_TEST_REQUEST, "running"))
+            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                       (run_id, self.scope.client_id, self.scope.brand_id,
+                        self.operator.id, REVIEW_TEST_REQUEST, "running", self.drafts.campaign_id))
             self._owned_run(db, run_id)
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?) ON CONFLICT DO NOTHING",
                        (run_id, json.dumps(context)))
@@ -239,12 +257,13 @@ class AgentRuntime:
         return run_id
 
     def resume(self, run_id, max_steps=4):
+        self.require("youtube:agent.run")
         if type(max_steps) is not int or not 0 <= max_steps <= 4:
             raise ValueError("The step budget must be between zero and four.")
         if self.planner.owns(run_id):
             return self.planner.resume(run_id, max_steps=max_steps)
         for _ in range(max_steps):
-            self.operator.require_brand(LOCAL_BRAND)
+            self.require("youtube:campaign.read")
             if self._resume_openrouter(run_id):
                 continue
             with closing(sqlite3.connect(self.path)) as db, db:
@@ -259,12 +278,14 @@ class AgentRuntime:
                 if run[1] in {"ready_for_review", "waiting_for_evidence"}:
                     return self.read(run_id)
                 tool = self.model.next_tool(run[0], history)
+                self.require("youtube:agent.run")
                 if run[0] == REVIEW_TEST_REQUEST:
                     result = self._dispatch_instruction_review(db, run_id, tool, history)
                 elif run[0] == NEXT_TEST_REQUEST:
                     result = self._dispatch_next_test(db, run_id, tool, history)
                 else:
                     result = self._dispatch(db, tool, history)
+                self.require("youtube:agent.run")
                 db.execute("INSERT INTO agent_steps VALUES (?, ?, ?, ?)",
                            (run_id, len(history), tool, json.dumps(result)))
                 if tool in {"finish", "finish_test", "finish_test_review", "wait_for_evidence"}:
@@ -275,7 +296,7 @@ class AgentRuntime:
     def read(self, run_id):
         if self.planner.owns(run_id):
             return self.planner.read(run_id)
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.path)) as db:
             db.execute("BEGIN")
             request, status = self._owned_run(db, run_id)
@@ -294,7 +315,8 @@ class AgentRuntime:
 
     def _resume_openrouter(self, run_id):
         """Reserve a single request, call outside SQLite, and persist its receipt before the step."""
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:agent.run")
+        self.require("youtube:campaign.read")
         receipt = None
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -336,7 +358,7 @@ class AgentRuntime:
                            (json.dumps(receipt), run_id))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            self.operator.require_brand(LOCAL_BRAND)
+            self.require("youtube:agent.run")
             self._owned_run(db, run_id)
             if db.execute("SELECT 1 FROM agent_steps WHERE run_id = ? AND position = 1", (run_id,)).fetchone():
                 return True

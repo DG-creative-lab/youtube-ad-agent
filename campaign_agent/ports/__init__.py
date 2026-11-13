@@ -1,0 +1,1 @@
+"""Product-owned integration contracts."""

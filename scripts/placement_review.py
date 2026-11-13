@@ -24,7 +24,6 @@ from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
 from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
-from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, package_fingerprint
@@ -98,7 +97,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
-    viewer = ViewerMeasurement(draft_path)
+    viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id)
     performance = None if live else CampaignPerformance(drafts, viewer)
     instruction_tests = agent.instruction_tests if agent else None
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
@@ -444,7 +443,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 raise ViewerNotFound("This ad comparison is unavailable.")
             with closing(viewer.connect()) as db, db:
                 db.execute("BEGIN IMMEDIATE")
-                link = CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, data["attribution"])
+                link = CampaignSetup.verified_viewer_link(db, drafts.scope, data["attribution"],
+                                                         campaign_id=drafts.campaign_id)
                 if link is None:
                     raise ViewerNotFound("This ad comparison is unavailable.")
                 result = self.open_comparison(

@@ -79,15 +79,15 @@ class InstructionTests:
                            "CHECK (source IN ('participant', 'rehearsal', 'fixture'))")
 
     @staticmethod
-    def test_id(campaign_id, revision, fingerprint):
-        return package_fingerprint({"scope": vars(LOCAL_BRAND), "campaign": campaign_id,
+    def test_id(campaign_id, revision, fingerprint, scope=LOCAL_BRAND):
+        return package_fingerprint({"scope": vars(scope), "campaign": campaign_id,
                                     "revision": revision, "fingerprint": fingerprint})[:32]
 
     def started_for_package(self, db, package):
         self.drafts._package_scope(package['campaign_id'], package['revision'])
-        test_id = self.test_id(package['campaign_id'], package['revision'], package_fingerprint(package))
+        test_id = self.test_id(package['campaign_id'], package['revision'], package_fingerprint(package), self.drafts.scope)
         return test_id if db.execute('SELECT 1 FROM instruction_tests WHERE id=? AND client_id=? AND brand_id=?',
-                                     (test_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone() else None
+                                     (test_id, self.drafts.scope.client_id, self.drafts.scope.brand_id)).fetchone() else None
 
     def _test(self, db, test_id):
         if not isinstance(test_id, str) or not re.fullmatch(r"[0-9a-f]{32}", test_id):
@@ -95,7 +95,7 @@ class InstructionTests:
         row = db.execute(
             "SELECT snapshot FROM instruction_tests WHERE id = ? AND client_id = ? AND brand_id = ? "
             "AND campaign_id = ?",
-            (test_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.drafts.campaign_id),
+            (test_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id),
         ).fetchone()
         if row is None:
             raise ViewerNotFound("This instruction test is unavailable.")
@@ -109,10 +109,11 @@ class InstructionTests:
                 raise PackageConflict("The test media has changed or is unavailable. Restore the reviewed media to continue.")
 
     def start(self, campaign_id, revision, fingerprint, *, allow_additional_batch=None):
+        self.drafts.require("youtube:review.write")
         self.drafts._package_scope(campaign_id, revision)
         if allow_additional_batch is not None and type(allow_additional_batch) is not bool:
             raise ValueError("Choose whether to allow an additional batch.")
-        test_id = self.test_id(campaign_id, revision, fingerprint)
+        test_id = self.test_id(campaign_id, revision, fingerprint, self.drafts.scope)
         with closing(self.viewer.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             existing = db.execute("SELECT id FROM instruction_tests WHERE id = ?", (test_id,)).fetchone()
@@ -129,7 +130,7 @@ class InstructionTests:
             original = db.execute(
                 "SELECT snapshot FROM campaign_package_approvals WHERE client_id = ? AND brand_id = ? "
                 "AND campaign_id = ? AND revision = ? AND fingerprint = ? AND snapshot IS NOT NULL",
-                (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id,
+                (self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id,
                  prepared["source_revision"], prepared["source_fingerprint"]),
             ).fetchone()
             if original is None:
@@ -164,8 +165,9 @@ class InstructionTests:
                 ],
             }
             self._verify_media(test)
+            self.drafts.require("youtube:review.write")
             db.execute("INSERT INTO instruction_tests VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                       (test_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id,
+                       (test_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id,
                         revision, fingerprint, test["started_at"], json.dumps(test)))
         return test
 
@@ -231,10 +233,11 @@ class InstructionTests:
         return checkpoint if checkpoint and checkpoint["protocol"] == protocol else None
 
     def save_evidence_snapshot(self, campaign_id, revision, fingerprint, operation_id):
+        self.drafts.require("youtube:review.write")
         self.drafts._package_scope(campaign_id, revision)
         if not isinstance(operation_id, str) or not re.fullmatch(r"[0-9a-f]{32}", operation_id):
             raise ValueError("Use a valid evidence operation reference.")
-        test_id = self.test_id(campaign_id, revision, fingerprint)
+        test_id = self.test_id(campaign_id, revision, fingerprint, self.drafts.scope)
         with closing(self.viewer.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             test = self._test(db, test_id)
@@ -251,19 +254,19 @@ class InstructionTests:
             if previous and cutoff < previous["cutoff_ms"]:
                 raise PackageConflict("The server clock is earlier than the latest evidence cutoff. Try again later.")
             snapshot = {
-                "test_id": test_id, **vars(LOCAL_BRAND), "campaign_id": campaign_id,
+                "test_id": test_id, **vars(self.drafts.scope), "campaign_id": campaign_id,
                 "revision": revision, "fingerprint": fingerprint, "protocol": protocol,
                 "creative_version": test["creative_version"], "comparison_version": test["comparison_version"],
                 "cutoff_ms": cutoff, "supersedes": previous["id"] if previous else None,
                 "rows": self._snapshot_rows(db, test, protocol["observation_window_ms"], cutoff),
             }
             snapshot["id"] = package_fingerprint({"test_id": test_id, "operation_id": operation_id})
+            self.drafts.require("youtube:review.write")
             db.execute("INSERT INTO instruction_test_evidence_snapshots VALUES (?, ?, ?, ?)",
                        (snapshot["id"], test_id, operation_id, json.dumps(snapshot)))
         return snapshot
 
-    @staticmethod
-    def _snapshot_rows(db, test, window_ms, cutoff):
+    def _snapshot_rows(self, db, test, window_ms, cutoff):
         rows = []
         for version in test["versions"]:
             # An assignment and its first completion each have a unique visit key.
@@ -280,14 +283,15 @@ class InstructionTests:
                     FROM instruction_test_assignments a JOIN viewer_visits v ON v.id = a.visit_id
                     LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = :example
                     WHERE a.test_id = :test AND a.arm = :arm AND v.client_id = :client AND v.brand_id = :brand
+                      AND v.campaign_id = :campaign
                       AND v.creative_ref = :creative AND v.content_fingerprint = :content
                       AND (v.arrived_ms IS NULL OR v.arrived_ms <= :cutoff)
                 )
                 SELECT source, COUNT(completed), COALESCE(SUM(completed), 0), COUNT(*) - COUNT(completed)
                 FROM assigned GROUP BY source
             """, {"window": window_ms, "cutoff": cutoff, "example": test["comparison_version"],
-                  "test": test["id"], "arm": version["arm"], "client": LOCAL_BRAND.client_id,
-                  "brand": LOCAL_BRAND.brand_id, "creative": test["creative_version"],
+                  "test": test["id"], "arm": version["arm"], "client": self.drafts.scope.client_id,
+                  "brand": self.drafts.scope.brand_id, "campaign": self.drafts.campaign_id, "creative": test["creative_version"],
                   "content": version["content_fingerprint"]})
             cohorts = {source: {"mature_arrivals": 0, "completions": 0, "unresolved": 0}
                        for source in (*ASSIGNMENT_SOURCES, "unknown")}
@@ -298,8 +302,7 @@ class InstructionTests:
                          "content_fingerprint": version["content_fingerprint"], "cohorts": cohorts})
         return rows
 
-    @staticmethod
-    def _assignment_rows(db, test, source):
+    def _assignment_rows(self, db, test, source):
         rows = []
         for version in test["versions"]:
             arrivals, completions = db.execute("""
@@ -308,12 +311,12 @@ class InstructionTests:
                 ) THEN 1 END)
                 FROM instruction_test_assignments a JOIN viewer_visits v ON v.id = a.visit_id
                 WHERE a.test_id = ? AND a.arm = ? AND v.client_id = ? AND v.brand_id = ?
-                    AND a.source IS ?
+                    AND v.campaign_id = ? AND a.source IS ?
                     AND v.creative_ref = ? AND v.content_fingerprint = ?
                     AND EXISTS (SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
                                 AND e.kind = 'arrival' AND e.example_ref = ?)
-            """, (test["comparison_version"], test["id"], version["arm"], LOCAL_BRAND.client_id,
-                  LOCAL_BRAND.brand_id, source, test["creative_version"], version["content_fingerprint"],
+            """, (test["comparison_version"], test["id"], version["arm"], self.drafts.scope.client_id,
+                  self.drafts.scope.brand_id, self.drafts.campaign_id, source, test["creative_version"], version["content_fingerprint"],
                   test["comparison_version"])).fetchone()
             rows.append({"arm": version["arm"], "arrivals": arrivals, "completions": completions,
                          "completion_rate": completions / arrivals if arrivals else None})
@@ -334,7 +337,7 @@ class InstructionTests:
         }
 
     def review_context(self, test_id, *, connection=None):
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:campaign.read")
         if connection is not None:
             return self._evidence(connection, self._test(connection, test_id))
         with closing(self.viewer.connect()) as db:
@@ -343,7 +346,7 @@ class InstructionTests:
             return self._evidence(db, test)
 
     def require_review_context(self, db, context):
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:campaign.read")
         if context.get("assignment_source") != "participant":
             raise PackageConflict("Review the instruction test again using participant visits.")
         test = self._test(db, context["test_id"])
@@ -352,6 +355,7 @@ class InstructionTests:
             raise PackageConflict("The buyer correction changed. Review the instruction test again.")
 
     def save_review(self, db, context, assessment, *, inference=None):
+        self.drafts.require("youtube:review.write")
         self.require_review_context(db, context)
         assessment = self.validate_assessment(context, assessment)
         review = {"evidence": context, "assessment": assessment}
@@ -366,7 +370,7 @@ class InstructionTests:
 
     def next_test_context(self, db, test_id, review_id):
         """Validate a current experiment assessment and pin the approved revised arm as baseline."""
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:campaign.read")
         test = self._test(db, test_id)
         row = db.execute(
             "SELECT id, snapshot FROM instruction_test_reviews WHERE test_id = ? ORDER BY rowid DESC LIMIT 1",
@@ -455,7 +459,7 @@ class InstructionTests:
 
     def read(self, campaign_id, revision, fingerprint):
         self.drafts._package_scope(campaign_id, revision)
-        test_id = self.test_id(campaign_id, revision, fingerprint)
+        test_id = self.test_id(campaign_id, revision, fingerprint, self.drafts.scope)
         with closing(self.viewer.connect()) as db:
             db.execute("BEGIN")
             if not db.execute("SELECT 1 FROM instruction_tests WHERE id = ?", (test_id,)).fetchone():

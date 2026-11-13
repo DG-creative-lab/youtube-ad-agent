@@ -1,6 +1,6 @@
 # Campaign agent build plan
 
-Updated 10 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
+Updated 13 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
 
 ## Application deliverable
 
@@ -8,13 +8,38 @@ Build one local workflow for the ElevenLabs Text to Speech brief. A buyer gives 
 
 Target a complete walkthrough by **Friday 13 November**. Reserve **Monday 16 November** for a clean setup check and application packaging before the recorded **18:30 GMT** deadline. These are planning targets. Keep the build at zero cost across media, models, hosting and advertising.
 
-## POC checkpoint · 10 November 2026
+## Release checkpoint · 11 November 2026
 
 The local POC can turn a brief into two contextual placement groups and a versioned package, then take the buyer through approval, setup and review. The Google Ads test account verified paused creation and setup read-back. Real delivery, inventory coverage and lift still require an authorized pilot. The workspace and chat can recommend waiting, checking coverage or running a comparison from saved delivery and the buyer's correction. The existing instruction experiment can compare approved versions and prepare an eligible follow-up within the campaign. [Delivery review PR](https://github.com/DG-creative-lab/youtube-ad-agent/pull/22) · [Source map](source-map.md#instruction-test-workflow)
 
 **Portable demo is the release slice.** The checkout includes playable media and authored wait and propose scenarios. In a clean local checkout with a fresh database and no provider credentials, both tagged viewer paths recorded one completion under the correct group. The planner reproduced the wait and propose recommendations while showing authored counts separately from local visits. Keep the walkthrough freeze and packaging ahead of new functionality. [Portable walkthrough](../README.md#portable-demo-walkthrough)
 
-**First functional slice after the portable demo is Bayesian self-learning.** A new brief for the same brand should be able to use the result of an earlier compatible instruction test to decide whether to propose the revised wording or gather more evidence. This takes priority over turning a delivery recommendation directly into an instruction draft. The local demo uses a seeded operator. A hosted pilot still needs staff identity, scoped client and brand access, and a hosted viewer. [GitHub epic #23](https://github.com/DG-creative-lab/youtube-ad-agent/issues/23) · [Tenancy plan](tenancy.md)
+**The four Bayesian self-learning slices are merged.** Eligible cumulative snapshots feed the versioned policy. The buyer can save a supported finding and retrieve its wording, source counts and uncertainty in a compatible fresh brief after restart. The draft command rechecks evidence, scope, current rules, correction and permission before creating a revision for approval. The comparison records 69 Bayesian wins, 55 fixed-lift wins and 188 ties across 312 paired simulations. Both average utility scores are below the zero payoff for always keeping under this coverage mix. [GitHub epic #23](https://github.com/DG-creative-lab/youtube-ad-agent/issues/23) · [Comparison report](instruction-policy-comparison.md)
+
+The release pass uses merged commit `7374914ca30e1c6dd0e68d74924e16f3f103b946` in an independent local Git clone. That clone began with no `.local/`, installed dependencies or planner build. Verification commands and the server ran with `env -i PATH="$PATH"`. Python 3.14.3, Node 25.8.2 and pnpm 10.33.0 were available on the verification machine. The offline dependency install reused 21 locked packages from the existing pnpm cache with zero downloads. An uncached installation needs access to the public package registry.
+
+| Release check | Evidence |
+| --- | --- |
+| Offline application checks | All 156 tests passed in the fresh clone. |
+| Planner dependencies and build | Frozen-lockfile offline installation and TypeScript/Vite build passed. |
+| Policy comparison | The regenerated report matched the committed report byte for byte. Its application walkthrough reopened SQLite and prepared an unapproved wording draft. |
+| Browser package flow | Chromium prepared and approved the two-context package, exported its handoff, and verified the paused simulated setup. |
+| Playable comparisons | Real media playback completed both editing and audiobook takes. Each tagged group saved one arrival and one completion. Reload preserved the selected take. Both viewer layouts were inspected at 420 px width. |
+| Delivery and restart | Restarting the same database retained the two 1/1 link counts. The authored wait state became the authored 4/1 editing proposal. Chat displayed the demo label and zero model turns. |
+| Correction and experiment | Three eligible uncompleted editing visits triggered the sample review. A saved keep-takes correction led to an approved instruction test. Participant and rehearsal links saved separate unresolved cohorts, and the policy waited at the initial review point. |
+| Finding reuse and authority | The separate authored 2/20 versus 18/20 example survived a server restart. A browser apply request without draft permission returned 403 and preserved the revision. The authorized action saved the exact tested wording in a new unapproved draft. |
+
+Chromium also displayed the finding's counts, uncertainty and policy source together, with the final approval control visible. The learning example is prepared synthetic evidence, as labelled in the walkthrough. The 156-test suite supplies the stale, mismatched, superseded, retired and changed-correction rejection checks.
+
+**The next slice is walkthrough freeze and packaging.** Use the [demo walkthrough](demo-walkthrough.md) for the recording and its source labels. The local demo uses a seeded operator. A hosted pilot needs staff identity, scoped client and brand access, and a hosted viewer. Live viewer lift and live model quality remain pilot questions. [Tenancy plan](tenancy.md)
+
+## Enterprise preparation · 13 November 2026
+
+UI consistency is merged in PR #33 (`aa78a97`). The active product slice is [#35 tenant/workspace boundary](https://github.com/DG-creative-lab/youtube-ad-agent/issues/35) on `feature/tenant-workspace-boundary`. It adds immutable client/brand/workspace/installation ownership, campaign-bound private access, a product-owned current-access port, and offline shared-store isolation checks. It preserves the local demo and existing snapshots. The pending demo walkthrough/checkpoint changes remain on this branch.
+
+Verification on this slice: all 177 offline tests and the planner build passed. The shared-store cases keep two clients and their brands separate across runs, conversations, catalogs, approvals, reports, visits and learning reuse after restart. A credential-free temporary server completed preparation, exact approval, simulated setup read-back and the authored wait recommendation in the in-app browser. After review, visits and activity freshness are also campaign-bound within a brand. Unbound customer history is excluded, and a known-unsent setup access failure releases the reservation for an explicit retry. Finding lookup and retirement also verify the source test’s campaign, so newer sibling findings cannot shadow or retire the current campaign’s result. The restarted browser path saved one campaign-specific comparison arrival and read it back in the performance review. The 312-run policy comparison retains its scores and decisions; only the instruction-test source fingerprint changed. No Gateplane or provider network calls were made.
+
+The [enterprise epic #34](https://github.com/DG-creative-lab/youtube-ad-agent/issues/34) contains eight linked sub-issues, [#35–#42](tenancy.md#remaining-enterprise-work). After this product boundary, compose the accepted Gateplane access contract and hosted staff entrypoints in #36. Persistence/private media, durable jobs, provider authority, privacy/audit and operational release checks follow as explicit slices. Gateplane owns identity, membership and current access; this application retains ownership, evidence, exact approvals and provider effects. [Implemented model and remaining limits](tenancy.md)
 
 ## Milestones
 
@@ -33,7 +58,7 @@ Start with the existing randomized viewer instruction test for the editing demo.
 
 1. **Admit evidence.** `InstructionTests` owns the pinned versions, assignments and counts. Before testing, pin the comparison, assignment unit, outcome, follow-up window and optional second batch size. Before saving learning, verify source, scope and maturity. Separate rehearsals and authored fixtures from observed participants. At each declared review point use the latest eligible cumulative snapshot for the experiment. Recompute from its original prior so retries, overlapping counts and late outcomes cannot add the same visit twice. Preserve earlier snapshots and record which one superseded them.
 2. **Estimate the effect and choose a next step.** Use a versioned Beta–Bernoulli model with a weak prior per arm. Record counts, estimated lift and the posterior probability of exceeding a predeclared worthwhile effect. Give reuse and keep explicit payoffs for a worthwhile effect and for a smaller or harmful effect. For the one allowed extra batch, average the value of the best subsequent decision over predicted batch outcomes. Collect only if the gain over deciding now exceeds the batch cost and the batch fits the approved test limits. Otherwise choose the better of proposing reuse for review and keeping the current version. Declare the effect threshold, payoffs, collection cost and sample cap in advance.
-3. **Carry the decision into a fresh brief.** Use the proposed `learning.py` module and SQLite for a versioned finding with source test, snapshot, model and decision references. Resolve client and brand from the current run, then match the viewing context, metric and applicable comparison versions. Show the buyer the counts, uncertainty, source and reason for the recommendation. A mismatched, superseded or retired finding is ineligible for reuse. Recheck the finding, current brand rules, applicable buyer correction and draft permission through the existing command path before saving an unapproved draft. The buyer retains approval authority.
+3. **Carry the decision into a fresh brief.** `learning.py` and SQLite retain a versioned finding with source test, snapshot, model and decision references. Resolve client and brand from the current run, then match the viewing context, metric and applicable comparison versions. Show the buyer the counts, uncertainty, source and reason for the recommendation. A mismatched, superseded or retired finding is ineligible for reuse. Recheck the finding, current brand rules, applicable buyer correction and draft permission through the existing command path before saving an unapproved draft. The buyer retains approval authority.
 
 ### Offline comparison
 
@@ -45,7 +70,7 @@ Use independently calculated posterior examples to check the math. With a unifor
 
 ### GitHub epic
 
-The [Bayesian self-learning epic](https://github.com/DG-creative-lab/youtube-ad-agent/issues/23) starts after the portable demo. Close it when the fresh-brief walkthrough and offline comparison are reproducible.
+The four work items in the [Bayesian self-learning epic](https://github.com/DG-creative-lab/youtube-ad-agent/issues/23) are implemented through PRs #29–#32. The release pass checks the fresh-brief walkthrough and offline comparison together against merged main.
 
 1. **Prepare eligible experiment evidence.** Expose versioned, mature counts and verify scope, provenance and replay through the experiment command. [Issue #24](https://github.com/DG-creative-lab/youtube-ad-agent/issues/24)
 2. **Implement the belief update and next decision.** Calculate lift uncertainty and compare reuse, one extra batch and keeping the current wording under a declared budget. [Issue #25](https://github.com/DG-creative-lab/youtube-ad-agent/issues/25)

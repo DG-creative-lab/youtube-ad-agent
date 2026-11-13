@@ -4,7 +4,6 @@ import json
 import re
 import sqlite3
 
-from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.delivery import delivery_message
 from campaign_agent.delivery_next_test import recommendation_message
@@ -76,13 +75,13 @@ class PlacementAgent:
         self.conversations = CampaignConversations(self)
 
     def options(self):
-        self.owner.operator.require_brand(LOCAL_BRAND)
+        self.owner.require("youtube:campaign.read")
         models = [{'id': 'simulated', 'label': 'Simulated agent', 'mode': 'simulated'},
                   {'id': 'simulated-inspect', 'label': 'Simulated agent · inspect first', 'mode': 'simulated'}]
         models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
         with closing(sqlite3.connect(self.path)) as db:
             row = db.execute('SELECT model FROM planner_defaults WHERE client_id=? AND brand_id=? AND actor_id=?',
-                             (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.owner.operator.id)).fetchone()
+                             (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)).fetchone()
         default = row[0] if row and row[0] in {item['id'] for item in models} else 'simulated'
         return {'models': models, 'default': default, 'max_turns': MAX_TURNS,
                 'specialist': 'simulated_decision', 'specialist_label': 'Automatic · simulated decision model'}
@@ -92,7 +91,8 @@ class PlacementAgent:
             return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
 
     def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none'):
-        self.owner.operator.require_brand(LOCAL_BRAND)
+        self.owner.require("youtube:agent.run")
+        self.owner.require("youtube:campaign.read")
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
                 or not isinstance(request, str) or not request.strip() or len(request) > 1500):
             raise ValueError('Supply a request and valid session, run and catalog references.')
@@ -115,7 +115,7 @@ class PlacementAgent:
                 if source.get('draft_permission', 'none') != draft_permission:
                     raise ValueError('This run ID has different draft authority. Send a new request to change it.')
                 return run_id
-            expected = (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.owner.operator.id, json.dumps(settings))
+            expected = (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id, json.dumps(settings))
             self.catalogs.read(db, catalog_id)
             current = self.drafts._read(db)
             previous, truncated = self.conversations.begin(db, session_id, settings, run_id, request,
@@ -146,14 +146,14 @@ class PlacementAgent:
                     context.update(delivery_next_test=True, delivery_report_id=report['id'] if report else None)
             db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
                        (*expected[:3], model))
-            db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?)',
-                       (run_id, *expected[:3], request, 'running'))
+            db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?,?)',
+                       (run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id))
             db.execute('INSERT INTO planner_jobs(run_id,session_id,snapshot) VALUES(?,?,?)',
                        (run_id, session_id, json.dumps(context)))
         return run_id
 
     def _context(self, db, run_id):
-        self.owner.operator.require_brand(LOCAL_BRAND)
+        self.owner.require("youtube:campaign.read")
         _, status = self.owner._owned_run(db, run_id)
         if status != 'running':
             raise PackageConflict('This request is no longer active. Read the latest conversation.')
@@ -213,11 +213,12 @@ class PlacementAgent:
         return result
 
     def resume(self, run_id, max_steps=1):
+        self.owner.require("youtube:agent.run")
         for _ in range(max_steps):
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
                 _, status = self.owner._owned_run(db, run_id)
-                self.owner.operator.require_brand(LOCAL_BRAND)
+                self.owner.require("youtube:campaign.read")
                 if status != 'running':
                     return self.read(run_id)
                 source = self._context(db, run_id)
@@ -264,6 +265,7 @@ class PlacementAgent:
                 with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute("UPDATE planner_turns SET state='received',receipt=? WHERE run_id=? AND position=?",
                                (json.dumps(receipt), run_id, position))
+            self.owner.require("youtube:agent.run")
             classified = None
             if receipt['tool'] == 'classify_catalog' and not receipt['arguments']:
                 classified = self._classify(run_id)
@@ -292,6 +294,7 @@ class PlacementAgent:
                 if db.execute('SELECT 1 FROM agent_steps WHERE run_id=? AND position=?', (run_id, position)).fetchone():
                     continue
                 history = self._history(db, run_id)
+                self.owner.require("youtube:agent.run")
                 db.execute('SAVEPOINT planner_tool')
                 try:
                     result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
@@ -428,7 +431,7 @@ class PlacementAgent:
         raise ValueError('Unknown tool')
 
     def read(self, run_id):
-        self.owner.operator.require_brand(LOCAL_BRAND)
+        self.owner.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.path)) as db:
             request, status = self.owner._owned_run(db, run_id)
             snapshot, outcome = db.execute('SELECT snapshot,outcome FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()

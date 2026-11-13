@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from urllib.parse import urlencode
 
-from .access import LOCAL_BRAND
 from .creatives import EXAMPLES
 
 
@@ -42,8 +41,8 @@ def example_content(example, media_dir):
     }
 
 
-def sample_package(draft, media_dir):
-    examples = {example.ref: example for example in EXAMPLES if example.scope == LOCAL_BRAND}
+def sample_package(draft, media_dir, *, examples=None):
+    examples = {example.ref: example for example in (EXAMPLES if examples is None else examples)}
     groups = []
     for context, brief in draft["brief"]["contexts"].items():
         example = examples[brief["destination_ref"] + "-v1"]

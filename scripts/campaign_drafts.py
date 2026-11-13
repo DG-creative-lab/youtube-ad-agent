@@ -8,8 +8,11 @@ import re
 import sqlite3
 from uuid import uuid4
 
-from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR
+from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, require_access
+from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.creatives import render_instruction_choices
+from campaign_agent.workspaces import initialize, verify, admit_demo_campaign
+from campaign_agent import handoff
 from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
@@ -64,18 +67,50 @@ class PackageConflict(ValueError):
     """The reviewed package is stale or lacks a matching approval."""
 
 
+def _catalog_schema(db):
+    columns = {row[1] for row in db.execute("PRAGMA table_info(catalog_entries)")}
+    legacy = bool(columns) and "client_id" not in columns
+    if legacy:
+        db.execute("ALTER TABLE catalog_entries RENAME TO catalog_entries_legacy")
+    db.execute('''CREATE TABLE IF NOT EXISTS catalog_entries (
+        ref TEXT PRIMARY KEY, video_id TEXT NOT NULL, title TEXT NOT NULL,
+        source TEXT NOT NULL, source_reference TEXT NOT NULL,
+        client_id TEXT NOT NULL, brand_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
+        UNIQUE(client_id,brand_id,campaign_id,video_id,title,source,source_reference))''')
+    if legacy:
+        db.execute('''INSERT INTO catalog_entries
+            SELECT ref,video_id,title,source,source_reference,?,?,'tts-catalog' FROM catalog_entries_legacy''',
+                   (LOCAL_CONTEXT.scope.client_id, LOCAL_CONTEXT.scope.brand_id))
+        db.execute("DROP TABLE catalog_entries_legacy")
+
+
 class CampaignDrafts:
-    def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=None):
-        operator.require_brand(LOCAL_BRAND)
+    def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=None,
+                 context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None):
         self.operator = operator
-        self.path = path
+        self.context = context
+        self.scope = context.scope
+        self.access = LocalDemoAccess() if access is None else access
+        self.path = path = Path(path)
         self.media_dir = media_dir if media_dir is not None else (MEDIA_DIR if MEDIA_DIR.is_dir() else DEMO_MEDIA_DIR)
         self.live = live
-        self.campaign_id = "tts-catalog" if live else "tts-sample"
+        if campaign_id is None and context != LOCAL_CONTEXT:
+            raise ValueError("Choose a provisioned campaign for this workspace.")
+        self.campaign_id = campaign_id or ("tts-catalog" if live else "tts-sample")
+        self._examples = None if examples is None and context == LOCAL_CONTEXT else tuple(examples or ())
+        if (not self.examples or any(example.scope != self.scope for example in self.examples)
+                or len({example.ref for example in self.examples}) != len(self.examples)
+                or len({example.creative_ref for example in self.examples}) != len(self.examples)):
+            raise PermissionError("Supply the brand's own comparison catalog.")
+        self.require("youtube:campaign.read")
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
+            initialize(db)
+            if context == LOCAL_CONTEXT and self.campaign_id in {"tts-sample", "tts-catalog"}:
+                admit_demo_campaign(db, self.campaign_id)
+            verify(db, context, self.campaign_id)
             db.execute("""
                 CREATE TABLE IF NOT EXISTS campaign_revisions (
                     campaign_id TEXT NOT NULL,
@@ -110,16 +145,7 @@ class CampaignDrafts:
                 if "snapshot" not in {column[1] for column in columns}:
                     db.execute("ALTER TABLE campaign_package_approvals ADD COLUMN snapshot TEXT")
             if live:
-                db.execute("""
-                    CREATE TABLE IF NOT EXISTS catalog_entries (
-                        ref TEXT PRIMARY KEY,
-                        video_id TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        source_reference TEXT NOT NULL,
-                        UNIQUE (video_id, title, source, source_reference)
-                    )
-                """)
+                _catalog_schema(db)
             db.execute("""CREATE TABLE IF NOT EXISTS placement_catalog_entries (
                 ref TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
                 campaign_id TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, source TEXT NOT NULL,
@@ -147,12 +173,14 @@ class CampaignDrafts:
                 "policy": POLICY,
                 "placements": [],
             }
-            db.execute(
-                "INSERT OR IGNORE INTO campaign_revisions VALUES (?, ?, ?)",
-                (self.campaign_id, 1, json.dumps(seed)),
-            )
+            if not db.execute("SELECT 1 FROM campaign_revisions WHERE campaign_id=?", (self.campaign_id,)).fetchone():
+                self.require("youtube:campaign.draft")
+                db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
+                           (self.campaign_id, 1, json.dumps(seed)))
 
     def _read(self, db, revision=None):
+        self.require("youtube:campaign.read")
+        verify(db, self.context, self.campaign_id)
         if revision is None:
             row = db.execute(
                 "SELECT snapshot FROM campaign_revisions WHERE campaign_id = ? "
@@ -171,11 +199,11 @@ class CampaignDrafts:
             return self._read(db, revision)
 
     def _package_scope(self, campaign_id, revision):
-        self.operator.require_brand(LOCAL_BRAND)
+        self.require("youtube:campaign.read")
         if (self.live or campaign_id != self.campaign_id
                 or type(revision) is not int or not 1 <= revision < 2**63):
             raise ValueError("Choose a valid sample campaign revision.")
-        return LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id
+        return self.scope.client_id, self.scope.brand_id, campaign_id
 
     def _package_review(self, db, campaign_id, revision):
         scope = self._package_scope(campaign_id, revision)
@@ -184,7 +212,7 @@ class CampaignDrafts:
         if draft is None:
             raise ValueError("Campaign revision unavailable.")
         draft = {**draft, "placements": self._validate_placements(db, draft["placements"], draft["brief"]["contexts"])}
-        package = sample_package(draft, self.media_dir)
+        package = sample_package(draft, self.media_dir, examples=self.examples)
         fingerprint = package_fingerprint(package)
         key = (*scope, revision, fingerprint)
         row = db.execute(
@@ -237,6 +265,7 @@ class CampaignDrafts:
     def approve_package(self, campaign_id, revision, fingerprint):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
+            self.require("youtube:campaign.approve")
             review, key = self._package_review(db, campaign_id, revision)
             self._require_current_package(review, revision, fingerprint)
             if review["approval"] is None:
@@ -260,6 +289,7 @@ class CampaignDrafts:
         return review
 
     def export_setup(self, campaign_id, revision, fingerprint):
+        self.require("youtube:campaign.export")
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN")
             review = self.require_approved_package(db, campaign_id, revision, fingerprint)
@@ -274,6 +304,7 @@ class CampaignDrafts:
 
     def register_catalog(self, rows):
         """Record independently supplied entries admitted by the local CLI."""
+        self.require("youtube:catalog.write")
         entries = []
         for row in rows:
             reference = row.get("source_reference")
@@ -283,20 +314,26 @@ class CampaignDrafts:
             entries.append((row["video_id"], row["description"], row["source"], reference.strip()))
 
         with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            self.require("youtube:catalog.write")
+            verify(db, self.context, self.campaign_id)
             db.executemany(
-                "INSERT OR IGNORE INTO catalog_entries VALUES (?, ?, ?, ?, ?)",
-                ((uuid4().hex, *entry) for entry in entries),
+                "INSERT OR IGNORE INTO catalog_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ((uuid4().hex, *entry, self.scope.client_id, self.scope.brand_id, self.campaign_id) for entry in entries),
             )
             return {
                 entry[0]: db.execute(
                     "SELECT ref FROM catalog_entries WHERE video_id = ? AND title = ? "
-                    "AND source = ? AND source_reference = ?", entry,
+                    "AND source = ? AND source_reference = ? AND client_id=? AND brand_id=? AND campaign_id=?",
+                    (*entry, self.scope.client_id, self.scope.brand_id, self.campaign_id),
                 ).fetchone()[0]
                 for entry in entries
             }
 
     def comparison_content(self, example, fingerprint):
         """Verify a content reference using current media and immutable instruction versions."""
+        if example.scope != self.scope or example not in self.examples:
+            raise PermissionError("The comparison is unavailable in this workspace.")
         content = example_content(example, self.media_dir)
         if self.live or package_fingerprint(content) == fingerprint:
             return content
@@ -327,6 +364,7 @@ class CampaignDrafts:
             raise ValueError("Enter a brief title, goal and supported comparison context.")
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
+            self.require("youtube:campaign.draft")
             review, _ = self._package_review(db, campaign_id, revision)
             if review["current_revision"] != revision or review["fingerprint"] != fingerprint:
                 raise PackageConflict("The package has changed. Load and review the latest draft.")
@@ -369,6 +407,8 @@ class CampaignDrafts:
 
     def _save_instruction_revision(self, db, current, group, instruction, provenance):
         """Write the wording, its viewer version and provenance in the caller's transaction."""
+        self.require("youtube:campaign.draft")
+        verify(db, self.context, self.campaign_id)
         saved = {
             **current, "revision": current["revision"] + 1,
             "comparison_instructions": {**current.get("comparison_instructions", {}),
@@ -379,7 +419,7 @@ class CampaignDrafts:
             saved.pop("instruction_reuse", None)
         db.executemany(
             "INSERT INTO comparison_instruction_versions VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-            [(LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, group["creative_version"], group["comparison_version"],
+            [(self.scope.client_id, self.scope.brand_id, group["creative_version"], group["comparison_version"],
               package_fingerprint({"instruction": text}), text)
              for text in (group["content"]["instruction"], instruction)],
         )
@@ -405,6 +445,7 @@ class CampaignDrafts:
             return self._save(db, expected, rows)
 
     def _save(self, db, expected, rows):
+        self.require("youtube:campaign.draft")
         current = self._read(db)
         placements = self._validate_placements(db, rows, current["brief"]["contexts"])
         revision = current["revision"]
@@ -420,6 +461,13 @@ class CampaignDrafts:
             (self.campaign_id, saved["revision"], json.dumps(saved)),
         )
         return saved
+
+    def require(self, capability):
+        require_access(self.operator, self.context, self.access, capability, self.campaign_id)
+
+    @property
+    def examples(self):
+        return handoff.EXAMPLES if self._examples is None else self._examples
 
     def _validate_placements(self, db, rows, contexts):
         seen, result = set(), []
@@ -442,11 +490,13 @@ class CampaignDrafts:
                 ref, entry = row["catalog_ref"], None
                 if isinstance(ref, str) and re.fullmatch(r"[0-9a-f]{32}", ref):
                     if self.live:
-                        entry = db.execute("SELECT video_id,title,source,source_reference FROM catalog_entries WHERE ref=?", (ref,)).fetchone()
+                        entry = db.execute("SELECT video_id,title,source,source_reference FROM catalog_entries "
+                                           "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
+                                           (ref, self.scope.client_id, self.scope.brand_id, self.campaign_id)).fetchone()
                     else:
                         entry = db.execute("SELECT video_id,title,source,source_reference FROM placement_catalog_entries "
                                            "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
-                                           (ref, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.campaign_id)).fetchone()
+                                           (ref, self.scope.client_id, self.scope.brand_id, self.campaign_id)).fetchone()
                 if (entry is None or entry[:3] != (video_id, title, source)
                         or not isinstance(entry[3], str) or not entry[3].strip()
                         or ("source_reference" in row and row["source_reference"] != entry[3])):
