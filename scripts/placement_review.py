@@ -494,6 +494,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if not self.check_host():
                 return
             url = urlsplit(self.path)
+            brand_assets = {"/brand/mark.svg": ("mark.svg", "image/svg+xml"),
+                            "/brand/tokens.css": ("tokens.css", "text/css")}
+            if url.path in brand_assets:
+                name, content_type = brand_assets[url.path]
+                self.send(200, (ROOT / "web/brand" / name).read_bytes(), content_type + "; charset=utf-8")
+                return
             if url.path.startswith("/viewer/media/"):
                 self.read_viewer_media(url.path.removeprefix("/viewer/media/"), url.query)
                 return
@@ -517,6 +523,10 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             if url.path in {"/", "/placements"}:
                 page = (ROOT / "placement-review/index.html").read_bytes()
+                if (planner_build / "index.html").is_file():
+                    page = page.replace(b"data-planner-link hidden", b"data-planner-link")
+                else:
+                    page = page.replace(b"data-planner-required hidden", b"data-planner-required")
                 viewer_origin = f"http://127.0.0.1:{viewer_server.server_port}".encode()
                 self.send(200, page.replace(b"VIEWER_ORIGIN_PLACEHOLDER", viewer_origin), "text/html; charset=utf-8")
                 return

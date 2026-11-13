@@ -131,6 +131,8 @@ Run the local workspace with Python 3.12 or newer and open the planner link prin
 python3 scripts/placement_review.py serve
 ```
 
+Without a frontend build, this opens standalone placement review. **New request** and **Campaign** appear after installing the planner dependencies and running `pnpm --dir web/planner build`; reopen the placement page after building. Search results and imported proposals stay on the current page. Leaving or reloading warns while that session work or unsaved selections remain, including after selected placements have been saved.
+
 **Save to campaign** records both placement groups against the local seed brief. Reopen the workspace to load the latest saved revision. If another tab saves first, review the merged draft and choose how to resolve overlapping edits before saving again. The placement and request limits apply across both groups.
 
 Sample selections and registered live-mode catalog selections are stored in separate campaigns in the ignored `.local/campaign-drafts.sqlite3` database. Live YouTube search selections stay in the browser session and remain available for export.

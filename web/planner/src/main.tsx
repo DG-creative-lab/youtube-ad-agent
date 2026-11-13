@@ -13,6 +13,7 @@ import {InstructionTest} from "./InstructionTest";
 import type {InstructionTestLimits, ReviewSelection} from "./InstructionTest";
 import {BriefLearning} from "./BriefLearning";
 import type {InstructionReuse} from "./BriefLearning";
+import "../../brand/tokens.css";
 import "./planner.css";
 
 type Placement = {id: string; title: string; creative: string; source: string};
@@ -165,11 +166,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.title = page === "/" ? "New request · Campaign planner" : "Campaign workspace";
+    document.title = `${page === "/" ? "New request" : "Campaign workspace"} · DG Creative Lab`;
     document.getElementById("page-heading")?.focus();
   }, [page]);
 
   useEffect(() => {
+    const startFresh = new URLSearchParams(location.search).get("new") === "1";
     async function load() {
       try {
         const [workspace, currentDraft] = await Promise.all([
@@ -192,6 +194,14 @@ function App() {
         }
           const chats = workspace.live ? [] : await request<ConversationSummary[]>("/api/agent/conversations");
           setConversations(chats);
+          if (startFresh) {
+            newConversation(selectedModel);
+            const destination = new URL(location.href);
+            destination.searchParams.delete("new");
+            history.replaceState(null, "", destination.pathname + destination.search + destination.hash);
+            setMode(workspace);
+            return;
+          }
           const savedConversation = sessionStorage.getItem("campaign-planner:conversation");
           const pendingStart = sessionStorage.getItem(pendingStartKey);
           const restore = chats.find(item => item.id === savedConversation)
@@ -520,19 +530,23 @@ function App() {
 
   return (
     <div className="app">
+      <a className="skip-link" href="#workspace-main">Skip to workspace</a>
       <aside className="rail">
-        <div className="identity"><span className="mark" aria-hidden="true" />DG Creative Lab</div>
+        <a className="brand-identity" href="/" onClick={event => follow(event, "/")} aria-label="DG Creative Lab by Dessi Georgieva">
+          <img src="/brand/mark.svg" alt="" width="44" height="44" />
+          <span className="brand-name">DG Creative Lab<small>By Dessi Georgieva</small></span>
+        </a>
         <nav aria-label="Workspace">
           <span className="rail-label">Workspace</span>
-          <a className="new-request" href="/" onClick={event => {
+          <a className="new-request" href="/?new=1" onClick={event => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
             if (!busy && !packageAction) {newConversation(); navigate("/");}
           }}
-             aria-current={home ? "page" : undefined}><span aria-hidden="true">+</span> New request</a>
+             aria-current={home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> New request</a>
           <a href="/campaign" onClick={event => follow(event, "/campaign")}
-             aria-current={!home ? "page" : undefined}>Campaign</a>
-          <a href="/placements">Placements <span aria-hidden="true">↗</span></a>
+             aria-current={!home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4ZM3 12l9 4 9-4M3 17l9 4 9-4" /></svg>Campaign</a>
+          <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>
         </nav>
         {conversations.length > 0 && <label className="saved-conversations">Saved conversations
           <select aria-label="Saved conversations" value={conversation?.id ?? ""} disabled={busy || !!packageAction}
@@ -541,13 +555,18 @@ function App() {
             {conversations.map(chat => <option key={chat.id} value={chat.id}>{chat.title}</option>)}
           </select>
         </label>}
-        <div className="rail-footer">Campaign workspace</div>
+        <div className="rail-footer">
+          <div className="rail-environment"><span className="rail-label">{mode?.live ? "Live catalog" : "Local workspace"}</span>
+            <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
+              : mode?.live ? "Check source labels when reviewing evidence." : "Authored delivery fixtures. Local viewer activity."}</p>
+          </div>
+          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">LO</span><span>Local operator<small>Trusted local workspace</small></span></div>
+        </div>
       </aside>
-      <main>
+      <main id="workspace-main" tabIndex={-1}>
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
-          {mode && <span className="mode">{mode.live ? "Live catalog"
-            : run?.planner ? "Campaign agent" : run?.inference?.settings.mode === "openrouter" ? "Sample campaign" : "Offline sample"}</span>}
+          {mode && <span className="mode">{mode.live ? "Live catalog" : mode.googleAdsReporting ? "Local workspace" : "Local demo"}</span>}
         </div>
         {home ? (
           <div className="home">
