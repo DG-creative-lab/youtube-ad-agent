@@ -2,17 +2,13 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Placement Review</title>
-<link rel="icon" href="data:,">
+<title>Placement review · DG Creative Lab</title>
+<link rel="icon" type="image/svg+xml" href="/brand/mark.svg">
+<link rel="stylesheet" href="/brand/tokens.css">
 <style>
   :root {
-    color-scheme: light;
-    --paper: #faf9f6;
-    --ink: #171717;
-    --muted: #626262;
-    --line: #deddd9;
-    --accent: #000;
-    font: 15px/1.5 Arial, Helvetica, sans-serif;
+    --accent: var(--black);
+    font: 15px/1.5 var(--sans);
     background: var(--paper);
     color: var(--ink);
   }
@@ -21,8 +17,8 @@
   body { margin: 0; }
   header, main { max-width: 1180px; margin: auto; padding-inline: clamp(16px, 5vw, 64px); }
   header { padding-block: 34px 22px; }
-  h1 { margin: 4px 0; font-size: clamp(36px, 6vw, 62px); line-height: 1.02; letter-spacing: -.035em; }
-  h2 { font-size: 25px; line-height: 1.2; letter-spacing: -.035em; margin: 0 0 12px; }
+  h1 { margin: 12px 0; font-size: clamp(1.85rem, 1.25rem + 2vw, 2.8rem); line-height: 1.05; letter-spacing: -.035em; }
+  h2 { font-size: 1.55rem; line-height: 1.2; letter-spacing: -.035em; margin: 0 0 12px; }
   p { margin: 5px 0 14px; }
   small, .muted { color: var(--muted); }
   .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: .74rem; font-weight: 650; }
@@ -32,12 +28,12 @@
   section, aside { border-top: 1px solid var(--line); padding-top: 20px; min-width: 0; }
   label { display: block; font-weight: 600; margin-bottom: 4px; }
   select, textarea, button, input { font: inherit; }
-  select, textarea { border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); padding: 8px; }
+  select, textarea { border: 1px solid var(--line); border-radius: 0; background: var(--panel); color: var(--ink); padding: 8px; max-width: 100%; }
   textarea { display: block; width: 100%; resize: vertical; }
-  button { border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); background: transparent; padding: 7px 12px; }
-  button.primary { background: var(--accent); color: white; }
+  button { border: 1px solid var(--accent); border-radius: 0; color: var(--accent); background: transparent; padding: 7px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--on-dark); font-weight: 700; }
   button, select { min-height: 44px; }
-  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
   button:disabled { opacity: .55; }
   button:not(:disabled):hover { box-shadow: 0 0 0 1px var(--accent); }
   a { color: var(--accent); }
@@ -63,6 +59,15 @@
     aside { grid-row: 1; }
   }
 </style>
+<a class="skip-link" href="#workspace-main">Skip to workspace</a>
+<div class="surface-masthead">
+  <a class="brand-identity brand-compact" href="/" aria-label="DG Creative Lab workspace">
+    <img src="/brand/mark.svg" alt="" width="34" height="34"><span class="brand-name">DG Creative Lab</span>
+  </a>
+  <nav aria-label="Workspace">
+    <a data-planner-link hidden href="/?new=1">New request</a><a data-planner-link hidden href="/campaign">Campaign</a><a href="/placements" aria-current="page">Placements</a>
+  </nav>
+</div>
 <header>
   <div class="topline">
     <span class="eyebrow muted">Campaign planning</span>
@@ -70,8 +75,11 @@
   </div>
   <h1>Placement review</h1>
   <p class="muted">Find videos for each creative, save a campaign draft and export selections.</p>
+  <p data-planner-required hidden class="muted">Standalone placement review. Enable the campaign planner with
+    <code>pnpm --dir web/planner install --frozen-lockfile</code>, then <code>pnpm --dir web/planner build</code>.
+    Reopen this page after building.</p>
 </header>
-<main>
+<main id="workspace-main" tabindex="-1">
   <section aria-labelledby="discovery-heading">
     <h2 id="discovery-heading">Find candidates</h2>
     <form id="search">
@@ -110,6 +118,8 @@
       <span id="count" aria-live="polite">0 selected</span>
     </div>
     <p id="campaign-status" role="status" tabindex="-1"></p>
+    <p id="session-work" class="muted" hidden>Search results and imported proposals stay on this page until you leave.
+      Saved campaigns contain the selected placements.</p>
     <div id="draft-conflict" hidden>
       <h3>Review the newer draft</h3>
       <p id="conflict-summary"></p>
@@ -180,6 +190,8 @@ let campaign = null;
 let latestCampaign = null;
 let limits;
 let saving = false;
+let searching = false;
+let importing = false;
 let saveError = "";
 queries.value = drafts[active].join("\n");
 
@@ -277,15 +289,30 @@ function reviewMerge(preferLocal) {
 byId("review-latest").addEventListener("click", () => reviewMerge(false));
 byId("review-mine").addEventListener("click", () => reviewMerge(true));
 
+function warnBeforeLeaving(event) {
+  event.preventDefault();
+  event.returnValue = true;
+}
+
+function updateNavigationGuard(changed = campaign
+  ? JSON.stringify([...selections.values()]) !== JSON.stringify(campaign.placements)
+  : selections.size > 0) {
+  const sessionWork = searchResults.size > 0 || imported.length > 0;
+  byId("session-work").hidden = !sessionWork;
+  if (changed || sessionWork || searching || importing) window.addEventListener("beforeunload", warnBeforeLeaving);
+  else window.removeEventListener("beforeunload", warnBeforeLeaving);
+}
+
 function updateCampaign() {
   const button = byId("save");
   const status = byId("campaign-status");
   const rows = [...selections.values()];
   const sessionOnly = rows.some((row) => row.source === "youtube_search");
   const unregistered = live && rows.some((row) => row.source !== "youtube_search" && !row.catalog_ref);
-  const changed = campaign && JSON.stringify(rows) !== JSON.stringify(campaign.placements);
+  const changed = campaign ? JSON.stringify(rows) !== JSON.stringify(campaign.placements) : rows.length > 0;
+  updateNavigationGuard(changed);
   const limit = limits && draftLimitError(rows);
-  button.disabled = !changed || sessionOnly || unregistered || Boolean(limit) || saving || Boolean(latestCampaign);
+  button.disabled = !campaign || !changed || sessionOnly || unregistered || Boolean(limit) || saving || Boolean(latestCampaign);
   status.className = saveError || limit ? "error" : "";
   if (campaign) {
     byId("campaign-revision").textContent = "Draft revision " + campaign.revision + " · brief revision " + campaign.brief.revision;
@@ -419,6 +446,8 @@ byId("search").addEventListener("submit", async (event) => {
   }
   creative.disabled = true;
   byId("run").disabled = true;
+  searching = true;
+  updateNavigationGuard();
   status.className = "";
   const batches = [];
   const pages = Number(byId("pages").value);
@@ -449,6 +478,7 @@ byId("search").addEventListener("submit", async (event) => {
     status.className = "error";
     status.textContent = error.message || "Search stopped. Review any results already returned.";
   } finally {
+    searching = false;
     renderResults();
     creative.disabled = false;
     byId("run").disabled = false;
@@ -459,6 +489,8 @@ byId("proposals").addEventListener("change", async (event) => {
   const status = byId("proposal-status");
   const file = event.target.files[0];
   if (!file) return;
+  importing = true;
+  updateNavigationGuard();
   try {
     if (file.size > 2_000_000) throw new Error("Select a proposal file smaller than 2 MB.");
     const rows = (await file.text()).split("\n").filter((line) => line.trim()).map((line) => JSON.parse(line));
@@ -480,6 +512,8 @@ byId("proposals").addEventListener("change", async (event) => {
     status.className = "error";
     status.textContent = error instanceof SyntaxError ? "The proposal file must contain one JSON object per line." : error.message;
   } finally {
+    importing = false;
+    updateNavigationGuard();
     event.target.value = "";
   }
 });
