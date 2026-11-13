@@ -8,6 +8,9 @@ This map translates the [application architecture](architecture-plan.md) into co
 | --- | --- |
 | [placement-review/index.html](../placement-review/index.html) | Placement search and review UI, unsaved selections, draft conflict reconciliation and per-context export. |
 | [scripts/placement_review.py](../scripts/placement_review.py) | The local server and developer CLI. It also contains YouTube search, sample search, catalog classification and the optional Jev call. |
+| [campaign_agent/hosted.py](../campaign_agent/hosted.py), [staff.py](../campaign_agent/staff.py) and [adapters/gateplane.py](../campaign_agent/adapters/gateplane.py) | ASGI staff/public entrypoints, server-side session binding and current request-bound wire decisions over existing commands. |
+| [campaign_agent/publications.py](../campaign_agent/publications.py) | Explicit approved-comparison publication, expiring opaque links and narrow public media/events. |
+| [scripts/hosted_access_fixture.py](../scripts/hosted_access_fixture.py) and [adapters/fixture_access.py](../campaign_agent/adapters/fixture_access.py) | Loopback-only synthetic identity/access composition; refuses nonfixture data and cannot select a real provider. |
 | [campaign_agent/access.py](../campaign_agent/access.py), [ports/access.py](../campaign_agent/ports/access.py) and [adapters/local_access.py](../campaign_agent/adapters/local_access.py) | Server-resolved workspace context, operator brand grants, current capability decisions and the exact local-only access adapter. |
 | [campaign_agent/workspaces.py](../campaign_agent/workspaces.py) | Immutable brand/workspace/installation and campaign ownership, trusted provisioning and explicit legacy demo admission. |
 | [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, catalog registration, draft validation, revision checks, approval snapshots and immutable instruction versions. |

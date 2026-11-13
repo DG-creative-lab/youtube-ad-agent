@@ -1,10 +1,10 @@
 # Tenant, brand and workspace boundary
 
-13 November 2026 · [Architecture](architecture-plan.md) · [Source-code map](source-map.md) · [Enterprise epic #34](https://github.com/DG-creative-lab/youtube-ad-agent/issues/34)
+13 November 2026 · [Staff access slice](hosted-access-boundary.md) · [Architecture](architecture-plan.md) · [Source-code map](source-map.md) · [Enterprise epic #34](https://github.com/DG-creative-lab/youtube-ad-agent/issues/34)
 
 ## Implemented product model
 
-The client organization is the tenant. A brand belongs to one client. A person may work for several clients; selecting a client or brand does not itself grant access. This slice makes those owners explicit in the existing application commands. It does not authenticate staff or expose a hosted service.
+The client organization is the tenant. A brand belongs to one client. A person may work for several clients; selecting a client or brand does not itself grant access. This slice makes those owners explicit in the existing application commands. The new ASGI slice adds staff-session and current-access adapters exercised with offline contract fixtures; real identity/service activation remains gated.
 
 | Object | Meaning and boundary |
 | --- | --- |
@@ -39,7 +39,7 @@ The client organization is the tenant. A brand belongs to one client. A person m
 
 These are product capabilities, not a proposed Gateplane wire schema. Access is rechecked at sensitive command boundaries and when accepting inference results. Receipts already obtained may be retained after revocation for recovery; they cannot authorize another tool or draft. A per-request instruction/placement draft permission, current evidence, stale-revision protection, exact approval and provider limits still apply in addition to access. An allowed actor cannot turn learned text or a model proposal into approval. If the final access check fails after a setup reservation but before the provider call, the command releases that known-unsent reservation back to validated, clears creation approval and requires an explicit retry. Provider outcomes after dispatch retain the existing created/unknown/read-back recovery path.
 
-Gateplane owns authentication, membership, current access and bounded delegation. The product owns native resource ownership, evidence freshness, draft permission, exact package approval and provider effects. The later adapter should translate Gateplane's accepted native decisions through this port, bind the verified session/request and selected application/workspace/installation, and enforce freshness/revocation without importing Gateplane's database models. This slice uses offline fakes and makes no live Gateplane calls. The SDK, hosted session boundary, worker mandate and provider connections remain open work.
+Gateplane owns authentication, membership, current access and bounded delegation. The product owns native resource ownership, evidence freshness, draft permission, exact package approval and provider effects. The later adapter should translate Gateplane's accepted native decisions through this port, bind the verified session/request and selected application/workspace/installation, and enforce freshness/revocation without importing Gateplane's database models. The staff session/HTTP boundary is now exercised through the [offline contract fixture](hosted-access-boundary.md). It makes no live Gateplane calls. The private SDK, real OIDC callback/credential adapter, worker mandate and provider connections remain open work.
 
 ## Compatibility and verification
 

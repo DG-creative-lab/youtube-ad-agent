@@ -1,0 +1,5 @@
+# Supported ASGI transport and validation of the pinned Gateplane wire contract.
+starlette==1.10.0
+uvicorn==0.54.0
+jsonschema==4.26.0
+rfc3986-validator==0.1.1

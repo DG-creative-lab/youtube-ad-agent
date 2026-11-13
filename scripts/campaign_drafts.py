@@ -270,6 +270,7 @@ class CampaignDrafts:
             self._require_current_package(review, revision, fingerprint)
             if review["approval"] is None:
                 approved_at = datetime.now(timezone.utc).isoformat()
+                self.require("youtube:campaign.approve")
                 db.execute(
                     "INSERT INTO campaign_package_approvals "
                     "(client_id, brand_id, campaign_id, revision, fingerprint, actor_id, approved_at, snapshot) "
@@ -293,6 +294,7 @@ class CampaignDrafts:
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN")
             review = self.require_approved_package(db, campaign_id, revision, fingerprint)
+            self.require("youtube:campaign.export")
             return {
                 "handoff": "Manual Google Ads setup example",
                 "instructions": "Use this as a walkthrough. Replace fictional placements with verified targets "
@@ -375,6 +377,7 @@ class CampaignDrafts:
                           "contexts": {context: BRIEF["contexts"][context]}},
                 "placements": [row for row in current["placements"] if row["creative"] == context],
             }
+            self.require("youtube:campaign.draft")
             db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
                        (campaign_id, saved["revision"], json.dumps(saved)))
         return saved
@@ -456,6 +459,7 @@ class CampaignDrafts:
         if placements == current["placements"]:
             return current
         saved = {**current, "revision": revision + 1, "placements": placements}
+        self.require("youtube:campaign.draft")
         db.execute(
             "INSERT INTO campaign_revisions VALUES (?, ?, ?)",
             (self.campaign_id, saved["revision"], json.dumps(saved)),

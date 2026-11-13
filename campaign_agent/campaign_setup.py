@@ -31,8 +31,9 @@ class SetupProvider(Protocol):
 
 
 class CampaignSetup:
-    def __init__(self, drafts, provider: SetupProvider):
+    def __init__(self, drafts, provider: SetupProvider, *, viewer_links=None):
         self.drafts, self.provider = drafts, provider
+        self.viewer_links = viewer_links
         self.path = drafts.path
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -96,7 +97,9 @@ class CampaignSetup:
                 self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
                 existing = self._read(db, key)
                 if existing is not None:
-                    return self._require_setup(db, key, existing['id'])
+                    existing = self._require_setup(db, key, existing['id'])
+                    self._require_current_destinations(db, key, existing)
+                    return existing
                 return self._save_validated(db, key, plan, links, validation_id)
         if connection is None:
             with closing(sqlite3.connect(self.path)) as db, db:
@@ -113,7 +116,9 @@ class CampaignSetup:
         package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
         existing = self._read(db, key)
         if existing is not None:
-            return self._require_setup(db, key, existing['id']), None, None
+            existing = self._require_setup(db, key, existing['id'])
+            self._require_current_destinations(db, key, existing)
+            return existing, None, None
         links, groups = [], []
         for group in package['groups']:
             link = {'context': group['context'], 'creative_ref': group['creative_version'],
@@ -123,7 +128,15 @@ class CampaignSetup:
             path = '/viewer?attribution=' + link['id']
             links.append({**link, 'path': path})
             groups.append({**group, 'viewer_path': path})
+        if self.viewer_links is not None:
+            links = self.viewer_links(package, fingerprint)
+            by_context = {link['context']: link for link in links}
+            groups = [{**group, 'viewer_path': by_context[group['context']]['path']} for group in package['groups']]
         plan = self.provider.prepare({**package, 'groups': groups}, fingerprint)
+        return None, plan, self._used_viewer_links(plan, links)
+
+    @staticmethod
+    def _used_viewer_links(plan, links):
         destinations = {group['context']: group['destination']
                         for group in plan.get('expected_readback', plan)['groups']}
         used_links = []
@@ -132,7 +145,16 @@ class CampaignSetup:
             url = urlsplit(destination)
             if f'{url.path}?{url.query}' == link['path'] and not url.fragment:
                 used_links.append({**link, 'destination': destination})
-        return None, plan, used_links
+        return used_links
+
+    def _require_current_destinations(self, db, key, record):
+        if self.viewer_links is None:
+            return
+        package = self.drafts.require_approved_package(db, *key[2:5])['package']
+        links = self.viewer_links(package, key[4])
+        if self._used_viewer_links(record['plan'], links) != record.get('viewer_links', []):
+            raise PackageConflict('The saved public comparison destinations no longer match this package. '
+                                  'Prepare and approve a new package revision before exporting and validating.')
 
     @staticmethod
     def _setup_id(key, plan):
@@ -149,6 +171,7 @@ class CampaignSetup:
             record['validation_request_id'] = validation_id
         if links:
             record['viewer_links'] = links
+        self._require_current_destinations(connection, key, record)
         connection.execute('INSERT INTO campaign_setups VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (*key, json.dumps(record)))
         return record
 
@@ -184,14 +207,20 @@ class CampaignSetup:
                 return record
             self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
             self.drafts.require("youtube:setup.manage")
+            self._require_current_destinations(db, key, record)
             record['approval'] = {'actor_id': self.drafts.operator.id, 'approved_at': datetime.now(timezone.utc).isoformat()}
             record['status'] = 'creating'
             self._update(db, key, record)
 
         try:
             self.drafts.require("youtube:setup.manage")
+            # The journal reservation and a potentially slow access check are not
+            # evidence that the exact saved destinations are still usable now.
+            with closing(sqlite3.connect(self.path)) as db:
+                db.execute('BEGIN')
+                self._require_current_destinations(db, key, record)
         except Exception:
-            # Only the access check ran: the provider call below has not started.
+            # Only pre-dispatch checks ran: the provider call below has not started.
             self._release_undispatched(key, setup_id, record['approval'])
             raise
         try:

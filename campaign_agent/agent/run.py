@@ -65,14 +65,14 @@ class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
-                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None):
+                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None):
         operator.require_brand(context.scope)
         self.operator = operator
         self.scope = context.scope
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
                                      context=context, campaign_id=campaign_id, access=access, examples=examples)
-        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path))
+        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path), viewer_links=viewer_links)
         self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
                                                                             campaign_id=self.drafts.campaign_id))
         self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting, demo_scenario=demo_scenario)
