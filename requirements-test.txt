@@ -1,0 +1,2 @@
+-r requirements-hosted.txt
+httpx2==2.16.0

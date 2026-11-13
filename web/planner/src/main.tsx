@@ -33,6 +33,7 @@ type Draft = {
   };
 };
 type PackageReview = {
+  public_comparisons?: {creative_ref: string; url: string}[];
   package: {
     campaign_id: string;
     revision: number;
@@ -46,11 +47,13 @@ type PackageReview = {
   approval: {actor_id: string; approved_at: string} | null;
 };
 type Mode = {
+  workspace?: {actor: string; client_id: string; brand_id: string; id: string; fixture: boolean};
   live: boolean;
   googleAdsReporting?: boolean;
   instructionTestLimits: InstructionTestLimits;
   demoRequest: string;
   viewerOrigin: string;
+  publicViewerOrigin?: string;
   openrouterReviewModels: string[];
   openrouterDraftModels: string[];
   agentPlanner?: PlannerOptions;
@@ -115,16 +118,19 @@ class RequestError extends Error {
   }
 }
 
+let csrfToken = "";
 async function request<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   const response = await fetch(path, {
     method: body ? "POST" : "GET",
     headers: {
       "X-Local-Operator": sessionStorage.getItem(operatorKey) ?? "",
       "X-Placement-Review": "campaign",
+      ...(csrfToken && {"X-CSRF-Token": csrfToken}),
       ...(body && {"Content-Type": "application/json"}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  csrfToken = response.headers.get("X-CSRF-Token") ?? csrfToken;
   const result = await response.json();
   if (!response.ok) throw new RequestError(result.error, response.status);
   return result;
@@ -178,6 +184,22 @@ function App() {
           request<Mode>("/api/mode"),
           request<Draft>("/api/campaign"),
         ]);
+        if (workspace.workspace) {
+          const scope = JSON.stringify([workspace.workspace.actor, workspace.workspace.client_id,
+            workspace.workspace.brand_id, workspace.workspace.id, currentDraft.campaign_id]);
+          if (sessionStorage.getItem("staff-workspace-scope") !== scope) {
+            for (const key of Object.keys(sessionStorage)) {
+              if (key.startsWith("campaign-planner:")) sessionStorage.removeItem(key);
+            }
+            const nextConversation = crypto.randomUUID().replaceAll("-", "");
+            setConversationId(nextConversation);
+            sessionStorage.setItem("campaign-planner:conversation", nextConversation);
+            setPendingId(null);
+            setRun(null);
+            setDraftPermission("none");
+            sessionStorage.setItem("staff-workspace-scope", scope);
+          }
+        }
         setDraft(currentDraft);
         const savedModel = sessionStorage.getItem("campaign-planner:model");
         const selectedModel = workspace.agentPlanner?.models.some(item => item.id === savedModel)
@@ -260,6 +282,9 @@ function App() {
         setPackageReview(await request<PackageReview>("/api/campaign/approve", payload));
       } else {
         const setup = await request<unknown>("/api/campaign/export", payload);
+        if (mode?.workspace) {
+          setPackageReview(await request<PackageReview>(`/api/campaign/package?revision=${current.revision}`));
+        }
         const url = URL.createObjectURL(new Blob([JSON.stringify(setup, null, 2) + "\n"],
           {type: "application/json"}));
         const link = document.createElement("a");
@@ -546,7 +571,7 @@ function App() {
              aria-current={home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> New request</a>
           <a href="/campaign" onClick={event => follow(event, "/campaign")}
              aria-current={!home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4ZM3 12l9 4 9-4M3 17l9 4 9-4" /></svg>Campaign</a>
-          <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>
+          {!mode?.workspace && <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>}
         </nav>
         {conversations.length > 0 && <label className="saved-conversations">Saved conversations
           <select aria-label="Saved conversations" value={conversation?.id ?? ""} disabled={busy || !!packageAction}
@@ -556,17 +581,17 @@ function App() {
           </select>
         </label>}
         <div className="rail-footer">
-          <div className="rail-environment"><span className="rail-label">{mode?.live ? "Live catalog" : "Local workspace"}</span>
+          <div className="rail-environment"><span className="rail-label">{mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
               : mode?.live ? "Check source labels when reviewing evidence." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
-          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">LO</span><span>Local operator<small>Trusted local workspace</small></span></div>
+          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">{mode?.workspace ? "SF" : "LO"}</span><span>{mode?.workspace?.actor ?? "Local operator"}<small>{mode?.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : "Trusted local workspace"}</small></span></div>
         </div>
       </aside>
       <main id="workspace-main" tabIndex={-1}>
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
-          {mode && <span className="mode">{mode.live ? "Live catalog" : mode.googleAdsReporting ? "Local workspace" : "Local demo"}</span>}
+          {mode && <span className="mode">{mode.workspace ? "Offline access fixture" : mode.live ? "Live catalog" : mode.googleAdsReporting ? "Local workspace" : "Local demo"}</span>}
         </div>
         {home ? (
           <div className="home">
@@ -659,7 +684,9 @@ function App() {
                     const rows = draft.placements.filter(placement => placement.creative === key);
                     const example = mode?.examples.find(item => item.creative === context.creative_ref + "-v1");
                     const group = activePackage?.package.groups.find(item => item.context === key);
-                    const viewerPath = group?.viewer_path ?? (example && "/viewer?ad=" + encodeURIComponent(example.creative));
+                    const viewerPath = mode?.workspace
+                      ? activePackage?.public_comparisons?.find(link => link.creative_ref === example?.creative)?.url
+                      : group?.viewer_path ?? (example && "/viewer?ad=" + encodeURIComponent(example.creative));
                     return (
                       <section className="context" key={key} aria-label={context.title}>
                         <div className="context-heading">
@@ -725,7 +752,7 @@ function App() {
                     </ul>
                     {historyError && <p className="error" role="alert">{historyError}</p>}
                   </details>}
-                  {draft && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
+                  {draft && !mode?.workspace && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
                 {activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
@@ -738,7 +765,7 @@ function App() {
                 )}
                 {mode && activePackage?.approval && !needsLatest && !busy && (
                   <GoogleAdsDelivery key={`delivery:${activePackage.fingerprint}:${deliveryRefresh}`} campaignId={activePackage.package.campaign_id}
-                    viewerOrigin={mode.viewerOrigin} googleAds={Boolean(mode.googleAdsReporting)}
+                    viewerOrigin={mode.publicViewerOrigin ?? mode.viewerOrigin} googleAds={Boolean(mode.googleAdsReporting)}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onPackageConflict={message => {
                       setPackageChanged(true);

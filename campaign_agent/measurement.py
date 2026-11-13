@@ -238,43 +238,46 @@ class ViewerMeasurement:
         ).fetchone()
         return {"finished": finished, "choice": choice[0] if choice else None, "complete": bool(complete)}
 
-    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take):
+    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take, *, connection=None):
+        if connection is None:
+            with closing(self.connect()) as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                return self.record(creative_ref, visit_id, example_ref, event_id, kind, take, connection=db)
         origin, target = self.resolve(creative_ref, example_ref)
         takes = {item[0] for item in target.takes}
         if not re.fullmatch(r"[0-9a-f]{32}", event_id) or kind not in {"start", "finish", "choose"} or take not in takes:
             raise ValueError("Invalid comparison event.")
         event = (example_ref, kind, take)
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            self.require_visit(db, origin, visit_id)
-            existing = db.execute(
-                "SELECT example_ref, kind, take FROM viewer_events WHERE visit_id = ? AND event_id = ?",
-                (visit_id, event_id),
-            ).fetchone()
-            if existing is not None:
-                if existing != event:
-                    raise ValueError("This event ID belongs to a different action.")
-                return self.state(db, visit_id, example_ref)
-            if not db.execute(
-                "SELECT 1 FROM viewer_events WHERE visit_id = ? AND event_id = ?",
-                (visit_id, f"arrival:{example_ref}"),
-            ).fetchone():
-                raise ViewerNotFound("Open this comparison before recording playback.")
-            if kind == "finish" and not db.execute(
-                "SELECT 1 FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'start' AND take = ?",
-                (visit_id, example_ref, take),
-            ).fetchone():
-                raise ValueError("Start this take before finishing it.")
-            if kind == "choose" and set(self.state(db, visit_id, example_ref)["finished"]) != takes:
-                raise ValueError("Finish both takes before choosing.")
-            db.execute(
-                "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) VALUES (?, ?, ?, ?, ?)",
-                (visit_id, event_id, *event),
-            )
-            if kind == "choose":
-                db.execute(
-                    "INSERT INTO viewer_completions (visit_id, example_ref, first_choice, completed_ms) "
-                    "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                    (visit_id, example_ref, take, time_ns() // 1_000_000),
-                )
+        db = connection
+        self.require_visit(db, origin, visit_id)
+        existing = db.execute(
+            "SELECT example_ref, kind, take FROM viewer_events WHERE visit_id = ? AND event_id = ?",
+            (visit_id, event_id),
+        ).fetchone()
+        if existing is not None:
+            if existing != event:
+                raise ValueError("This event ID belongs to a different action.")
             return self.state(db, visit_id, example_ref)
+        if not db.execute(
+            "SELECT 1 FROM viewer_events WHERE visit_id = ? AND event_id = ?",
+            (visit_id, f"arrival:{example_ref}"),
+        ).fetchone():
+            raise ViewerNotFound("Open this comparison before recording playback.")
+        if kind == "finish" and not db.execute(
+            "SELECT 1 FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'start' AND take = ?",
+            (visit_id, example_ref, take),
+        ).fetchone():
+            raise ValueError("Start this take before finishing it.")
+        if kind == "choose" and set(self.state(db, visit_id, example_ref)["finished"]) != takes:
+            raise ValueError("Finish both takes before choosing.")
+        db.execute(
+            "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) VALUES (?, ?, ?, ?, ?)",
+            (visit_id, event_id, *event),
+        )
+        if kind == "choose":
+            db.execute(
+                "INSERT INTO viewer_completions (visit_id, example_ref, first_choice, completed_ms) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                (visit_id, example_ref, take, time_ns() // 1_000_000),
+            )
+        return self.state(db, visit_id, example_ref)

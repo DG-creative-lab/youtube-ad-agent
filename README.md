@@ -125,6 +125,19 @@ After **Review instruction test**, choose **Plan next step**. The agent checks t
 
 If the verified assessment supports another instruction test, the agent prepares a new unapproved revision. Drafting inherits the conversation's main-model choice, with recorded offline responses for simulated profiles. The current approved revised comparison becomes the next baseline; this does not declare it a winner. The draft links its source experiment and assessment, preserves the recordings and placements, and requires package approval before a new experiment can start. Earlier experiments, reviews and viewer assignments remain intact. Repeated or interrupted preparation reuses its run and provider receipt.
 
+## Offline staff access fixture
+
+The [staff access walkthrough](docs/hosted-access-boundary.md) exercises two clients, buyer/reviewer permissions and narrow public links through the ASGI entrypoint. It uses synthetic identity/access records against the accepted Gateplane wire schema; it does not provide real sign-in or activate a hosted service.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+pnpm --dir web/planner build
+.venv/bin/python scripts/hosted_access_fixture.py --db /tmp/hosted-access-fixture.sqlite3
+```
+
+Open `http://127.0.0.1:18985/fixture`. Use a fresh database reserved for this fixture. The existing portable demo remains available through its original command.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

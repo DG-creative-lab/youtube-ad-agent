@@ -13,7 +13,11 @@ Keep repo-wide rules in [AGENTS.md](../AGENTS.md) and load the relevant skill fo
 Run the offline suite locally for behavior changes. GitHub Actions runs the same command on pushes to main and pull requests.
 
 ```sh
-python3 -m unittest discover -s tests -v
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 Exercise affected UI behavior in the browser. Use the [design direction](design-direction.md) for visual and accessibility checks. Keep live model, provider and human usability evidence separate from the offline suite.
+
+The hosted access checks use Starlette’s in-process ASGI client with synthetic identity/access dependencies and temporary SQLite. Dependency installation may need registry access; the tests make no external provider calls. The original portable-demo runtime still uses the standard library.

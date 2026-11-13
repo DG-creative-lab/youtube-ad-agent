@@ -18,5 +18,11 @@ class AccessPolicy(Protocol):
     def decide(self, request: AccessRequest) -> Literal["allow", "deny", "unavailable"]: ...
 
 
+class GateplaneClient(Protocol):
+    """Consumer facade for the private client; control authentication belongs to its adapter."""
+    def context(self, subject_token: str, workspace_context) -> dict: ...
+    def decide(self, request: dict) -> dict: ...
+
+
 class AccessUnavailable(RuntimeError):
     """Current authorization cannot be established; no private action is permitted."""

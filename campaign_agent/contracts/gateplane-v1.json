@@ -1,0 +1,2465 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gateplane:access:wire:v1",
+  "title": "Proposed Gateplane access wire v1",
+  "$defs": {
+    "NativeTarget": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "namespace",
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "Actor": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "human",
+            "agent",
+            "service"
+          ]
+        },
+        "principal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "delegator_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grant_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "principal_id",
+        "delegator_id",
+        "grant_id"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "agent"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "delegator_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "grant_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "delegator_id": {
+                "type": "null"
+              },
+              "grant_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ActorEvidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "human"
+            },
+            "subject_token": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 16384,
+              "writeOnly": true
+            }
+          },
+          "required": [
+            "kind",
+            "subject_token"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "agent"
+            },
+            "agent_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "grant_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "agent_id",
+            "grant_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "service"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrincipalContext": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "external_identity": {
+          "type": "object",
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "format": "uri",
+              "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9/_.~%-]*$"
+            },
+            "subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "issuer",
+            "subject"
+          ],
+          "additionalProperties": false
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "credential_expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "actor",
+        "external_identity",
+        "session_id",
+        "credential_expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "ApplicationRegistration": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "issuer": {
+          "type": "string",
+          "maxLength": 2048,
+          "format": "uri",
+          "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9/_.~%-]*$"
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "api_audience": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "control_audience": {
+          "const": "gateplane-control"
+        },
+        "redirect_uris": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri",
+            "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9/_.~%-]*$"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "logout_uris": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri",
+            "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9/_.~%-]*$"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "format": "uri",
+            "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "idempotency_key",
+        "expected_revision",
+        "application_id",
+        "issuer",
+        "client_id",
+        "api_audience",
+        "control_audience",
+        "redirect_uris",
+        "logout_uris",
+        "origins",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "InstallationCommand": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "workspace_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "idempotency_key",
+        "expected_revision",
+        "application_id",
+        "tenant_id",
+        "installation_id",
+        "enabled",
+        "workspace_ids",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "MembershipCommand": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "principal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "revoked"
+          ]
+        },
+        "role_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "idempotency_key",
+        "expected_revision",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "principal_id",
+        "status",
+        "role_ids",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceFacts": {
+      "type": "object",
+      "properties": {
+        "attester_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "resource_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "owner_tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attributes": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean",
+              "null"
+            ],
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "attester_id",
+        "source",
+        "resource_version",
+        "observed_at",
+        "owner_tenant_id",
+        "workspace_id",
+        "attributes"
+      ],
+      "additionalProperties": false
+    },
+    "DecisionRequest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "actor_evidence": {
+          "$ref": "#/$defs/ActorEvidence"
+        },
+        "capability": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+        },
+        "target": {
+          "$ref": "#/$defs/NativeTarget"
+        },
+        "facts": {
+          "$ref": "#/$defs/ResourceFacts"
+        },
+        "input_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "effect": {
+          "enum": [
+            "read",
+            "write",
+            "external"
+          ]
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "actor_evidence",
+        "capability",
+        "target",
+        "facts",
+        "input_hash",
+        "subject_hash",
+        "effect",
+        "run_id"
+      ],
+      "additionalProperties": false
+    },
+    "GrantRequest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "actor_evidence": {
+          "$ref": "#/$defs/ActorEvidence"
+        },
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "parent_grant_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeTarget"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "actor_evidence",
+        "agent_id",
+        "parent_grant_id",
+        "capabilities",
+        "targets",
+        "expires_at"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "actor_evidence": {
+              "not": {
+                "properties": {
+                  "kind": {
+                    "const": "service"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AuthorityVersions": {
+      "type": "object",
+      "properties": {
+        "principal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_membership": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_membership": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "configuration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "grant": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parent_grants": {
+          "description": "Unordered grant-ID/revision pairs. Distinct IDs may share revisions. Reject duplicate JSON object keys before schema validation; chain order comes from persisted grant parent relationships.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "maxProperties": 2
+        }
+      },
+      "required": [
+        "principal",
+        "tenant_membership",
+        "installation",
+        "workspace_membership",
+        "policy",
+        "configuration",
+        "grant",
+        "parent_grants"
+      ],
+      "additionalProperties": false
+    },
+    "DecisionResult": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "outcome": {
+          "enum": [
+            "allow",
+            "deny",
+            "approval_required",
+            "unavailable"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "allowed",
+            "access_denied",
+            "approval_required",
+            "expired_grant",
+            "revoked_grant",
+            "tenant_mismatch",
+            "workspace_mismatch",
+            "untrusted_facts",
+            "stale_resource",
+            "unknown_obligation",
+            "authority_unavailable"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/NativeTarget"
+        },
+        "input_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "authority_versions": {
+          "$ref": "#/$defs/AuthorityVersions"
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "valid_for_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "product.verify_current_resource.v1",
+              "product.enforce_business_approval.v1",
+              "product.reserve_budget.v1",
+              "access.human_approval.v1"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "request_id",
+        "correlation_id",
+        "decision_id",
+        "actor",
+        "outcome",
+        "reason",
+        "target",
+        "input_hash",
+        "subject_hash",
+        "authority_versions",
+        "checked_at",
+        "valid_until",
+        "valid_for_ms",
+        "obligations"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "allow"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "allowed"
+              },
+              "valid_for_ms": {
+                "minimum": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "valid_for_ms": {
+                "const": 0
+              },
+              "reason": {
+                "not": {
+                  "const": "allowed"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "approval_required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "approval_required"
+              },
+              "obligations": {
+                "contains": {
+                  "const": "access.human_approval.v1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "authority_unavailable"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Grant": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "delegator_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "parent_grant_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chain_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NativeTarget"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "revoked"
+          ]
+        },
+        "revoked_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "grant_id",
+        "agent_id",
+        "delegator_id",
+        "parent_grant_id",
+        "chain_depth",
+        "capabilities",
+        "targets",
+        "created_at",
+        "expires_at",
+        "status",
+        "revoked_at",
+        "revision"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "parent_grant_id": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "chain_depth": {
+                "const": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "chain_depth": {
+                "minimum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "revoked"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "revoked_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "revoked_at": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EffectObservation": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "capability": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+        },
+        "target": {
+          "$ref": "#/$defs/NativeTarget"
+        },
+        "input_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "attempted",
+            "completed",
+            "partial",
+            "unknown",
+            "cancelled"
+          ]
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "completeness": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ]
+        },
+        "evidence_reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "event_id",
+        "correlation_id",
+        "decision_id",
+        "operation_id",
+        "actor",
+        "capability",
+        "target",
+        "input_hash",
+        "subject_hash",
+        "run_id",
+        "outcome",
+        "occurred_at",
+        "completeness",
+        "evidence_reference"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completeness": {
+                "const": "complete"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completeness": {
+                "const": "unknown"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "status": {
+          "enum": [
+            401,
+            403,
+            409,
+            422,
+            429,
+            503
+          ]
+        },
+        "code": {
+          "enum": [
+            "invalid_credential",
+            "wrong_audience",
+            "wrong_token_kind",
+            "access_denied",
+            "stale_revision",
+            "changed_input",
+            "invalid_request",
+            "unsupported_version",
+            "rate_limited",
+            "authority_unavailable"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "correlation_id",
+        "status",
+        "code",
+        "retryable"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 401
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "invalid_credential",
+                  "wrong_audience",
+                  "wrong_token_kind"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 403
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "access_denied"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 409
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "stale_revision",
+                  "changed_input"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 422
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "invalid_request",
+                  "unsupported_version"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 429
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "rate_limited"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": 503
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "enum": [
+                  "authority_unavailable"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "BoundResourceFacts": {
+      "type": "object",
+      "properties": {
+        "attester_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "resource_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "owner_tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attributes": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean",
+              "null"
+            ],
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "attester_id",
+        "source",
+        "resource_version",
+        "owner_tenant_id",
+        "workspace_id",
+        "attributes"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalBinding": {
+      "type": "object",
+      "properties": {
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "capability": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9_-]*:[a-z][a-z0-9_.-]*\\.v[1-9][0-9]*$"
+        },
+        "target": {
+          "$ref": "#/$defs/NativeTarget"
+        },
+        "facts": {
+          "$ref": "#/$defs/BoundResourceFacts"
+        },
+        "input_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "input_profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "subject_profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "effect": {
+          "enum": [
+            "read",
+            "write",
+            "external"
+          ]
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authority_versions": {
+          "$ref": "#/$defs/AuthorityVersions"
+        }
+      },
+      "required": [
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "actor",
+        "capability",
+        "target",
+        "facts",
+        "input_hash",
+        "subject_hash",
+        "input_profile_id",
+        "subject_profile_id",
+        "effect",
+        "run_id",
+        "authority_versions"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "origin_decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "origin_decision_id",
+        "ttl_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalResolution": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "approval_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actor_evidence": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "human"
+            },
+            "subject_token": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 16384,
+              "writeOnly": true
+            }
+          },
+          "required": [
+            "kind",
+            "subject_token"
+          ],
+          "additionalProperties": false
+        },
+        "resolution": {
+          "enum": [
+            "approve",
+            "reject",
+            "cancel"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "approval_request_id",
+        "expected_revision",
+        "actor_evidence",
+        "resolution"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalRecord": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "approval_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "origin_decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "binding": {
+          "$ref": "#/$defs/ApprovalBinding"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "cancelled",
+            "expired",
+            "consumed"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolved_by": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolver_authority_versions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthorityVersions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consumed_operation_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "approval_request_id",
+        "origin_decision_id",
+        "binding",
+        "state",
+        "revision",
+        "created_at",
+        "expires_at",
+        "resolved_at",
+        "resolved_by",
+        "resolver_authority_versions",
+        "consumed_operation_id"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "approved",
+                  "rejected",
+                  "consumed",
+                  "cancelled"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolved_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+              },
+              "resolved_by": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "resolver_authority_versions": {
+                "$ref": "#/$defs/AuthorityVersions"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "consumed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "consumed_operation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "consumed_operation_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "pending"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resolved_at": {
+                "type": "null"
+              },
+              "resolved_by": {
+                "type": "null"
+              },
+              "resolver_authority_versions": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ApprovalConsumption": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "approval_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "fresh_decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "approval_request_id",
+        "fresh_decision_id",
+        "operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "OperationReceipt": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "installation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "tenant_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "approval_request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "subject_binding": {
+          "$ref": "#/$defs/ApprovalBinding"
+        },
+        "consumption_decision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "consumed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "meaning": {
+          "const": "access_approval_reserved_not_effect"
+        }
+      },
+      "required": [
+        "schema_version",
+        "application_id",
+        "installation_id",
+        "tenant_id",
+        "workspace_id",
+        "receipt_id",
+        "operation_id",
+        "approval_request_id",
+        "subject_binding",
+        "consumption_decision_id",
+        "consumed_at",
+        "meaning"
+      ],
+      "additionalProperties": false
+    },
+    "ApprovalConsumptionResult": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        },
+        "current_decision": {
+          "$ref": "#/$defs/DecisionResult",
+          "allOf": [
+            {
+              "properties": {
+                "outcome": {
+                  "const": "allow"
+                },
+                "obligations": {
+                  "not": {
+                    "contains": {
+                      "const": "access.human_approval.v1"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "receipt",
+        "current_decision",
+        "replayed"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiptObservationRequest": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "actor_evidence": {
+          "$ref": "#/$defs/ActorEvidence"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "correlation_id",
+        "idempotency_key",
+        "operation_id",
+        "actor_evidence"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
