@@ -6,6 +6,7 @@ import sqlite3
 from time import time_ns
 from uuid import uuid4
 
+from .access import LOCAL_BRAND
 from .creatives import EXAMPLES
 
 
@@ -14,8 +15,10 @@ class ViewerNotFound(LookupError):
 
 
 class ViewerMeasurement:
-    def __init__(self, path, examples=EXAMPLES):
+    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample"):
         self.path = path
+        # Server composition selects the campaign. Public payloads cannot override it.
+        self.campaign_id = campaign_id
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
         with closing(self.connect()) as db, db:
@@ -42,6 +45,18 @@ class ViewerMeasurement:
                 db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
             if "ad_link_id" not in columns:
                 db.execute("ALTER TABLE viewer_visits ADD COLUMN ad_link_id TEXT")
+            if "campaign_id" not in columns:
+                db.execute("ALTER TABLE viewer_visits ADD COLUMN campaign_id TEXT")
+                # Admit the original demo only if no sibling campaign makes that legacy
+                # attribution ambiguous. Other unbound history stays quarantined.
+                has_owners = db.execute("SELECT 1 FROM sqlite_master WHERE name='campaign_owners' AND type='table'").fetchone()
+                ambiguous_demo = has_owners and db.execute(
+                    "SELECT 1 FROM campaign_owners WHERE client_id=? AND brand_id=? "
+                    "AND campaign_id NOT IN ('tts-sample','tts-catalog')",
+                    (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone()
+                if not ambiguous_demo:
+                    db.execute("UPDATE viewer_visits SET campaign_id='tts-sample' WHERE client_id=? AND brand_id=?",
+                               (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id))
             for column in ("arrived_ms", "rehearsal"):
                 if column not in columns:
                     db.execute(f"ALTER TABLE viewer_visits ADD COLUMN {column} INTEGER")
@@ -67,8 +82,8 @@ class ViewerMeasurement:
     def require_visit(self, db, origin, visit_id):
         visit = db.execute(
             "SELECT content_fingerprint, ad_link_id FROM viewer_visits "
-            "WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ?",
-            self.visit_key(origin, visit_id),
+            "WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ? AND campaign_id IS ?",
+            (*self.visit_key(origin, visit_id), self.campaign_id),
         ).fetchone()
         if visit is None:
             raise ViewerNotFound("This visit is unavailable.")
@@ -97,19 +112,19 @@ class ViewerMeasurement:
                     ) THEN 1 END)
                 FROM viewer_visits v
                 WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
-                    AND v.ad_link_id IS NULL
+                    AND v.campaign_id = ? AND v.ad_link_id IS NULL
                     AND EXISTS (
                         SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
                     )
-            """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint)).fetchone()
+            """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint, self.campaign_id)).fetchone()
             unattributed, = db.execute("""
                 SELECT COUNT(*) FROM viewer_visits v
                 WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ?
-                    AND v.content_fingerprint IS NULL
+                    AND v.campaign_id = ? AND v.content_fingerprint IS NULL
                     AND EXISTS (
                         SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
                     )
-            """, (scope.client_id, scope.brand_id, creative_ref)).fetchone()
+            """, (scope.client_id, scope.brand_id, creative_ref, self.campaign_id)).fetchone()
             observations.append({
                 "creative_version": creative_ref, "comparison_version": example_ref,
                 "comparison_fingerprint": fingerprint, "unattributed_arrivals": unattributed,
@@ -119,20 +134,20 @@ class ViewerMeasurement:
         return observations
 
     @staticmethod
-    def ad_link_activity(db, scope, link):
+    def ad_link_activity(db, scope, link, *, campaign_id="tts-sample"):
         arrivals, completions = db.execute("""
             SELECT COUNT(*), COUNT(c.visit_id)
             FROM viewer_visits v
             JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
             LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
             WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ?
+                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
         """, (f"arrival:{link['comparison_ref']}", scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'])).fetchone()
+              link['creative_ref'], link['content_fingerprint'], campaign_id)).fetchone()
         return {"arrivals": arrivals, "completions": completions}
 
     @staticmethod
-    def ad_link_window_activity(db, scope, link, start_ms, end_ms):
+    def ad_link_window_activity(db, scope, link, start_ms, end_ms, *, campaign_id="tts-sample"):
         rows = db.execute("""
             SELECT v.rehearsal, COUNT(*), COUNT(c.visit_id)
             FROM viewer_visits v
@@ -140,11 +155,11 @@ class ViewerMeasurement:
             LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
                 AND c.completed_ms >= v.arrived_ms AND c.completed_ms < ?
             WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ?
+                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
                 AND v.arrived_ms >= ? AND v.arrived_ms < ? AND v.rehearsal IN (0, 1)
             GROUP BY v.rehearsal
         """, (f"arrival:{link['comparison_ref']}", end_ms, scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'], start_ms, end_ms))
+              link['creative_ref'], link['content_fingerprint'], campaign_id, start_ms, end_ms))
         cohorts = {rehearsal: (arrivals, completions) for rehearsal, arrivals, completions in rows}
         arrivals, completions = cohorts.get(0, (0, 0))
         rehearsals, rehearsal_completions = cohorts.get(1, (0, 0))
@@ -169,9 +184,9 @@ class ViewerMeasurement:
             attribution = None if origin_unavailable else content_fingerprint
             db.execute(
                 "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint, "
-                "ad_link_id, arrived_ms, rehearsal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "ad_link_id, arrived_ms, rehearsal, campaign_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (*self.visit_key(origin, visit_id), attribution, ad_link_id, time_ns() // 1_000_000,
-                 int(rehearsal) if ad_link_id is not None else None),
+                 int(rehearsal) if ad_link_id is not None else None, self.campaign_id),
             )
         else:
             attribution, saved_link = self.require_visit(db, origin, visit_id)

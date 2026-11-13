@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 import sqlite3
 
-from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
 from scripts.campaign_drafts import PackageConflict
 
@@ -16,7 +15,7 @@ DELIVERY_FIXTURE = Path(__file__).resolve().parents[1] / "examples/tts-performan
 MIN_SAMPLE_IMPRESSIONS = 100
 MIN_LOCAL_ARRIVALS = 3
 LOW_COMPLETION_RATE = 0.5
-VIEWER_ATTRIBUTION = "verified_comparison_content"
+VIEWER_ATTRIBUTION = "campaign_comparison_content_v1"
 CORRECTION_CHOICES = {
     "keep_takes": "Keep both takes unchanged",
     "keep_comparison": "Keep the entire comparison unchanged",
@@ -125,6 +124,8 @@ def propose_next_test(delivery, activity):
 
 class CampaignPerformance:
     def __init__(self, drafts, viewer, reporting=None):
+        if viewer.campaign_id != drafts.campaign_id:
+            raise ValueError("Bind measurement to this campaign before reviewing activity.")
         self.drafts = drafts
         self.viewer = viewer
         self.reporting = reporting if reporting is not None else SampleCampaignReporting()
@@ -189,7 +190,7 @@ class CampaignPerformance:
                 ORDER BY sequence DESC LIMIT 1
             )
             WHERE kind = 'keep_takes' OR (kind = 'keep_comparison' AND comparison_identity = ?)
-        """, (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, evidence["campaign_id"],
+        """, (self.drafts.scope.client_id, self.drafts.scope.brand_id, evidence["campaign_id"],
               creative, group["comparison_version"], comparison_identity(group, keep_takes=True),
               comparison_identity(group))).fetchone()
         return self._correction_record(row) if row else None
@@ -208,6 +209,7 @@ class CampaignPerformance:
                 "review_id": review_id, "actor_id": actor, "created_at": created_at}
 
     def save_correction(self, campaign_id, revision, fingerprint, review_id, kind, note, operation_id):
+        self.drafts.require("youtube:review.write")
         if not isinstance(operation_id, str) or not re.fullmatch(r"[0-9a-f]{32}", operation_id):
             raise ValueError("Use a valid correction operation ID.")
         if (not isinstance(kind, str) or kind not in CORRECTION_CHOICES
@@ -222,7 +224,7 @@ class CampaignPerformance:
                 SELECT snapshot FROM campaign_performance_reviews
                 WHERE id = ? AND client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ?
                     AND json_extract(snapshot, '$.local_viewer_activity.attribution') = ?
-            """, (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision,
+            """, (review_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, revision,
                   fingerprint, VIEWER_ATTRIBUTION)).fetchone()
             if row is None:
                 raise ValueError("Choose a review for this approved package.")
@@ -235,7 +237,7 @@ class CampaignPerformance:
                             if row["creative_version"] == creative)
             actor = self.drafts.operator.id
             correction_id = package_fingerprint({
-                "client": LOCAL_BRAND.client_id, "brand": LOCAL_BRAND.brand_id, "campaign": campaign_id,
+                "client": self.drafts.scope.client_id, "brand": self.drafts.scope.brand_id, "campaign": campaign_id,
                 "actor": actor, "operation": operation_id,
             })
             existing = db.execute(
@@ -243,12 +245,13 @@ class CampaignPerformance:
             ).fetchone()
             if existing is not None and existing != (review_id, kind, note):
                 raise ValueError("This correction operation was already used for a different save.")
+            self.drafts.require("youtube:review.write")
             db.execute("""
                 INSERT INTO campaign_buyer_corrections
                     (id, client_id, brand_id, campaign_id, creative_version, comparison_fingerprint,
                      review_id, actor_id, kind, note, created_at, comparison_identity, takes_identity, comparison_version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-            """, (correction_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, creative,
+            """, (correction_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, creative,
                   activity["comparison_fingerprint"], review_id, actor, kind, note, datetime.now(timezone.utc).isoformat(),
                   comparison_identity(group), comparison_identity(group, keep_takes=True),
                   group["comparison_version"]))
@@ -261,7 +264,7 @@ class CampaignPerformance:
             for group in package["groups"]
         ]
         delivery = self.reporting.snapshot(scenario, [creative for creative, _, _ in comparisons])
-        activity = self.viewer.summarize(LOCAL_BRAND, comparisons)
+        activity = self.viewer.summarize(self.drafts.scope, comparisons)
         evidence = {
             "campaign_id": campaign_id, "revision": revision, "fingerprint": fingerprint,
             "sample_delivery": delivery,
@@ -275,10 +278,11 @@ class CampaignPerformance:
     def require_current_activity(self, db, evidence, package):
         comparisons = [(group['creative_version'], group['comparison_version'], package_fingerprint(group['content']))
                        for group in package['groups']]
-        if self.viewer.summarize(LOCAL_BRAND, comparisons, connection=db) != evidence['local_viewer_activity']['rows']:
+        if self.viewer.summarize(self.drafts.scope, comparisons, connection=db) != evidence['local_viewer_activity']['rows']:
             raise PackageConflict('Viewer activity changed. Review performance again before preparing a test.')
 
     def save_review(self, db, evidence):
+        self.drafts.require("youtube:review.write")
         campaign_id, revision, fingerprint = (evidence[key] for key in ('campaign_id', 'revision', 'fingerprint'))
         package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
         self.require_current_activity(db, evidence, package)
@@ -286,12 +290,12 @@ class CampaignPerformance:
         correction = self._latest_correction(db, evidence, package)
         if correction:
             evidence['proposal'] = apply_correction(evidence['proposal'], correction)
-        review_id = package_fingerprint({'client': LOCAL_BRAND.client_id, 'brand': LOCAL_BRAND.brand_id, 'evidence': evidence})
+        review_id = package_fingerprint({'client': self.drafts.scope.client_id, 'brand': self.drafts.scope.brand_id, 'evidence': evidence})
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             'INSERT INTO campaign_performance_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(id) DO UPDATE SET last_requested_at = excluded.last_requested_at',
-            (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint,
+            (review_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, revision, fingerprint,
              now, now, json.dumps(evidence)))
         created_at = db.execute('SELECT created_at FROM campaign_performance_reviews WHERE id=?', (review_id,)).fetchone()[0]
         return {'id': review_id, 'created_at': created_at, **evidence}
@@ -308,7 +312,7 @@ class CampaignPerformance:
         query = ("SELECT id,created_at,snapshot FROM campaign_performance_reviews "
                  "WHERE client_id=? AND brand_id=? AND campaign_id=? AND revision=? AND fingerprint=? "
                  "AND json_extract(snapshot, '$.local_viewer_activity.attribution')=?")
-        values = [LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint, VIEWER_ATTRIBUTION]
+        values = [self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, revision, fingerprint, VIEWER_ATTRIBUTION]
         if review_id is not None:
             query += ' AND id=?'
             values.append(review_id)
@@ -322,7 +326,7 @@ class CampaignPerformance:
             "WHERE id = ? AND client_id = ? AND brand_id = ? AND campaign_id = ? "
             "AND revision = ? AND fingerprint = ? "
             "AND json_extract(snapshot, '$.local_viewer_activity.attribution') = ?",
-            (review_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint,
+            (review_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, revision, fingerprint,
              VIEWER_ATTRIBUTION),
         ).fetchone()
         if row is None:
@@ -360,7 +364,7 @@ class CampaignPerformance:
                 "WHERE client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ? "
                 "AND json_extract(snapshot, '$.local_viewer_activity.attribution') = ? "
                 "ORDER BY last_requested_at DESC, id DESC LIMIT 1",
-                (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, campaign_id, revision, fingerprint, VIEWER_ATTRIBUTION),
+                (self.drafts.scope.client_id, self.drafts.scope.brand_id, campaign_id, revision, fingerprint, VIEWER_ATTRIBUTION),
             ).fetchone()
             if row:
                 response["review"] = {"id": row[0], "created_at": row[1], **json.loads(row[2])}

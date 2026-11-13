@@ -5,7 +5,6 @@ import json
 import re
 
 from scripts.campaign_drafts import POLICY, PackageConflict
-from .access import LOCAL_BRAND
 from .agent.draft_permissions import permits
 from .handoff import package_fingerprint
 from .instruction_tests import EVIDENCE_PROTOCOL
@@ -66,11 +65,12 @@ class InstructionFindings:
         return snapshot if [row["cohorts"]["participant"] for row in at_cutoff] == frozen else None
 
     def save(self, campaign_id, revision, fingerprint, *, snapshot_id):
+        self.drafts.require("youtube:learning.manage")
         _reference(snapshot_id)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)["package"]
-            test = self.tests._test(db, self.tests.test_id(campaign_id, revision, fingerprint))
+            test = self.tests._test(db, self.tests.test_id(campaign_id, revision, fingerprint, self.drafts.scope))
             snapshot = self._current_source(db, test, snapshot_id)
             if snapshot is None:
                 raise PackageConflict("Save a current snapshot with resolved participant outcomes first.")
@@ -84,6 +84,7 @@ class InstructionFindings:
             original, revised = test["versions"]
             group = next(group for group in package["groups"] if group["creative_version"] == creative)
             finding_id = package_fingerprint({"version": FINDING_VERSION, "snapshot_id": snapshot_id})
+            self.drafts.require("youtube:learning.manage")
             finding = {
                 "id": finding_id, "version": FINDING_VERSION, "action": "reuse",
                 "test_id": test["id"], "snapshot_id": snapshot_id, "cutoff_ms": snapshot["cutoff_ms"],
@@ -96,10 +97,10 @@ class InstructionFindings:
             db.execute("""
                 INSERT INTO instruction_findings (id, client_id, brand_id, comparison_key, snapshot)
                 VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-            """, (finding_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id,
+            """, (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id,
                   _comparison_key(group, original["content_fingerprint"]), json.dumps(finding)))
             row = db.execute("SELECT retired FROM instruction_findings WHERE id = ? AND client_id = ? AND brand_id = ?",
-                             (finding_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone()
+                             (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id)).fetchone()
             if row is None or row[0]:
                 raise PackageConflict("This finding is unavailable for reuse.")
         return finding
@@ -115,12 +116,15 @@ class InstructionFindings:
             return None
         group, = package["groups"]
         key = _comparison_key(group, package_fingerprint(group["content"]))
-        # A retired or stale latest finding must not make an older version eligible again.
+        # Resolve ownership from the native source test, including for legacy findings.
+        # A retired or stale latest finding within this campaign must not revive an older one.
         row = db.execute("""
-            SELECT snapshot, retired FROM instruction_findings
-            WHERE client_id = ? AND brand_id = ? AND comparison_key = ?
-            ORDER BY rowid DESC LIMIT 1
-        """, (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, key)).fetchone()
+            SELECT f.snapshot, f.retired FROM instruction_findings f
+            JOIN instruction_tests t ON t.id = json_extract(f.snapshot, '$.test_id')
+                AND t.client_id = f.client_id AND t.brand_id = f.brand_id
+            WHERE f.client_id = ? AND f.brand_id = ? AND f.comparison_key = ? AND t.campaign_id = ?
+            ORDER BY f.rowid DESC LIMIT 1
+        """, (self.drafts.scope.client_id, self.drafts.scope.brand_id, key, self.drafts.campaign_id)).fetchone()
         return json.loads(row[0]) if row and not row[1] else None
 
     def _eligible(self, db, package, draft):
@@ -147,6 +151,7 @@ class InstructionFindings:
             return self._eligible(db, package, draft)
 
     def retire(self, campaign_id, revision, fingerprint, *, finding_id):
+        self.drafts.require("youtube:learning.manage")
         _reference(finding_id)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -154,8 +159,18 @@ class InstructionFindings:
             finding = self._latest_match(db, package)
             if not finding or finding["id"] != finding_id:
                 raise PackageConflict("This finding is no longer available for this brief.")
-            db.execute("UPDATE instruction_findings SET retired = 1 WHERE id = ? AND client_id = ? AND brand_id = ?",
-                       (finding_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id))
+            self.drafts.require("youtube:learning.manage")
+            updated = db.execute("""
+                UPDATE instruction_findings SET retired = 1
+                WHERE id = ? AND client_id = ? AND brand_id = ? AND EXISTS (
+                    SELECT 1 FROM instruction_tests t
+                    WHERE t.id = json_extract(instruction_findings.snapshot, '$.test_id')
+                        AND t.client_id = instruction_findings.client_id
+                        AND t.brand_id = instruction_findings.brand_id AND t.campaign_id = ?
+                )
+            """, (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id))
+            if updated.rowcount != 1:
+                raise PackageConflict("This finding is no longer available for this brief.")
         return {"retired": finding_id}
 
     def apply(self, campaign_id, revision, fingerprint, *, finding_id, correction_id, draft_permission="none"):

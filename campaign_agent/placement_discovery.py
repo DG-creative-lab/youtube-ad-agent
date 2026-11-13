@@ -4,7 +4,6 @@ import json
 import sqlite3
 from typing import Protocol
 
-from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
 from .placements import rule_assignment
 from scripts.campaign_drafts import PackageConflict, VIDEO_ID
@@ -30,7 +29,8 @@ class PlacementDiscovery:
                 campaign_id TEXT NOT NULL, label TEXT NOT NULL, snapshot TEXT NOT NULL)''')
 
     def register(self, label, rows):
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:catalog.write")
+        self.drafts.require("youtube:campaign.read")
         if not isinstance(label, str) or not label.strip() or len(label) > 100:
             raise ValueError('Name the catalog in up to 100 characters.')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 200:
@@ -49,36 +49,37 @@ class PlacementDiscovery:
                 raise ValueError('Use unique video IDs, permitted descriptions and an independent source reference.')
             seen.add(video)
             clean.append(dict(video_id=video, description=text, source=source, source_reference=reference))
-        identity = {'scope': vars(LOCAL_BRAND), 'campaign': self.drafts.campaign_id, 'rows': clean}
+        identity = {'scope': vars(self.drafts.scope), 'campaign': self.drafts.campaign_id, 'rows': clean}
         catalog_id = package_fingerprint(identity)[:32]
         with closing(sqlite3.connect(self.drafts.path)) as db, db:
+            self.drafts.require("youtube:catalog.write")
             db.execute('INSERT INTO placement_catalogs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
-                       (catalog_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.drafts.campaign_id,
+                       (catalog_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id,
                         label.strip(), json.dumps(clean)))
             for row in clean:
                 ref = package_fingerprint({**identity, 'video': row['video_id']})[:32]
                 db.execute('''INSERT INTO placement_catalog_entries
                            (ref,client_id,brand_id,campaign_id,video_id,title,source,source_reference)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING''',
-                           (ref, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.drafts.campaign_id,
+                           (ref, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id,
                             row['video_id'], row['description'], row['source'], row['source_reference']))
         return catalog_id
 
     def read(self, db, catalog_id):
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:campaign.read")
         row = db.execute('SELECT snapshot FROM placement_catalogs WHERE id=? AND client_id=? AND brand_id=? AND campaign_id=?',
-                         (catalog_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.drafts.campaign_id)).fetchone()
+                         (catalog_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id)).fetchone()
         if row is None:
             raise ValueError('Choose an available catalog for this campaign.')
         return json.loads(row[0])
 
     def list(self):
-        self.drafts.operator.require_brand(LOCAL_BRAND)
+        self.drafts.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.drafts.path)) as db:
             return [{'id': key, 'label': label, 'count': len(json.loads(snapshot))}
                     for key, label, snapshot in db.execute(
                         'SELECT id,label,snapshot FROM placement_catalogs WHERE client_id=? AND brand_id=? AND campaign_id=?',
-                        (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.drafts.campaign_id))]
+                        (self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id))]
 
     def save(self, db, catalog_id, expected_revision, assignments, selected_ids):
         rows = self.read(db, catalog_id)
@@ -91,7 +92,7 @@ class PlacementDiscovery:
         current = self.drafts._read(db)
         if current['revision'] != expected_revision:
             raise PackageConflict('The campaign changed. Start a new placement run from the latest revision.')
-        identity = {'scope': vars(LOCAL_BRAND), 'campaign': self.drafts.campaign_id, 'rows': rows}
+        identity = {'scope': vars(self.drafts.scope), 'campaign': self.drafts.campaign_id, 'rows': rows}
         chosen = {row['id']: row for row in current['placements']}
         for row in rows:
             if row['video_id'] in selected_ids and row['video_id'] not in chosen:

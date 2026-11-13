@@ -25,6 +25,8 @@ To rehearse campaign creation, ask **“Validate the campaign setup”** in chat
 
 The portable demo uses bundled media, recorded agent responses and an authored delivery scenario. It needs no provider credentials or media generation. The default database is `.local/portable-demo.sqlite3`. Use `--draft-db` with a new path for a fresh run.
 
+The [release demo walkthrough](docs/demo-walkthrough.md) connects package preparation, both viewers, delivery review, the buyer correction, and finding reuse after restart. It includes setup commands, recording cues and the evidence labels for the prepared learning example.
+
 1. Prepare and approve the offline package, then validate and create its paused simulated setup.
 2. In **Demo delivery**, open **Rehearse tagged comparison** for each group. Play Take A and Take B to the end and select one. Return to the planner and choose **Review demo delivery**. Each group's **All-time viewer link** row should show one arrival and one completion on a fresh run.
 3. Choose **Recommend next test**. The `wait` fixture shows zero delivery and recommends waiting for evidence.

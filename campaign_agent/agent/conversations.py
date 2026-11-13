@@ -3,7 +3,6 @@ from contextlib import closing
 import json
 import sqlite3
 
-from campaign_agent.access import LOCAL_BRAND
 from scripts.campaign_drafts import PackageConflict
 from .replies import verified_result
 
@@ -56,12 +55,12 @@ class CampaignConversations:
                         self.finish(db, run_id, result, status)
 
     def session(self, db, session_id):
-        self.operator.require_brand(LOCAL_BRAND)
+        self.planner.drafts.require("youtube:campaign.read")
         row = db.execute('SELECT client_id,brand_id,actor_id,settings,campaign_id FROM planner_sessions WHERE id=?',
                          (session_id,)).fetchone()
         if row is None:
             return None
-        if row[:3] != (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.operator.id) or row[4] != self.planner.drafts.campaign_id:
+        if row[:3] != (self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id) or row[4] != self.planner.drafts.campaign_id:
             raise PermissionError('Conversation unavailable in this campaign.')
         return json.loads(row[3])
 
@@ -121,7 +120,7 @@ class CampaignConversations:
         count = db.execute('SELECT COUNT(*) FROM planner_messages WHERE session_id=?', (session_id,)).fetchone()[0]
         db.execute('''INSERT INTO planner_sessions(id,client_id,brand_id,actor_id,settings,campaign_id)
                       VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
-                   (session_id, LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.operator.id,
+                   (session_id, self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id,
                     json.dumps(settings), self.planner.drafts.campaign_id))
         db.execute('UPDATE planner_sessions SET settings=? WHERE id=?', (json.dumps(settings), session_id))
         self.append(db, session_id, run_id, 'user', request, revision, catalog_id, 'request')
@@ -139,12 +138,12 @@ class CampaignConversations:
                     'latest_run_id': messages[-1]['run_id'] if messages else None}
 
     def list(self):
-        self.operator.require_brand(LOCAL_BRAND)
+        self.planner.drafts.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.path)) as db:
             return [{'id': key, 'model': json.loads(settings)['model'], 'title': title[:80]}
                     for key, settings, title in db.execute('''
                         SELECT s.id,s.settings,(SELECT content FROM planner_messages WHERE session_id=s.id ORDER BY id LIMIT 1)
                         FROM planner_sessions s WHERE client_id=? AND brand_id=? AND actor_id=? AND campaign_id=?
                         ORDER BY (SELECT MAX(id) FROM planner_messages WHERE session_id=s.id) DESC''',
-                        (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id, self.operator.id, self.planner.drafts.campaign_id))
+                        (self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id, self.planner.drafts.campaign_id))
                     if title]

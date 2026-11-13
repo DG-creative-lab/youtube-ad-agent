@@ -8,6 +8,8 @@ This map translates the [application architecture](architecture-plan.md) into co
 | --- | --- |
 | [placement-review/index.html](../placement-review/index.html) | Placement search and review UI, unsaved selections, draft conflict reconciliation and per-context export. |
 | [scripts/placement_review.py](../scripts/placement_review.py) | The local server and developer CLI. It also contains YouTube search, sample search, catalog classification and the optional Jev call. |
+| [campaign_agent/access.py](../campaign_agent/access.py), [ports/access.py](../campaign_agent/ports/access.py) and [adapters/local_access.py](../campaign_agent/adapters/local_access.py) | Server-resolved workspace context, operator brand grants, current capability decisions and the exact local-only access adapter. |
+| [campaign_agent/workspaces.py](../campaign_agent/workspaces.py) | Immutable brand/workspace/installation and campaign ownership, trusted provisioning and explicit legacy demo admission. |
 | [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, catalog registration, draft validation, revision checks, approval snapshots and immutable instruction versions. |
 | [campaign_agent/agent/planner.py](../campaign_agent/agent/planner.py) and [planning_models.py](../campaign_agent/agent/planning_models.py) | Main-model port, tool schemas, simulated profiles, OpenRouter tool calling, pinned conversations, request receipts and the bounded placement loop. |
 | [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Campaign-scoped persisted messages, transcript migration, history reads, follow-up ordering and supersession of unfinished conversation requests. |

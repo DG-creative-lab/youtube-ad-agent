@@ -7,7 +7,6 @@ from typing import Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scripts.campaign_drafts import PackageConflict
-from .access import LOCAL_BRAND
 from .adapters import demo_delivery
 from .campaign_setup import CampaignSetup
 from .delivery_next_test import next_action, respect_correction
@@ -134,6 +133,7 @@ class CampaignDelivery:
         return {**report, 'binding': binding}
 
     def save(self, db, campaign_id, revision, fingerprint, report):
+        self.drafts.require("youtube:review.write")
         binding = self.binding(db, campaign_id, revision, fingerprint)
         if binding is None or binding != report['binding']:
             raise PackageConflict('The Google Ads setup changed. Review delivery again from the current package.')
@@ -142,8 +142,10 @@ class CampaignDelivery:
         groups = []
         for group in binding['groups']:
             link = group['viewer_link']
-            activity = ViewerMeasurement.ad_link_activity(db, LOCAL_BRAND, link) if link else None
-            window_activity = ViewerMeasurement.ad_link_window_activity(db, LOCAL_BRAND, link, *window) if link and window else None
+            activity = ViewerMeasurement.ad_link_activity(db, self.drafts.scope, link,
+                                                         campaign_id=campaign_id) if link else None
+            window_activity = ViewerMeasurement.ad_link_window_activity(
+                db, self.drafts.scope, link, *window, campaign_id=campaign_id) if link and window else None
             captured = captured_groups.get(group['ad_group_id'], {})
             groups.append({**group, 'metrics': captured.get('metrics'),
                            'viewer_activity': activity, 'window_activity': window_activity,
@@ -155,6 +157,7 @@ class CampaignDelivery:
         return report
 
     def recommend(self, campaign_id, revision, fingerprint, report_id, *, connection=None):
+        self.drafts.require("youtube:review.write")
         if connection is None:
             with closing(sqlite3.connect(self.drafts.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')

@@ -79,6 +79,7 @@ class CampaignSetup:
             return self._read(db, key)
 
     def validate(self, campaign_id, revision, fingerprint, *, connection=None):
+        self.drafts.require("youtube:setup.manage")
         key = self._key(campaign_id, revision, fingerprint)
         if not self.provider.local_validation:
             if connection is not None:
@@ -88,6 +89,7 @@ class CampaignSetup:
                 record, plan, links = self._prepare(db, key)
             if record is not None:
                 return record
+            self.drafts.require("youtube:setup.manage")
             validation_id = self.provider.validate(plan)
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
@@ -138,6 +140,7 @@ class CampaignSetup:
         return package_fingerprint({'scope': key[:5], 'plan': plan})
 
     def _save_validated(self, connection, key, plan, links, validation_id=None):
+        self.drafts.require("youtube:setup.manage")
         revision, fingerprint = key[3:5]
         record = {'id': self._setup_id(key, plan), 'revision': revision,
                   'fingerprint': fingerprint, 'plan': plan, 'status': 'validated',
@@ -150,13 +153,14 @@ class CampaignSetup:
         return record
 
     @staticmethod
-    def verified_viewer_link(db, scope, link_id):
+    def verified_viewer_link(db, scope, link_id, *, campaign_id="tts-sample"):
         row = db.execute('''SELECT link.value FROM campaign_setups AS setup,
                             json_each(setup.snapshot, '$.viewer_links') AS link
                             WHERE setup.client_id=? AND setup.brand_id=?
+                            AND setup.campaign_id=?
                             AND json_extract(setup.snapshot, '$.status')='verified'
                             AND json_extract(link.value, '$.id')=?''',
-                         (scope.client_id, scope.brand_id, link_id)).fetchone()
+                         (scope.client_id, scope.brand_id, campaign_id, link_id)).fetchone()
         return json.loads(row[0]) if row else None
 
     def _require_setup(self, db, key, setup_id):
@@ -171,6 +175,7 @@ class CampaignSetup:
         return record
 
     def create(self, campaign_id, revision, fingerprint, setup_id):
+        self.drafts.require("youtube:setup.manage")
         key = self._key(campaign_id, revision, fingerprint)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
@@ -178,16 +183,33 @@ class CampaignSetup:
             if record['status'] != 'validated':
                 return record
             self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)
+            self.drafts.require("youtube:setup.manage")
             record['approval'] = {'actor_id': self.drafts.operator.id, 'approved_at': datetime.now(timezone.utc).isoformat()}
             record['status'] = 'creating'
             self._update(db, key, record)
 
+        try:
+            self.drafts.require("youtube:setup.manage")
+        except Exception:
+            # Only the access check ran: the provider call below has not started.
+            self._release_undispatched(key, setup_id, record['approval'])
+            raise
         try:
             receipt = self.provider.create_paused(setup_id, record['plan'])
         except SetupProviderError:
             return self._save_receipt(key, setup_id, None)
         self._save_receipt(key, setup_id, receipt)
         return self.reconcile(campaign_id, revision, fingerprint, setup_id)
+
+    def _release_undispatched(self, key, setup_id, reservation):
+        """Release only this known-unsent reservation, even if current access is unavailable."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            record = self._require_setup(db, key, setup_id)
+            if (record['status'] == 'creating' and record['approval'] == reservation
+                    and record['receipt'] is None and record['readback'] is None):
+                record.update(status='validated', approval=None)
+                self._update(db, key, record)
 
     def _save_receipt(self, key, setup_id, receipt):
         with closing(sqlite3.connect(self.path)) as db, db:
@@ -204,6 +226,7 @@ class CampaignSetup:
             return record
 
     def reconcile(self, campaign_id, revision, fingerprint, setup_id):
+        self.drafts.require("youtube:setup.manage")
         key = self._key(campaign_id, revision, fingerprint)
         with closing(sqlite3.connect(self.path)) as db:
             record = self._require_setup(db, key, setup_id)
@@ -212,6 +235,7 @@ class CampaignSetup:
         if record['status'] in {'verified', 'mismatch'}:
             return record
         try:
+            self.drafts.require("youtube:setup.manage")
             observed = self.provider.readback(setup_id, record['plan'])
         except SetupProviderError:
             return record
