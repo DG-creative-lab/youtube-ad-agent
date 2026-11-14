@@ -384,6 +384,12 @@ charging-profile validation. Current text modalities and advertised capabilities
 must support the selected planner or structured-review profile; an eligible
 catalogue row is not permission to use every profile. Changed operation inputs,
 incompatible current metadata or changed pinned profile/settings fail closed.
+Every full catalogue read, including selection revalidation and durable replay,
+uses the same per-connection foreground refresh gate. Contenders receive
+`admission_busy`; other connections remain independent. A detected model,
+endpoint or pinned-profile change invalidates the connection catalogue and its
+cursors so the next declared models refresh obtains current data immediately.
+The original selection remains immutable; changed settings require a new operation.
 
 New metadata commands collect command-bound permits from the existing access
 adapters, then check original deadlines, local session and native campaign identity

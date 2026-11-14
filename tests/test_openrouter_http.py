@@ -1,10 +1,13 @@
 """Actual foreground HTTP commands with authored identity/key/catalogue responses only."""
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import replace
 import io
 import json
 from pathlib import Path
 import sqlite3
+from threading import Event,Lock
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch,Mock
@@ -310,6 +313,112 @@ class OpenRouterHttpTests(unittest.TestCase):
         self.assertEqual(self.post('select',self.selection(connection,catalogue['catalogue_revision']))['profile'],'planner')
         structured=self.selection(connection,catalogue['catalogue_revision']);structured['profile']='structured_review'
         self.assertEqual(self.post('select',structured,status=409)['code'],'route_unqualified')
+
+    def test_catalogue_reads_share_one_connection_guard_across_select_and_models(self):
+        for first,contender in (('select','select'),('select','models'),('models','select')):
+            with self.subTest(first=first,contender=contender):
+                connection=self.connect()['connection_id'];catalogue=self.models(connection)
+                data=self.selection(connection,catalogue['catalogue_revision']);saved=self.post('select',data)
+                independent=self.connect()['connection_id']
+                body={'connection_id':connection,'tab_id':self.tab,'search':'','cursor':None}
+                if first=='models':self.service.cache.invalidate(connection)
+                entered=Event();release=Event();lock=Lock();calls=[0]
+                original=self.metadata.models
+                def held(credential):
+                    with lock:
+                        calls[0]+=1;position=calls[0]
+                    if position==1:
+                        entered.set()
+                        if not release.wait(3):raise AssertionError('Catalogue read was not released')
+                    return original(credential)
+                with patch.object(self.metadata,'models',side_effect=held),ThreadPoolExecutor(max_workers=1) as pool:
+                    pending=pool.submit(self.post,first,data if first=='select' else body)
+                    try:
+                        self.assertTrue(entered.wait(3))
+                        if contender=='models':self.service.cache.invalidate(connection)
+                        rejected=self.post(contender,data if contender=='select' else body,status=429)
+                        self.assertEqual(rejected['code'],'admission_busy')
+                        self.assertEqual(calls[0],1,'Contender must not start a full catalogue read')
+                        # Another connection remains usable while this foreground request waits.
+                        self.models(independent)
+                        self.assertEqual(calls[0],2)
+                    finally:release.set()
+                    completed=pending.result(timeout=3)
+                    if first=='select':self.assertEqual(completed,saved)
+                self.assertEqual(self.post('select',data),saved)
+
+    def test_catalogue_guard_releases_on_key_and_catalogue_errors(self):
+        connection=self.connect()['connection_id'];catalogue=self.models(connection)
+        data=self.selection(connection,catalogue['catalogue_revision']);saved=self.post('select',data)
+        for action in ('select','models'):
+            for method in ('validate_key','models'):
+                with self.subTest(action=action,method=method):
+                    if action=='models':self.service.cache.invalidate(connection)
+                    body=data if action=='select' else {'connection_id':connection,'tab_id':self.tab,'search':'','cursor':None}
+                    with patch.object(self.metadata,method,side_effect=ProviderError('catalogue_unavailable')):
+                        self.assertEqual(self.post(action,body,status=503)['code'],'catalogue_unavailable')
+                    if action=='models':self.models(connection)
+                    self.assertEqual(self.post('select',data),saved)
+
+    def test_detected_model_drift_refreshes_immediately_and_requires_new_operation(self):
+        for position in range(21):
+            self.metadata.rows.append({**deepcopy(self.metadata.rows[0]),'id':f'fixture/z-extra-{position:02}'})
+        connection=self.connect()['connection_id'];catalogue=self.models(connection)
+        self.assertIsNotNone(catalogue['next_cursor'])
+        data=self.selection(connection,catalogue['catalogue_revision'])
+        self.metadata.rows[0]['name']='Current authored display name'
+        self.assertEqual(self.post('select',data,status=409)['code'],'selection_stale')
+        refreshed=self.models(connection)
+        self.assertNotEqual(refreshed['catalogue_revision'],catalogue['catalogue_revision'])
+        self.assertEqual(refreshed['models'][0]['name'],'Current authored display name')
+        self.assertEqual(self.post('models',{'connection_id':connection,'tab_id':self.tab,'search':'',
+            'cursor':catalogue['next_cursor']},status=409)['code'],'selection_stale')
+        self.assertEqual(self.post('select',data,status=409)['code'],'selection_stale')
+        selected=self.post('select',self.selection(connection,refreshed['catalogue_revision']))
+        self.assertEqual(selected['catalogue_revision'],refreshed['catalogue_revision'])
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections WHERE operation_id=?',(data['operation_id'],)).fetchone()[0],0)
+
+    def test_incompatible_or_missing_current_model_does_not_leave_eligible_cache(self):
+        original=deepcopy(self.metadata.rows)
+        for change in ('modalities','pricing','missing'):
+            with self.subTest(change=change):
+                self.metadata.rows=deepcopy(original)
+                connection=self.connect()['connection_id'];catalogue=self.models(connection)
+                data=self.selection(connection,catalogue['catalogue_revision'])
+                if change=='modalities':self.metadata.rows[0]['architecture']['output_modalities']=['audio']
+                elif change=='pricing':self.metadata.rows[0]['pricing']['input_cache_read']='0.1'
+                else:self.metadata.rows=[]
+                self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
+                refreshed=self.models(connection)
+                self.assertNotEqual(refreshed['catalogue_revision'],catalogue['catalogue_revision'])
+                if change=='missing':self.assertEqual(refreshed['models'],[])
+                else:self.assertEqual(refreshed['models'][0]['state'],'blocked')
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections').fetchone()[0],0)
+
+    def test_endpoint_and_profile_drift_refresh_immediately_without_rewriting_receipt(self):
+        connection=self.connect()['connection_id'];catalogue=self.models(connection)
+        data=self.selection(connection,catalogue['catalogue_revision']);saved=self.post('select',data)
+        original_profiles=self.service.profiles;original_endpoint=deepcopy(self.metadata.endpoint)
+        for change in ('profile','endpoint'):
+            with self.subTest(change=change):
+                catalogue=self.models(connection)
+                if change=='profile':self.service.profiles=(replace(original_profiles[0],version='authored-free-v2'),)
+                else:self.metadata.endpoint['context_length']=16000
+                try:
+                    self.post('select',data,status=409)
+                    self.metadata.requests.clear()
+                    refreshed=self.models(connection)
+                    self.assertIn('models',self.metadata.requests)
+                    self.assertNotEqual(refreshed['catalogue_revision'],catalogue['catalogue_revision'])
+                    with closing(sqlite3.connect(self.path)) as db:
+                        rows=db.execute('SELECT snapshot FROM provider_selections').fetchall()
+                    self.assertEqual([json.loads(row[0]) for row in rows],[saved])
+                finally:
+                    self.service.profiles=original_profiles;self.metadata.endpoint=deepcopy(original_endpoint)
+        self.assertEqual(self.post('select',data),saved)
 
 
 class OpenRouterLocalTests(unittest.TestCase):

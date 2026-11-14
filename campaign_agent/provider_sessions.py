@@ -242,18 +242,31 @@ class ProviderSessions:
         if not existing and (entry is None or entry['catalogue_revision']!=data['catalogue_revision']
                 or not any(r['id']==data['model_id'] for r in entry['models'])):
             raise ProviderError('selection_stale')
-        self.metadata.validate_key(credential)
         # An admitted operation is durable, but neither its former cache entry nor
         # its old compatibility result supplies current selection authority.
-        current_models=self.metadata.models(credential)
-        current_rows=self._safe(normalize(current_models,self.profiles,now=self.clock()),credential)
-        current=next((row for row in current_rows if row['id']==data['model_id']),None)
-        raw=next((row for row in current_models if row.get('id')==data['model_id']),None)
-        if current is None or current['state']=='blocked' or raw is None or not compatible_model(raw,data['profile']):
-            raise ProviderError('route_unqualified')
-        if not existing and current!=next(row for row in entry['models'] if row['id']==data['model_id']):
-            raise ProviderError('selection_stale')
-        selected=select_endpoint(data['model_id'],data['profile'],self.metadata.endpoints(credential,data['model_id']),self.profiles,self.clock())
+        # Share /models' foreground gate; never queue a credential-bearing worker.
+        self.cache.begin(ident)
+        try:
+            self.metadata.validate_key(credential)
+            current_models=self.metadata.models(credential)
+            current_rows=self._safe(normalize(current_models,self.profiles,now=self.clock()),credential)
+            current=next((row for row in current_rows if row['id']==data['model_id']),None)
+            raw=next((row for row in current_models if row.get('id')==data['model_id']),None)
+            if current is None or current['state']=='blocked' or raw is None or not compatible_model(raw,data['profile']):
+                self.cache.invalidate(ident)
+                raise ProviderError('route_unqualified')
+            cached=next((row for row in entry['models'] if row['id']==data['model_id']),None) if entry else None
+            if entry is not None and current!=cached:
+                self.cache.invalidate(ident)
+                if not existing:
+                    raise ProviderError('selection_stale')
+        finally:
+            self.cache.finish(ident)
+        try:
+            selected=select_endpoint(data['model_id'],data['profile'],self.metadata.endpoints(credential,data['model_id']),self.profiles,self.clock())
+        except ProviderError as error:
+            if error.code=='route_unqualified':self.cache.invalidate(ident)
+            raise
         rates=selected['prices']
         maximum=price(rates['prompt'])*selected['max_input_tokens']+price(rates['completion'])*selected['max_output_tokens']+price(rates.get('request','0'))
         if maximum>price(data['max_run_cost_usd']):
@@ -263,6 +276,7 @@ class ProviderSessions:
         if existing:
             old=json.loads(existing[1])
             if {k:v for k,v in old.items() if k!='selection_id'}!=selected:
+                self.cache.invalidate(ident)
                 raise ProviderError('selection_stale')
         permits=self._authorize(context,access)
         with closing(sqlite3.connect(self.path)) as db,db:
@@ -271,12 +285,14 @@ class ProviderSessions:
             found=db.execute('SELECT request_hash,snapshot FROM provider_selections WHERE connection_id=? AND operation_id=?',
                              (ident,data['operation_id'])).fetchone()
             if selected['charging_profile_expires_at']<=self.clock():
+                self.cache.invalidate(ident)
                 raise ProviderError('route_unqualified')
             if found:
                 if found[0]!=request_hash:
                     raise ProviderError('operation_conflict')
                 saved=json.loads(found[1])
                 if {k:v for k,v in saved.items() if k!='selection_id'}!=selected:
+                    self.cache.invalidate(ident)
                     raise ProviderError('selection_stale')
                 return saved
             if existing:
