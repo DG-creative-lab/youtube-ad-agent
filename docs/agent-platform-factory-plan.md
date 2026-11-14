@@ -236,6 +236,13 @@ an explicit product policy; initial rule is fail closed pending reauthorization.
 
 ## 6. OpenRouter and user-funded inference
 
+The proposed [foreground session contract v1](openrouter-session-contract.md)
+resolves the choices in this section for issue #54: memory-only raw key,
+request-scoped server use, concrete API/binding, qualified charging profiles and
+serial backend/admission/UI ownership. It supersedes this section's optional
+sessionStorage-key suggestion for that implementation; no runtime is changed by
+the contract proposal.
+
 ### What to reuse from iwoca
 
 Read comparison sources: `iwoca/frontend/src/openrouter-session.ts`,
