@@ -100,6 +100,12 @@ data, never an endpoint or price selection. POST responses and secret-bearing
 requests use `Cache-Control: no-store`; no service-worker cache. Raw provider
 responses and URLs in errors are not forwarded.
 
+Connect, models, select, reconcile and inference commands require current
+`youtube:campaign.read` and `youtube:agent.run` decisions, including cache hits and
+idempotent admission retries. Native resource ownership and original actor/session
+binding are checked independently. Disconnect's local-session-only exception is
+limited to revocation; it cannot read history, metadata or authorize inference.
+
 | Command | Exact JSON body | Result / rule |
 | --- | --- | --- |
 | `POST /api/openrouter/connect` | `operation_id`, `tab_id`; optional `resume_connection_id` | Key header required. Current read+agent.run access, bounded key-introspection GET, then atomic scoped admission. Returns `schema_version:1`, `connection_id`, `expires_at`, `state:"connected"`; no key or account data. Replay of identical scope/key/operation returns the original connection; different inputs conflict. Replacement explicitly disconnects first. |
@@ -108,7 +114,23 @@ responses and URLs in errors are not forwarded.
 | `POST /api/openrouter/disconnect` | `connection_id`, `tab_id` | No key. Owner/session-local revocation is idempotent; returns `disconnected:true`. Wrong owner rejected without provider I/O. |
 | `POST /api/openrouter/reconcile` | `run_id`, `inference_position` | Key header required. Accounting only for an owned ledger row with a saved generation ID; never obtains/replays completion text. A current authorized session in the original actor/native scope may prove the original key against an expired connection verifier for this purpose alone; it cannot re-enable that connection or inference. Returns `state`, `reserved_cost_usd`, `actual_cost_usd` (null if unknown). |
 | Existing `POST /api/agent/placements` | Existing fields plus `provider_selection_id` only for OpenRouter | Key header required for OpenRouter; selection resolves connection/scope/model/budget. Existing run/session/catalog IDs, `after_message` and `draft_permission` retain their meanings. Supplied `model` must equal the selection. No browser actor/account/price/endpoint selectors. |
-| Existing `POST /api/agent/run` | Existing `run_id` | Key header only if the next step needs a new inference. Resolve original binding/selection from run; do not accept replacements. Reads and receipt-only recovery need no key. Structured review/draft command routes follow the same optional selection reference rule. |
+| Existing `POST /api/agent/next-test` | Required `campaign_id`, `revision`, `fingerprint`, `review_id`; see inference fields below | Calls existing `start_next_test`; original approved package/review/correction checks remain authoritative. |
+| Existing `POST /api/agent/instruction-review` | Required `test_id`; see inference fields below | Calls existing `start_instruction_review`; original experiment/evidence checks remain authoritative. |
+| Existing `POST /api/agent/experiment-next-test` | Required `test_id`, `review_id`; see inference fields below | Calls existing `start_experiment_next_test`; original assessment/next-test eligibility checks remain authoritative. |
+| Existing `POST /api/agent/run` | Existing `run_id` | Applies to planner and all three structured routes. Key header only if the next step needs a new inference. Resolve original binding/selection from run; do not accept replacement selection, model, mode or operation ID. Reads and receipt-only recovery need no key. |
+
+For the three structured start routes, both hosted and local handlers use this
+same additive field contract. Retain existing offline payloads: absent `mode`
+means `offline`; optional `operation_id` follows the existing replay rules. Reject
+provider selection/model/key fields in offline mode. In `openrouter` mode require
+`mode:"openrouter"`, `operation_id` and `provider_selection_id`, plus the key header;
+`model` is optional compatibility input and, if supplied, must match the resolved
+selection. Selection profile must be `structured_review` with the route's actual
+assessment or instruction-component schema pinned in the run; a planner selection
+cannot substitute. The server supplies the existing command's model/settings from
+that selection, never an environment default. Identity comes from the connection
+and authenticated context, not `campaign_id` or `test_id`; native lookup must prove
+those existing references belong to the same scope before admission.
 
 `operation_id` and `tab_id` use the existing 32-lowercase-hex UUID convention;
 connection/selection IDs are 64 lowercase hex. Model IDs must exactly match a
@@ -117,6 +139,12 @@ segments when building the fixed upstream metadata path. No arbitrary hostname,
 redirect, model alias/router, model-fallback array, plugin or provider header.
 `search` is at most 100 characters; maximum 20 returned rows; opaque cursor is
 bound to this connection/scope/revision and expires with its catalogue.
+
+Price and budget fields are nonnegative finite base-10 decimal strings, not JSON
+floats; reject NaN/infinity, negative or unbounded-precision values. Internal cost
+arithmetic uses exact decimals and rounds the final reservation upward to integer
+USD nanodollars; browser display rounding never affects admission. `revision` and
+`inference_position` remain bounded integers under their owning command's rules.
 
 Failures use `{error, code, retryable}` with sanitized fixed messages: 400
 `invalid_request`; 401 `sign_in_required`; 403 `access_denied` or
@@ -150,7 +178,10 @@ models; oversized/incomplete data fails closed. Authenticated projections are
 cached only under full connection/scope, never globally shared. A request refreshes
 the chosen endpoint before every inference; a UI cache cannot authorize dispatch.
 At most one catalogue refresh per connection at a time; at most two endpoint
-detail reads for one selection. No N-provider requests for every displayed row.
+detail reads per individual selection or inference-preflight HTTP command. This
+is not a lifetime quota on a selection: each of up to eight inference steps gets
+its own mandatory fresh endpoint read within that command's bound. No N-provider
+requests for every displayed row.
 
 Select text-input/text-output chat routes whose endpoint metadata and reviewed
 profile support the actual request: tools, required tool choice, disabled parallel
@@ -218,6 +249,13 @@ dialogue except legitimate task context; no credential verifier in snapshots.
    `valid_until` derived without extending the adapter's verified lifetime.
    It is constructed only by the access adapter, never serialized to browser,
    database, model or a background job. No cached permit crosses commands.
+   Collect a permit set for every capability the actual step and nested command
+   requires, including campaign read, review/draft and capability-reply projection;
+   an agent.run permit alone cannot satisfy those checks. Existing nested `require`
+   calls consume only matching still-valid command permits in the transaction and
+   fail closed if absent. They cannot invoke the remote authority under the lock
+   or fall back to a permissive local policy. This seam covers main-loop and all
+   three structured-command commit paths under the #36 owner.
 2. In one short transaction, verify the permit is still valid for the exact
    command/native identity; recheck local session, connection/revocation, current
    run/revision/supersession and selection hash. Reserve call and worst-case cost
@@ -275,6 +313,7 @@ application login. A provider revocation race is not a locally preventable denia
 | Sentinel raw credential and internal verifier through all sinks | Raw key absent from durable data/backups, prompts/tool arguments, client/server logs/traces/errors, transcripts and exports; key only in permitted transport header. Internal verifier exists only in private connection storage/operator backups and is absent from client/model/log/user-export projections. |
 | Browser connect/select/type/send/disconnect/replace/reload/scope change | Desktop+narrow+keyboard; no completion from connection/model selection; key absent from all browser persistence, restored selection never silently reconnects; draft grants/approval controls preserved. |
 | Qualified vs candidate/free/paid/unknown-charge routes | Only current qualified profiles dispatch within selected budget; all others show actionable unavailable reasons. No live-readiness inference from fake transport. |
+| Eight planner turns and the three structured start/resume routes | Every turn performs its bounded current metadata preflight, without exhausting a lifetime selection quota. Hosted/local field sets agree, mismatched mode/model/profile/selection is rejected, receipts recover under original binding and nested authority checks do no network I/O under a write transaction. |
 
 Implement serially; freeze exact base/head and exclusive files for each assignment:
 
