@@ -68,6 +68,7 @@ class AgentRuntime:
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
                  web=False):
         operator.require_brand(context.scope)
+        self.foreground = None
         self.operator = operator
         self.scope = context.scope
         self.path = Path(path)
@@ -144,35 +145,37 @@ class AgentRuntime:
         return run_id
 
     def start_next_test(self, campaign_id, revision, fingerprint, review_id, *,
-                        mode="offline", model=None, operation_id=None):
+                        mode="offline", model=None, operation_id=None, provider_selection_id=None):
         self.drafts._package_scope(campaign_id, revision)
         if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
                for value in (fingerprint, review_id)):
             raise ValueError("Choose a valid performance review.")
         source = {"campaign_id": campaign_id, "revision": revision,
                   "fingerprint": fingerprint, "review_id": review_id}
-        return self._start_test_preparation(source, mode=mode, model=model, operation_id=operation_id)
+        return self._start_test_preparation(source, mode=mode, model=model, operation_id=operation_id,provider_selection_id=provider_selection_id)
 
-    def start_experiment_next_test(self, test_id, review_id, *, mode="offline", model=None, operation_id=None):
+    def start_experiment_next_test(self, test_id, review_id, *, mode="offline", model=None, operation_id=None, provider_selection_id=None):
         if (not isinstance(test_id, str) or not RUN_ID.fullmatch(test_id)
                 or not isinstance(review_id, str) or not re.fullmatch(r"[0-9a-f]{64}", review_id)):
             raise ValueError("Choose a valid instruction-test assessment.")
         return self._start_test_preparation({"test_id": test_id, "review_id": review_id},
-                                            mode=mode, model=model, operation_id=operation_id)
+                                            mode=mode, model=model, operation_id=operation_id,provider_selection_id=provider_selection_id)
 
     def _next_test_context(self, db, source):
         if "test_id" in source:
             return self.instruction_tests.next_test_context(db, **source)
         return self.performance.instruction_test_context(db, **source)
 
-    def _start_test_preparation(self, source, *, mode, model, operation_id):
+    def _start_test_preparation(self, source, *, mode, model, operation_id,provider_selection_id=None):
         self.require("youtube:agent.run")
         self.require("youtube:campaign.read")
         if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
             raise ValueError("Choose offline or OpenRouter drafting.")
         if mode == "offline" and model is not None:
             raise ValueError("Offline drafts do not use provider settings.")
-        settings = {"mode": "offline"} if mode == "offline" else self.openrouter_drafts.settings(model)
+        if provider_selection_id is not None and (mode!='openrouter' or self.foreground is None): raise ValueError('Use a provider selection only for OpenRouter.')
+        settings = ({"mode":"offline"} if mode=='offline' else
+            self.foreground.settings(provider_selection_id,model,'structured_review',self.openrouter_drafts.prompt_version) if provider_selection_id is not None else self.openrouter_drafts.settings(model))
         if mode == "openrouter" and operation_id is None:
             raise ValueError("Use a valid drafting operation ID.")
         identity = {"client": self.scope.client_id, "brand": self.scope.brand_id,
@@ -215,16 +218,18 @@ class AgentRuntime:
             raise PermissionError("The run is unavailable to this operator.")
         return row
 
-    def start_instruction_review(self, test_id, *, mode="offline", model=None, operation_id=None):
+    def start_instruction_review(self, test_id, *, mode="offline", model=None, operation_id=None, provider_selection_id=None):
         self.require("youtube:agent.run")
         self.require("youtube:campaign.read")
         if not isinstance(mode, str) or mode not in {"offline", "openrouter"}:
             raise ValueError("Choose offline or OpenRouter reviews.")
         if mode == "offline" and model is not None:
             raise ValueError("Offline reviews do not use provider settings.")
+        if provider_selection_id is not None and (mode!='openrouter' or self.foreground is None): raise ValueError('Use a provider selection only for OpenRouter.')
         settings = {"mode": "offline"}
         if mode == "openrouter":
-            settings = self.openrouter.settings(model)
+            settings = (self.foreground.settings(provider_selection_id,model,'structured_review',self.openrouter.prompt_version)
+                        if provider_selection_id is not None and self.foreground is not None else self.openrouter.settings(model))
             if operation_id is None:
                 raise ValueError("Use a valid review operation ID.")
         if operation_id is not None:
@@ -269,6 +274,7 @@ class AgentRuntime:
         return run_id
 
     def resume(self, run_id, max_steps=4):
+        if self.foreground: self.foreground.use_run(run_id)
         self.require("youtube:agent.run")
         if type(max_steps) is not int or not 0 <= max_steps <= 4:
             raise ValueError("The step budget must be between zero and four.")
@@ -278,9 +284,11 @@ class AgentRuntime:
             self.require("youtube:campaign.read")
             if self._resume_openrouter(run_id):
                 continue
+            if self.foreground: self.foreground.before_commit(self.foreground.settings_bound)
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
                 run = self._owned_run(db, run_id)
+                if self.foreground and run[1]!='running': return self.read(run_id)
                 history = [
                     {"tool": tool, "result": json.loads(result)}
                     for tool, result in db.execute(
@@ -303,6 +311,7 @@ class AgentRuntime:
                 if tool in {"finish", "finish_test", "finish_test_review", "wait_for_evidence"}:
                     db.execute("UPDATE agent_runs SET status = ? WHERE id = ?",
                                ("waiting_for_evidence" if tool == "wait_for_evidence" else "ready_for_review", run_id))
+        if self.foreground: self.foreground.policy.refresh()
         return self.read(run_id)
 
     def read(self, run_id):
@@ -332,7 +341,8 @@ class AgentRuntime:
         receipt = None
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            request, _ = self._owned_run(db, run_id)
+            request, status = self._owned_run(db, run_id)
+            if status!='running': return False
             row = db.execute(
                 "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
             ).fetchone()
@@ -349,7 +359,7 @@ class AgentRuntime:
             adapter = self.openrouter if request == REVIEW_TEST_REQUEST else self.openrouter_drafts
             if row[1] == "received":
                 receipt = json.loads(row[2])
-            elif row[1] == "pending":
+            elif row[1] == "pending" or settings.get('foreground'):
                 adapter.require_available(settings)
                 db.execute("UPDATE agent_review_inference SET state = 'requested' WHERE run_id = ?", (run_id,))
             else:
@@ -368,15 +378,16 @@ class AgentRuntime:
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("UPDATE agent_review_inference SET state = 'received', receipt = ? WHERE run_id = ?",
                            (json.dumps(receipt), run_id))
+        if self.foreground: self.foreground.before_commit(settings)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             self.require("youtube:agent.run")
-            self._owned_run(db, run_id)
+            if self._owned_run(db, run_id)[1]!='running': return True
             if db.execute("SELECT 1 FROM agent_steps WHERE run_id = ? AND position = 1", (run_id,)).fetchone():
                 return True
             self._inference_context(db, request, source)
             usage = receipt["inference"]["usage"]
-            if ((usage["cost_usd"] is not None and usage["cost_usd"] > 0)
+            if ((not settings.get('foreground') and usage["cost_usd"] is not None and usage["cost_usd"] > 0)
                     or (usage["output_tokens"] is not None and usage["output_tokens"] > settings["max_output_tokens"])):
                 raise ReviewInferenceError("The provider reported usage beyond the inference limits. Its receipt was retained.")
             try:

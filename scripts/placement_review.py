@@ -79,7 +79,7 @@ def youtube_search(key, query, page):
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
           openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
-          provider_metadata=None, provider_profiles=()):
+          provider_metadata=None, provider_profiles=(),provider_completion_transport=None):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -168,7 +168,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if self.path.startswith('/api/openrouter/'):
                 self.post_provider()
                 return
-            if self.headers.get('X-OpenRouter-Key') is not None:
+            if self.headers.get('X-OpenRouter-Key') is not None and self.path not in {'/api/agent/run','/api/agent/placements','/api/agent/next-test','/api/agent/instruction-review','/api/agent/experiment-next-test'}:
                 self.send(400,{'error':'Use credential headers only on provider commands.'})
                 return
             if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review",
@@ -362,46 +362,24 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Send a valid agent request."})
                 return
             try:
-                data = json.loads(self.rfile.read(int(length)))
-                if not isinstance(data, dict):
-                    raise ValueError("Invalid agent request.")
-                if self.path == "/api/agent/placements":
-                    fields = {"request", "model", "session_id", "run_id", "catalog_id"}
-                    if not fields <= set(data) or set(data) - fields - {'after_message', 'draft_permission'}:
-                        raise ValueError("Supply a request, main model, conversation and catalog.")
-                    run_id = agent.planner.start(**data)
-                    result = agent.read(run_id)
-                elif self.path == "/api/agent/experiment-next-test":
-                    fields = {"test_id", "review_id"}
-                    if set(data) not in (fields, fields | {"mode", "operation_id"},
-                                         fields | {"mode", "model", "operation_id"}):
-                        raise ValueError("Choose a saved instruction-test assessment.")
-                    run_id = agent.start_experiment_next_test(**data)
-                    result = agent.read(run_id)
-                elif self.path == "/api/agent/instruction-review":
-                    if set(data) not in ({"test_id"}, {"test_id", "mode", "operation_id"},
-                                         {"test_id", "mode", "model", "operation_id"}):
-                        raise ValueError("Choose an instruction test.")
-                    run_id = agent.start_instruction_review(**data)
-                    result = agent.read(run_id)
-                elif self.path == "/api/agent/next-test":
-                    fields = {"campaign_id", "revision", "fingerprint", "review_id"}
-                    if set(data) not in (fields, fields | {"mode", "operation_id"},
-                                         fields | {"mode", "model", "operation_id"}):
-                        raise ValueError("Choose a valid performance review.")
-                    run_id = agent.start_next_test(**data)
-                    result = agent.read(run_id)
+                data=parse_command(self.rfile.read(int(length)))
+                from campaign_agent.foreground_inference import ForegroundInference,dispatch_agent
+                runtime=AgentRuntime(draft_path,media_dir=drafts.media_dir,reporting=reporting,demo_scenario=demo_scenario,web=True)
+                command={'method':'POST','path':self.path,'query':{},'body':data}
+                context=ProviderContext(runtime.operator.id,runtime.drafts.context,runtime.drafts.campaign_id,
+                    hashlib.sha256(operator_token.encode()).hexdigest(),time()+3600,command,
+                    lambda:runtime.operator.require_brand(runtime.drafts.context.scope))
+                values=self.headers.get_all('X-OpenRouter-Key',[]) if hasattr(self.headers,'get_all') else ([self.headers['X-OpenRouter-Key']] if 'X-OpenRouter-Key' in self.headers else [])
+                foreground=ForegroundInference(providers,context,runtime.drafts.access,values,completion_transport=provider_completion_transport)
+                foreground.attach(runtime)
+                if set(data)=={'run_id','request'} and self.path=='/api/agent/run':
+                    if foreground.credential: raise ProviderError('invalid_request')
+                    runtime.start(data['request'],run_id=data['run_id']);result=runtime.read(data['run_id'])
                 else:
-                    run_id = data.get("run_id")
-                    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
-                        raise ValueError("Invalid run ID.")
-                    if set(data) == {"run_id", "request"}:
-                        agent.start(data["request"], run_id=run_id)
-                        result = agent.read(run_id)
-                    elif set(data) == {"run_id"}:
-                        result = agent.resume(run_id, max_steps=1)
-                    else:
-                        raise ValueError("Invalid agent request.")
+                    try: result=dispatch_agent(runtime,self.path,data)
+                    finally: foreground.close()
+            except ProviderError as exc:
+                self.send(exc.status,exc.response())
             except PackageConflict as exc:
                 self.send(409, {"error": str(exc)})
             except ReviewInferenceError as exc:

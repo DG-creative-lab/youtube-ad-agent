@@ -11,6 +11,7 @@ class ProviderError(RuntimeError):
         'credential_mismatch': (403,'Use the original connection and credential.'),
         'connection_expired': (409,'Reconnect with a new operation; this connection is inactive.'),
         'waiting_for_credentials': (409,'Supply your OpenRouter key for this foreground request.'),
+        'inference_outcome_unknown': (409,'This inference may have been sent. Its original reservation is retained.'),
         'operation_conflict': (409,'This operation already has different inputs.'),
         'selection_stale': (409,'Refresh the catalogue and choose a model again.'),
         'route_unqualified': (409,'No qualified route is available for this selection.'),

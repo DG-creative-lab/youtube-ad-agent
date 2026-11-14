@@ -52,9 +52,10 @@ def fields(data, required, optional=()):
 
 class HostedApplication:
     def __init__(self, path, sessions, client, assets, *, staff_origin, viewer_origin,
-                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=()):
+                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=(), provider_completion_transport=None):
         self.path, self.sessions, self.client, self.assets = path, sessions, client, assets
         self.staff_origin, self.viewer_origin, self.application_id = staff_origin, viewer_origin, application_id
+        self.provider_completion_transport=provider_completion_transport
         self.fixture_login = fixture_login
         self.fixture = fixture_login is not None
         if self.fixture and provider_metadata is not None and not getattr(provider_metadata,'synthetic',False):
@@ -193,6 +194,21 @@ class HostedApplication:
             context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,session_digest,row[6],command,
                                     lambda:self.sessions.local(token))
             result=self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,runtime.drafts.access)
+            return JSONResponse(result),csrf
+        agent_paths={'/api/agent/placements','/api/agent/next-test','/api/agent/instruction-review','/api/agent/experiment-next-test','/api/agent/run'}
+        if method=='POST' and path in agent_paths:
+            from .foreground_inference import ForegroundInference,dispatch_agent
+            row=self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),row[5]): raise ProviderError('access_denied')
+            _,campaign,csrf=self.sessions.current(token)
+            command={'method':method,'path':path,'query':dict(request.query_params),'body':data}
+            if request.query_params: raise ProviderError('invalid_request')
+            runtime,_=self.runtime(token,campaign,command)
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,hashlib.sha256(token.encode()).hexdigest(),row[6],command,lambda:self.sessions.local(token))
+            foreground=ForegroundInference(self.provider_sessions,context,runtime.drafts.access,request.headers.getlist('x-openrouter-key'),completion_transport=self.provider_completion_transport)
+            foreground.attach(runtime)
+            try: result=dispatch_agent(runtime,path,data)
+            finally: foreground.close()
             return JSONResponse(result),csrf
         if request.headers.getlist('x-openrouter-key'):
             raise ProviderError('invalid_request')

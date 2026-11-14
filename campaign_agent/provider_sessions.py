@@ -134,13 +134,18 @@ class ProviderSessions:
         return row
 
     def _safe(self,value,credential):
-        def contains(v):
+        def contains(v,depth=0):
             if isinstance(v,str):
-                return credential.key in v
+                if credential.key in v: return True
+                if depth<4:
+                    try: decoded=json.loads(v)
+                    except (ValueError,TypeError,RecursionError): return False
+                    if decoded!=v: return contains(decoded,depth+1)
+                return False
             if isinstance(v,dict):
-                return any(contains(k) or contains(item) for k,item in v.items())
+                return any(contains(k,depth+1) or contains(item,depth+1) for k,item in v.items())
             if isinstance(v,(list,tuple)):
-                return any(contains(item) for item in v)
+                return any(contains(item,depth+1) for item in v)
             return False
         if contains(value):
             raise ProviderError('catalogue_unavailable')
@@ -154,9 +159,12 @@ class ProviderSessions:
         try:
             if action=='disconnect':
                 return self.disconnect(data,context)
-            permits=self._authorize(context,access)
             if action=='reconcile':
-                raise ProviderError('route_unqualified')
+                from .foreground_inference import ForegroundInference
+                foreground=ForegroundInference(self,context,access,key_values)
+                try: return foreground.reconcile(data)
+                finally: foreground.close()
+            permits=self._authorize(context,access)
             if self.metadata is None:
                 raise ProviderError('catalogue_unavailable')
             return getattr(self,action)(data,credential,context,access,permits)

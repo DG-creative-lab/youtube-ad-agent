@@ -422,3 +422,59 @@ activation gate; no background timeout worker retains a key after the foreground
 request. Reconciliation, inference cost/call admission and new completion dispatch
 remain A2b; account controls and browser-memory handling remain A2c. No live
 provider/identity/deployment claim follows from the fake-transport tests.
+
+## A2b implementation checkpoint
+
+Foreground planner and all three structured start/resume commands now consume the
+original server-owned selection through `ForegroundInference`. Both HTTP surfaces
+use the same strict additive field dispatcher. Request-local raw credentials are
+cleared from the runtime/adapters at command exit; saved settings contain no key
+or verifier. Model context excludes internal connection, selection, routing and
+cost metadata. The shared encoder uses the selected provider route, privacy and
+price policy and its qualified output-cap parameter, rather than legacy defaults.
+
+Append-only migration 4 adds `inference_ledger`, uniquely keyed by run and inference
+position. The ledger extends the existing planner/structured semantic receipt
+paths; it does not introduce a worker runtime. Admission uses a short SQLite
+transaction, current command permits and native scope/revision, original connection
+proof, and integer nanodollar ceilings. Run, actor/installation UTC-day and
+tenant/installation UTC-day limits include unresolved reserves from prior days.
+Free calls still consume concurrency and start-rate allowances. Queries use
+indexed scoped aggregates, including separate old unresolved and current-day
+accounting, rather than loading installation history into Python.
+
+Reservation and dispatch marker commit separately. A failed marker transaction
+can release its provably unsent reservation. A possibly sent request retains its
+claim across failure/restart and is never automatically dispatched again. A
+bounded provider response stores sanitized generation/usage and its raw semantic
+receipt before parsing the model tool/schema. Invalid model output or a complete
+provider error can therefore retain accounting without producing an effect.
+Unknown usage retains the reservation; unsupported numeric exponents remain
+unknown without unbounded decimal expansion. Representable actual cost is rounded
+up exactly and retained even beyond SQLite's signed-integer range; an overrun or
+reported token-bound violation freezes further admission for the affected scope.
+
+The runtime still owns semantic receipts and transactional tool/draft commits.
+Received receipts recover without a key or metadata call. Permit sets are
+collected outside locks for the six grants used by the agent and nested command /
+capability projections; missing optional grants remain denied. Nested checks
+consume command/session/native-bound permits locally. After provider work, fresh
+permits and local connection/revocation/native checks fence domain commits.
+Terminal or superseded structured/planner runs cannot save late effects. A
+successful own draft is followed by a new outside-lock access projection before
+reading the response at its new revision.
+
+Accounting-only reconciliation proves the original key/verifier and current
+actor/native scope, allowing the documented expired original-session/connection
+exception only for saved generation accounting. It never obtains completion
+content or re-enables inference. Numeric accounting alone does not release an
+unresolved lost-call concurrency claim. Backup and restore retain ledger rows,
+unknown reserves and historical receipts while revoking connection/session
+authority; pre-ledger requested rows remain uncertain under their existing paths.
+
+This is offline implementation evidence only. Production compositions still
+install neither metadata nor completion transport/qualified profiles from a key
+or environment variable. Exercising the new inference path requires explicit
+transport injection, with authored metadata/profiles for tests. The real transport
+hard deadline, ingress redaction, identity and live route/charge qualification
+gates remain open. A2c account/composer UI and unattended execution are separate.
