@@ -120,6 +120,10 @@ class AgentRuntime:
             raise PermissionError("The run actor changed. Resolve a new application context.")
         self.drafts.require(capability)
 
+    def capabilities(self):
+        from .capabilities import catalogue
+        return catalogue(self)
+
     def start(self, request, *, run_id=None):
         self.require("youtube:agent.run")
         if request != DEMO_REQUEST:

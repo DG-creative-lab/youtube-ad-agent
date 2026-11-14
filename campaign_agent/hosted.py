@@ -218,6 +218,9 @@ class HostedApplication:
         if path == '/api/campaign':
             fields(q, set(), {'revision'})
             return r.drafts.read(int(q['revision']) if 'revision' in q else None)
+        if path == '/api/agent/capabilities':
+            fields(q, set())
+            return r.capabilities()
         if path == '/api/agent/conversations':
             return r.planner.conversations.list()
         if path in {'/api/agent/conversation', '/api/agent/run'}:
