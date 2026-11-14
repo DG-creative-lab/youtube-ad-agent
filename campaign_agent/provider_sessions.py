@@ -134,21 +134,34 @@ class ProviderSessions:
         return row
 
     def _safe(self,value,credential):
-        def contains(v,depth=0):
-            if isinstance(v,str):
-                if credential.key in v: return True
-                if depth<4:
-                    try: decoded=json.loads(v)
-                    except (ValueError,TypeError,RecursionError): return False
-                    if decoded!=v: return contains(decoded,depth+1)
-                return False
-            if isinstance(v,dict):
-                return any(contains(k,depth+1) or contains(item,depth+1) for k,item in v.items())
-            if isinstance(v,(list,tuple)):
-                return any(contains(item,depth+1) for item in v)
-            return False
-        if contains(value):
-            raise ProviderError('catalogue_unavailable')
+        """Check bounded structured data and JSON embedded in strings before sinks.
+
+        Structural nesting and embedded JSON decoding have separate bounds. A
+        tool-arguments string sits deep in a completion, but still needs its own
+        decoding checks. Reaching either bound fails closed rather than declaring
+        the unexamined content safe.
+        """
+        pending=[(value,0,0)];nodes=0;characters=0
+        while pending:
+            current,depth,decodings=pending.pop();nodes+=1
+            if depth>64 or nodes>100_000:
+                raise ProviderError('catalogue_unavailable')
+            if isinstance(current,str):
+                characters+=len(current)
+                if characters>8_000_000 or credential.key in current:
+                    raise ProviderError('catalogue_unavailable')
+                if current.lstrip().startswith(('{','[','"')):
+                    try: decoded=json.loads(current)
+                    except (ValueError,TypeError): continue
+                    except RecursionError:
+                        raise ProviderError('catalogue_unavailable') from None
+                    if decoded!=current:
+                        if decodings>=8: raise ProviderError('catalogue_unavailable')
+                        pending.append((decoded,depth+1,decodings+1))
+            elif isinstance(current,dict):
+                pending.extend((item,depth+1,decodings) for pair in current.items() for item in pair)
+            elif isinstance(current,(list,tuple)):
+                pending.extend((item,depth+1,decodings) for item in current)
         return value
 
     def command(self,action,data,key_values,context,access):

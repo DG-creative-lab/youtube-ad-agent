@@ -404,6 +404,117 @@ class ForegroundHttpTests(unittest.TestCase):
             self.assertNotIn(self.key,'\n'.join(db.iterdump()))
 
 
+    def test_escaped_nested_key_echo_retains_cost_but_no_semantic_secret_or_redispatch(self):
+        from campaign_agent.recovery import backup_store
+        run=self.start()
+        escaped=''.join('\\u%04x'%ord(c) for c in self.key)
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments']='{"topic":"'+escaped+'"}'
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(len(self.calls),1)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT state,actual_cost FROM inference_ledger').fetchone(),('settled','0'))
+            self.assertNotIn(self.key,'\n'.join(db.iterdump()))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM agent_steps WHERE run_id=?',(run,)).fetchone()[0],0)
+            receipt=json.loads(db.execute('SELECT receipt FROM inference_ledger').fetchone()[0])
+            self.assertIsNone(receipt['message'])
+        before=len(self.calls)
+        self.assertNotEqual(self.post('/api/agent/run',{'run_id':run},key=False).status_code,200)
+        self.assertEqual(len(self.calls),before)
+        backup_store(self.path,self.path.with_suffix('.assets'),self.path.parent/'echo-backup')
+        with closing(sqlite3.connect(self.path.parent/'echo-backup/state.sqlite3')) as db:
+            self.assertNotIn(self.key,'\n'.join(db.iterdump()))
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments']='{"topic":"'+''.join('\\u%04x'%ord(c) for c in 'campaign_summary')+'"}'
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['status'],'answered')
+        self.assertEqual(len(self.calls),2)
+
+    def test_known_header_key_in_command_data_is_denied_before_any_start_mutation(self):
+        from campaign_agent.recovery import backup_store
+        def snapshot():
+            with closing(sqlite3.connect(self.path)) as db:return '\n'.join(db.iterdump())
+        before=snapshot()
+        data=dict(request='My connection key is '+self.key,model='fixture/tool-model',session_id=uuid4().hex,
+                  run_id=uuid4().hex,catalog_id=self.catalog,provider_selection_id=self.selection['selection_id'])
+        for text in (data['request'],'Quoted key: '+json.dumps(self.key),
+                     '{"key":"'+''.join('\\u%04x'%ord(c) for c in self.key)+'"}'):
+            response=self.post('/api/agent/placements',{**data,'request':text})
+            self.assertEqual(response.status_code,400,response.text)
+            self.assertNotIn(self.key,response.text)
+            self.assertEqual(snapshot(),before)
+        self.assertEqual(self.calls,[])
+        backup_store(self.path,self.path.with_suffix('.assets'),self.path.parent/'input-backup')
+        with closing(sqlite3.connect(self.path.parent/'input-backup/state.sqlite3')) as db:self.assertNotIn(self.key,'\n'.join(db.iterdump()))
+        # Ordinary escaped text remains a valid user request.
+        data['request']='Summarise the campaign: {"note":"a \\"quoted\\" title"}'
+        response=self.post('/api/agent/placements',data);self.assertEqual(response.status_code,200,response.text)
+        response=self.post('/api/agent/run',{'run_id':data['run_id']});self.assertEqual(response.status_code,200,response.text)
+
+    def test_profile_expiry_during_authority_renewal_or_marker_fences_new_dispatch_only(self):
+        from dataclasses import replace
+        from time import time
+        from campaign_agent.inference_ledger import InferenceLedger
+        initial=time();now=[initial]
+        self.app.provider_sessions.clock=lambda:now[0]
+        profile=replace(self.meta.profiles[0],expires_at=initial+10)
+        self.app.provider_sessions.profiles=(profile,);self.selection=self.select()
+        run=self.start();self.meta.requests.clear()
+        def expire_after_endpoint(result):
+            if 'endpoints' in self.meta.requests:now[0]=initial+11
+            return result
+        self.app.client.result_filter=expire_after_endpoint
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.json()['code'],'route_unqualified')
+        self.assertEqual(self.calls,[]);self.assertEqual(self.ledger(),[])
+        self.app.client.result_filter=lambda result:result
+        now[0]=initial
+        reserve=InferenceLedger.reserve
+        def expire_after_reserve(ledger,*args,**kwargs):
+            result=reserve(ledger,*args,**kwargs);now[0]=initial+11;return result
+        with patch.object(InferenceLedger,'reserve',expire_after_reserve):
+            response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(self.calls,[])
+        # An expiry inside the reservation transaction rolls back admission.
+        self.assertEqual(self.ledger(),[])
+        now[0]=initial
+        dispatch=InferenceLedger.dispatch
+        def expire_before_marker(ledger,*args,**kwargs):
+            now[0]=initial+11
+            return dispatch(ledger,*args,**kwargs)
+        with patch.object(InferenceLedger,'dispatch',expire_before_marker):
+            response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(self.ledger()[0][:4],('released_unsent',0,None,0))
+        self.assertEqual(self.calls,[])
+        now[0]=initial
+        # Receipt-only recovery after expiry still consumes its original result.
+        from campaign_agent.agent.planner import PlacementAgent
+        with patch.object(PlacementAgent,'_tool',side_effect=sqlite3.OperationalError('before semantic save')):
+            self.assertNotEqual(self.post('/api/agent/run',{'run_id':run}).status_code,200)
+        self.assertEqual(len(self.calls),1)
+        now[0]=initial+11;self.meta.requests.clear()
+        response=self.post('/api/agent/run',{'run_id':run},key=False)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.meta.requests,[]);self.assertEqual(len(self.calls),1)
+
+
+    def test_unsupported_deep_or_repeated_embedded_json_fails_closed(self):
+        from campaign_agent.ports.inference import ForegroundCredential,ProviderError
+        credential=ForegroundCredential(self.key)
+        deep='ordinary text'
+        for _ in range(66):deep=[deep]
+        with self.assertRaises(ProviderError):self.app.provider_sessions._safe(deep,credential)
+        encoded='ordinary text'
+        for _ in range(10):encoded=json.dumps(encoded)
+        with self.assertRaises(ProviderError):self.app.provider_sessions._safe({'arguments':encoded},credential)
+        ordinary={'arguments':json.dumps({'topic':'campaign_summary','note':'a "quoted" title'})}
+        self.assertEqual(self.app.provider_sessions._safe(ordinary,credential),ordinary)
+
+
 class LocalForegroundTests(unittest.TestCase):
     def test_local_handler_uses_same_planner_and_three_structured_commands(self):
         from contextlib import ExitStack,redirect_stdout
@@ -430,19 +541,26 @@ class LocalForegroundTests(unittest.TestCase):
             stack.enter_context(patch.object(placement_review,'AgentRuntime',side_effect=runtime));stack.enter_context(redirect_stdout(io.StringIO()))
             placement_review.serve(18981,False,draft_path=path,viewer_port=18982,provider_metadata=metadata,provider_profiles=metadata.profiles,provider_completion_transport=complete)
             handler=servers[0].handler.__new__(servers[0].handler);handler.server=servers[0];handler.send=Mock()
-            def post(route,data,key=True):
+            def post(route,data,key=True,expected=200):
                 body=json.dumps(data).encode();headers=Message()
                 for k,v in {'Host':'127.0.0.1:18981','X-Local-Operator':'authored-local-operator','Origin':'http://127.0.0.1:18981','Content-Type':'application/json','Content-Length':str(len(body))}.items():headers[k]=v
                 if key:headers['X-OpenRouter-Key']=metadata.keys[0]
                 handler.path=route;handler.headers=headers;handler.rfile=io.BytesIO(body)
                 handler.do_POST();status,result=handler.send.call_args.args
-                self.assertEqual(status,200,result);return result
+                self.assertEqual(status,expected,result);return result
             tab=uuid4().hex
             connection=post('/api/openrouter/connect',{'operation_id':uuid4().hex,'tab_id':tab})['connection_id']
             catalogue=post('/api/openrouter/models',{'connection_id':connection,'tab_id':tab,'search':'','cursor':None})
             def select(profile):
                 return post('/api/openrouter/select',{'operation_id':uuid4().hex,'connection_id':connection,'tab_id':tab,'model_id':'fixture/tool-model','catalogue_revision':catalogue['catalogue_revision'],'profile':profile,'max_run_cost_usd':'0'})
             planner=select('planner');owner=runtimes[0];run=uuid4().hex
+            with closing(sqlite3.connect(path)) as db:before='\n'.join(db.iterdump())
+            denied=post('/api/agent/placements',{'request':'My key is '+metadata.keys[0],
+                'model':'fixture/tool-model','session_id':uuid4().hex,'run_id':uuid4().hex,
+                'catalog_id':owner.planner.catalogs.list()[0]['id'],'provider_selection_id':planner['selection_id']},expected=400)
+            self.assertNotIn(metadata.keys[0],json.dumps(denied))
+            with closing(sqlite3.connect(path)) as db:self.assertEqual('\n'.join(db.iterdump()),before)
+            self.assertEqual(calls,[])
             post('/api/agent/placements',{'request':'Prepare contextual placements','model':'fixture/tool-model','session_id':uuid4().hex,'run_id':run,'catalog_id':owner.planner.catalogs.list()[0]['id'],'provider_selection_id':planner['selection_id'],'draft_permission':'placements'})
             for name,args in (('read_campaign',{}),('classify_catalog',{}),('save_placement_draft',{'contexts':['video-editing','audiobook']})):
                 output['message']['tool_calls'][0]['function']={'name':name,'arguments':json.dumps(args)}

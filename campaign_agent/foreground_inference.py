@@ -31,6 +31,25 @@ class ForegroundInference:
         self.ledger=InferenceLedger(clock=providers.clock)
         self.run_id=None;self.runtime=None;self.settings_bound=None
         self.completion_transport=completion_transport
+        self.guard_data(context.command.get('body',{}))
+
+    def guard_data(self,value):
+        if self.credential is not None:
+            try: self.providers._safe(value,self.credential)
+            except ProviderError:
+                raise ProviderError('invalid_request') from None
+
+    def guard_receipt(self,value):
+        if self.credential is not None:
+            try: self.providers._safe(value,self.credential)
+            except ProviderError:
+                raise ProviderError('inference_outcome_unknown') from None
+
+    def qualified_for_dispatch(self,settings):
+        # Local-only original deadline fence. Historical receipt recovery does
+        # not call this new-effect check and cannot extend the qualification.
+        if settings['charging_profile_expires_at']<=self.providers.clock():
+            raise ProviderError('route_unqualified')
 
     def attach(self,runtime):
         self.runtime=runtime
@@ -158,13 +177,16 @@ class ForegroundInference:
                  'connection_id':settings['connection_id'],'selection_id':settings['selection_id']}
         with closing(sqlite3.connect(self.path)) as db,db:
             db.execute('BEGIN IMMEDIATE');self.policy.check(db);self.check_connection(db,settings,key=True)
-            self.current_run(db)
+            self.current_run(db);self.qualified_for_dispatch(settings)
             self.ledger.reserve(db,self.run_id,position,binding,settings,request_hash)
+            self.qualified_for_dispatch(settings)
         # Separate committed marker; any crash after this point is possibly sent.
         try:
             with closing(sqlite3.connect(self.path)) as db,db:
                 db.execute('BEGIN IMMEDIATE');self.policy.check(db);self.check_connection(db,settings,key=True)
-                self.current_run(db);self.ledger.dispatch(db,self.run_id,position)
+                self.current_run(db);self.qualified_for_dispatch(settings)
+                self.ledger.dispatch(db,self.run_id,position)
+                self.qualified_for_dispatch(settings)
         except BaseException:
             with closing(sqlite3.connect(self.path)) as db,db: self.ledger.release_unsent(db,self.run_id,position)
             raise
@@ -230,6 +252,7 @@ def dispatch_agent(runtime,path,data):
     """Both HTTP surfaces use the same strict additive foreground field contract."""
     if not isinstance(data,dict): raise ProviderError('invalid_request')
     foreground=runtime.foreground
+    foreground.guard_data(data)
     if path=='/api/agent/run':
         if set(data)!={'run_id'} or not isinstance(data['run_id'],str) or not re.fullmatch('[0-9a-f]{32}',data['run_id']): raise ProviderError('invalid_request')
         return runtime.resume(data['run_id'],max_steps=1)

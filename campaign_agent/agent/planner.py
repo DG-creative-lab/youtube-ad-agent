@@ -93,6 +93,10 @@ class PlacementAgent:
             return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
 
     def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none', provider_selection_id=None):
+        if self.owner.foreground:
+            self.owner.foreground.guard_data({'request':request,'model':model,'session_id':session_id,'run_id':run_id,
+                'catalog_id':catalog_id,'after_message':after_message,'draft_permission':draft_permission,
+                'provider_selection_id':provider_selection_id})
         self.owner.require("youtube:agent.run")
         self.owner.require("youtube:campaign.read")
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
@@ -256,6 +260,8 @@ class PlacementAgent:
                     else:
                         model = self.remote if source['settings']['mode'] == 'openrouter' else self.simulator
                         receipt = model.next_turn(source, history, source['settings'])
+                    if source['settings'].get('foreground'):
+                        self.owner.foreground.guard_receipt(receipt)
                     if (not isinstance(receipt, dict) or not isinstance(receipt.get('call_id'), str)
                             or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', receipt['call_id'])
                             or not isinstance(receipt.get('tool'), str) or len(receipt['tool']) > 64

@@ -478,3 +478,13 @@ or environment variable. Exercising the new inference path requires explicit
 transport injection, with authored metadata/profiles for tests. The real transport
 hard deadline, ingress redaction, identity and live route/charge qualification
 gates remain open. A2c account/composer UI and unattended execution are separate.
+
+A2b credential checks inspect bounded embedded JSON independently of structural
+depth and fail closed at either limit. The known request credential is rejected
+from incoming command data before a run/transcript mutation; decoded planner
+receipts are also checked before semantic persistence. A provider echo retains
+safe cost/generation accounting while discarding semantic content. New reservation
+and dispatch-marker transactions recheck the original charging-profile deadline
+at their local commit fences. A crossed dispatch fence releases only its known
+unsent reservation; already received receipt recovery does not require renewed
+profile qualification or a key.
