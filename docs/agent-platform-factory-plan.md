@@ -509,9 +509,9 @@ Suggested first task contract:
 id: A1-capability-catalogue
 status: proposed
 outcome: A buyer can see what the current agent can do and why an action is unavailable.
-base_commit: 610c4d672d9112c9090b0de47eeeb077d75a3a5a
+base_commit: "Resolve from the accepted launch contract immediately before dispatch"
 branch: feature/agent-capability-catalogue
-depends_on: [F0-contract-and-review-process]
+depends_on: [factory-playbooks-49, planner-ci-50]
 scope:
   - Register existing operations with explicit effects and prerequisites.
   - Project scoped availability into API, capability reply and workspace UI.
