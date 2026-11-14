@@ -189,3 +189,17 @@ textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px
   .saved-conversations { padding-bottom: 12px; }
   .message { padding: 13px 12px; }
 }
+
+/* Capability discovery uses the composer panel, with no execution controls. */
+.capability-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.capability-heading h3 { margin: 0; font-size: 1rem; }
+.capability-heading button, .capability-description button { min-height: 44px; white-space: normal; text-align: left; }
+.capability-list { padding: 0; margin: 18px 0 0; list-style: none; }
+.capability-list li { border-top: 1px solid var(--line); }
+.capability-list summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-height: 52px; padding: 10px 4px; cursor: pointer; font-size: .82rem; }
+.capability-list summary::before { content: "+"; font-family: monospace; }
+.capability-list details[open] > summary::before { content: "−"; }
+.capability-title { flex: 1 1 200px; font-weight: 700; }
+.capability-state { color: var(--muted); font-size: .75rem; }
+.capability-description { padding: 0 4px 16px 22px; overflow-wrap: anywhere; }
+.capability-list summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

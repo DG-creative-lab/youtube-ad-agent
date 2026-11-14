@@ -505,7 +505,9 @@ function App() {
   }
   const inheritedModel = mode?.agentPlanner?.models.find(item => item.id === mainModel)?.mode === "openrouter"
     ? {mode: "openrouter" as const, model: mainModel} : {mode: "offline" as const};
-  const composer = mode?.agentPlanner && <AgentComposer options={mode.agentPlanner} model={mainModel}
+  const capabilityScope = JSON.stringify([mode?.workspace?.actor, mode?.workspace?.client_id,
+    mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
+  const composer = mode?.agentPlanner && draft && <AgentComposer capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
     followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
     draftPermission={draftPermission} onDraftPermission={setDraftPermission}

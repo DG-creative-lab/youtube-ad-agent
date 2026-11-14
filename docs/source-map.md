@@ -35,6 +35,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [campaign_agent/adapters/google_ads_sandbox.py](../campaign_agent/adapters/google_ads_sandbox.py) | Test account verification, Demand Gen request construction, validation and read-back. [scripts/google_ads_sandbox.py](../scripts/google_ads_sandbox.py) is the opt-in entry point. |
 | [campaign_agent/delivery.py](../campaign_agent/delivery.py) | Resolves the verified setup for the current approved package and saves read-only report snapshots. [Google Ads reporting](../campaign_agent/adapters/google_ads_reporting.py) queries ad-group totals and video placement details. |
 | [campaign_agent/measurement.py](../campaign_agent/measurement.py) | Scoped viewer activity and completion attributed to exact comparison content. |
+| [web/planner/src/AgentCapabilities.tsx](../web/planner/src/AgentCapabilities.tsx) | Scoped read-only capability discovery, execution/prerequisite labels and composer-only examples; consumes the catalogue API. |
 | [web/planner/src/](../web/planner/src/) and [web/viewer/](../web/viewer/) | React campaign workspace and the public comparison experience. |
 | [tests/](../tests/) and [examples/](../examples/) | Offline behavior tests, authored catalogs and synthetic evidence. Private state and credentials live under the ignored `.local/` directory. |
 
