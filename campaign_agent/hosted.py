@@ -2,6 +2,7 @@
 from contextlib import closing
 from html import escape
 import json
+import hashlib
 from pathlib import Path
 import secrets
 import sqlite3
@@ -23,6 +24,8 @@ from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.publications import Publications
 from campaign_agent.staff import SignInRequired
+from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, validate_fields
+from campaign_agent.ports.inference import ProviderError
 from scripts.campaign_drafts import PackageConflict, StaleDraft
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,11 +52,13 @@ def fields(data, required, optional=()):
 
 class HostedApplication:
     def __init__(self, path, sessions, client, assets, *, staff_origin, viewer_origin,
-                 application_id='youtube', fixture_login=None):
+                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=()):
         self.path, self.sessions, self.client, self.assets = path, sessions, client, assets
         self.staff_origin, self.viewer_origin, self.application_id = staff_origin, viewer_origin, application_id
         self.fixture_login = fixture_login
         self.fixture = fixture_login is not None
+        if self.fixture and provider_metadata is not None and not getattr(provider_metadata,'synthetic',False):
+            raise ValueError('The offline fixture accepts synthetic provider metadata only.')
         for origin in (staff_origin, viewer_origin):
             url = urlsplit(origin)
             if self.fixture and url.hostname != '127.0.0.1':
@@ -66,6 +71,7 @@ class HostedApplication:
             raise ValueError('Staff and viewer origins must be separate.')
         self.cookie = 'gp_fixture_session' if self.fixture else '__Host-gp_session'
         self.publications = Publications(path, assets)
+        self.provider_sessions = ProviderSessions(path,metadata=provider_metadata,profiles=provider_profiles)
         self.staff = self._app(False)
         self.viewer = self._app(True)
 
@@ -73,12 +79,17 @@ class HostedApplication:
         async def endpoint(request: Request):
             origin = self.viewer_origin if public else self.staff_origin
             csrf = None
+            provider_route = not public and request.url.path.startswith('/api/openrouter/')
             try:
                 if request.headers.get('host') != urlsplit(origin).netloc or request.url.scheme != urlsplit(origin).scheme:
+                    if provider_route:
+                        raise ProviderError('access_denied')
                     return JSONResponse({'error': 'Use the registered application origin.'}, status_code=403)
                 site = request.headers.get('sec-fetch-site')
                 if site not in (None, 'same-origin', 'none') and not (
                         request.method in {'GET', 'HEAD'} and request.headers.get('sec-fetch-mode') == 'navigate'):
+                    if provider_route:
+                        raise ProviderError('access_denied')
                     return JSONResponse({'error': 'Cross-origin request rejected.'}, status_code=403)
                 if request.method == 'POST' and request.headers.get('origin') != origin:
                     raise PermissionError('Use the registered application origin.')
@@ -88,6 +99,8 @@ class HostedApplication:
                 async for chunk in request.stream():
                     raw += chunk
                     if len(raw) > 800_000:
+                        if provider_route:
+                            raise ProviderError('invalid_request')
                         return JSONResponse({'error': 'Request is too large.'}, status_code=413)
                 if request.method == 'POST':
                     if request.headers.get('content-type', '').split(';')[0] != 'application/json':
@@ -96,6 +109,8 @@ class HostedApplication:
                 else:
                     data = {}
                 response, csrf = await run_in_threadpool(self._handle, request, data, public)
+            except ProviderError as exc:
+                response = JSONResponse(exc.response(),status_code=exc.status)
             except SignInRequired:
                 response = JSONResponse({'error': 'Sign in to open this workspace.'}, status_code=401)
             except AccessUnavailable:
@@ -110,6 +125,11 @@ class HostedApplication:
                 response = JSONResponse({'error': 'Invalid command or unsupported fields.'}, status_code=400)
             except Exception:
                 response = JSONResponse({'error': 'Could not complete this action.'}, status_code=503)
+            if provider_route and response.status_code>=400 and b'"code"' not in response.body:
+                code={400:'invalid_request',401:'sign_in_required',403:'access_denied',409:'operation_conflict',
+                      429:'admission_busy'}.get(response.status_code,'authority_unavailable')
+                error=ProviderError(code)
+                response=JSONResponse(error.response(),status_code=error.status)
             response.headers.update({'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
                 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
                 'Cross-Origin-Resource-Policy': 'same-origin', 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
@@ -128,7 +148,7 @@ class HostedApplication:
         examples, media_dir = self.assets(context.scope.client_id, context.scope.brand_id)
         runtime = AgentRuntime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
                     context=context, campaign_id=campaign, access=access, examples=examples, media_dir=media_dir,
-                    viewer_links=self.publications.approved_links)
+                    viewer_links=self.publications.approved_links,web=True)
         return runtime, principal
 
     def _handle(self, request, data, public):
@@ -154,6 +174,28 @@ class HostedApplication:
         if self.fixture and path == '/fixture.js' and method == 'GET':
             return Response("document.getElementById('profiles').addEventListener('click',async e=>{if(e.target.tagName!=='BUTTON')return;const r=await fetch('/fixture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:e.target.value})});if(r.ok)location.assign((await r.json()).path);else document.body.append(' Access unavailable.');});", media_type='application/javascript'), None
         token = request.cookies.get(self.cookie)
+        if path.startswith('/api/openrouter/'):
+            if method!='POST' or request.query_params:
+                raise ProviderError('invalid_request')
+            action=path.removeprefix('/api/openrouter/')
+            validate_fields(action,data)
+            row=self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),row[5]):
+                raise ProviderError('access_denied')
+            session_digest=hashlib.sha256(token.encode()).hexdigest()
+            if action=='disconnect':
+                # Original local session is sufficient only for revocation, not metadata or inference.
+                context=ProviderContext('',None,'',session_digest,row[6],{},lambda:self.sessions.local(token))
+                return JSONResponse(self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,None)),row[5]
+            identity,campaign,csrf=self.sessions.current(token)
+            command={'method':method,'path':path,'query':{},'body':data}
+            runtime,_=self.runtime(token,campaign,command)
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,session_digest,row[6],command,
+                                    lambda:self.sessions.local(token))
+            result=self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,runtime.drafts.access)
+            return JSONResponse(result),csrf
+        if request.headers.getlist('x-openrouter-key'):
+            raise ProviderError('invalid_request')
         if path == '/api/session/end' and method == 'POST':
             row = self.sessions.local(token, allow_expired=True)
             if not secrets.compare_digest(request.headers.get('x-csrf-token', ''), row[5]):

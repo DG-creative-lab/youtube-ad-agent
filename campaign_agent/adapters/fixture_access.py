@@ -16,10 +16,41 @@ from campaign_agent.hosted import HostedApplication
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.staff import StaffSessions, VerifiedIdentity, SignInRequired
 from campaign_agent.workspaces import provision_workspace
+from campaign_agent.ports.inference import ProviderError, ChargingProfile
+from campaign_agent.model_catalogue import endpoint_fingerprint
 
 ISSUER = 'https://fixture-issuer.test/realm'
 AUDIENCES = frozenset({'youtube-api', 'gateplane-verifier'})
 CLIENT_ID = 'youtube-web'
+
+
+class AuthoredProviderMetadata:
+    """Synthetic-only metadata/key responses; no live provider transport is held."""
+    synthetic = True
+    keys = ('fixture-openrouter-a-key-not-a-real-secret', 'fixture-openrouter-b-key-not-a-real-secret')
+
+    def __init__(self):
+        self.requests=[]
+        self.rows=[{'id':'fixture/tool-model','name':'Authored tool model','architecture':{'input_modalities':['text'],'output_modalities':['text']},
+                    'supported_parameters':['tools','tool_choice'],'pricing':{'prompt':'0','completion':'0','request':'0'}}]
+        self.endpoint={'tag':'fixture/qualified','model_id':'fixture/tool-model','context_length':32000,
+            'supported_parameters':['tools','tool_choice','parallel_tool_calls','max_completion_tokens','response_format','structured_outputs'],
+            'supports_tool_choice':{'required':True},'pricing':{'prompt':'0','completion':'0','request':'0'}}
+        self.profiles=(ChargingProfile('fixture/tool-model','fixture/qualified','authored-free-v1',
+            endpoint_fingerprint(self.endpoint),time()+3600,evidence='Authored offline fixture; no live qualification'),)
+
+    def validate_key(self, credential):
+        self.requests.append('key')
+        if credential.key not in self.keys:
+            raise ProviderError('credential_mismatch')
+
+    def models(self, credential):
+        self.requests.append('models')
+        return self.rows
+
+    def endpoints(self, credential, model):
+        self.requests.append('endpoints')
+        return [self.endpoint] if model=='fixture/tool-model' else []
 
 
 class FixtureAuthority:
@@ -155,5 +186,6 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
     # The fixture-owned database retains campaigns, approvals and viewer evidence.
     with closing(sqlite3.connect(path)) as db, db:
         db.execute('DELETE FROM staff_sessions')
+    metadata=AuthoredProviderMetadata()
     return HostedApplication(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
-                             fixture_login=authority)
+                             fixture_login=authority,provider_metadata=metadata,provider_profiles=metadata.profiles)

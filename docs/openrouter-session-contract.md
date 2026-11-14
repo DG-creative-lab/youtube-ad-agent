@@ -1,10 +1,9 @@
 # OpenRouter foreground session contract · v1
 
 14 November 2026 · A2 / [#54](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54).
-Status: proposed implementation contract for human review. This document adds no
-runtime, live model, credential store, migration or deployment. Acceptance of the
-contract permits the bounded offline implementation slices below; it does not
-authorize provider calls or spending. [Architecture](architecture-plan.md) ·
+Status: v1 contract accepted in PR #65. The A2a implementation checkpoint below
+distinguishes shipped backend behavior from remaining A2b/A2c targets. Contract
+acceptance does not authorize provider calls or spending. [Architecture](architecture-plan.md) ·
 [Factory plan](agent-platform-factory-plan.md#6-openrouter-and-user-funded-inference).
 
 ## Product and compatibility
@@ -22,12 +21,13 @@ their own schema-compatibility profile. Unmigrated web inference paths stay offl
 they cannot use an environment key. The placement specialist remains simulated.
 Voice/audio generation, new tools, ad effects and background inference are separate.
 
-Current baseline: PR #64 merged at
+Pre-A2a contract baseline: PR #64 merged at
 `53553876308ccb0558eb61b829064639a12e0d0d`. `PlacementAgent` owns conversations,
 eight turns, reservation/receipt recovery and transactional tool commits;
 `OpenRouterInference` currently reads the environment and permits configured free
 models only. Hosted composition currently enables simulated models only. Those
-are current behaviors; everything below is a target contract.
+were the contract-baseline behaviors. The normative API and future targets below
+are implemented only to the extent stated in the A2a checkpoint.
 
 The iwoca comparison uses `frontend/src/openrouter-session.ts`,
 `OpenRouterSettings.tsx` and `src/acquisition/workspace_models.py`: sessionStorage
@@ -365,3 +365,45 @@ application's proposed design. No OpenRouter API was called for this review.
   and [generation metadata](https://openrouter.ai/docs/api/api-reference/generations/get-request-&-usage-metadata-for-a-generation):
   account/key budget controls complement local admission; generation metadata
   is not a guarantee of completion recovery or exactly-once billing.
+
+## A2a implementation checkpoint
+
+The shared `ProviderSessions` commands implement connect, models, select and
+disconnect through both the hosted ASGI and local operator handlers. The existing
+versioned migration chain adds private connection/verifier, reconnect-operation
+and immutable selection records. Reconnect operation identity is durable, including
+new operation IDs bound to an existing connection. Backups/restores revoke connection
+authority while retaining selections and domain history. Disconnect uses local
+session proof and works when upstream authority is unavailable.
+
+New metadata commands collect command-bound permits from the existing access
+adapters, then check original deadlines, local session and native campaign identity
+at admission without remote authority/provider calls under the write lock.
+Legacy tool/structured transaction seams are unchanged; their broader permit-set
+integration remains A2b. Catalogue cache hits still require current access and
+the original session/scope/tab/key proof. Metadata prices are exact decimal strings;
+complex/unknown charge profiles are visibly blocked without hiding valid rows.
+
+The hosted offline fixture explicitly injects authored metadata and qualified
+synthetic profiles. Only its documented `AuthoredProviderMetadata.keys` sentinels
+are accepted. These are fixture values, not account credentials or live model
+qualification. Ordinary hosted/local composition installs no metadata transport
+or qualified profile from a key or environment variable. The real fixed-origin
+adapter is available only for explicit later composition.
+
+All web compositions disable new OpenRouter inference pending A2b. Configured
+environment models are hidden from the local web model lists; fresh planner and
+structured requests cannot use an environment key. Non-web opt-in legacy adapters
+remain compatible. Previously received planner/review/draft receipts can still be
+read and committed under the original command checks without another provider
+request. The shared completion transport accepts an explicit ephemeral credential
+argument but A2a does not connect it to a web completion path.
+
+The metadata adapter supplies a five-second socket timeout and rejects results
+whose elapsed time reaches five seconds. This is an admission deadline, not a
+hard cancellation guarantee for DNS or slow-stream I/O. The real adapter remains
+unwired until separate total request deadline/slow-stream/DNS evidence clears that
+activation gate; no background timeout worker retains a key after the foreground
+request. Reconciliation, inference cost/call admission and new completion dispatch
+remain A2b; account controls and browser-memory handling remain A2c. No live
+provider/identity/deployment claim follows from the fake-transport tests.

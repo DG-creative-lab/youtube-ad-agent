@@ -16,7 +16,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from rfc3986_validator import validate_rfc3986
 
 from campaign_agent.access import BrandScope, CAPABILITIES, WorkspaceContext
-from campaign_agent.ports.access import AccessUnavailable, GateplaneClient
+from campaign_agent.ports.access import AccessUnavailable, GateplaneClient, CommandPermit
+from campaign_agent.access import validate_permit
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'contracts/gateplane-v1.json'
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
@@ -89,6 +90,25 @@ class GateplaneAccess:
         return identity, context, result
 
     def decide(self, request):
+        return self._decision(request)
+
+    def permit(self, request, *, command, session_digest, expires_at, path):
+        if (Path(path) != Path(self.path) or command != self.command or session_digest != hashlib.sha256(self.session_token.encode()).hexdigest()):
+            raise PermissionError('The command binding changed.')
+        result = self._decision(request, permit=True)
+        if result == 'unavailable':
+            raise AccessUnavailable('Current access decision unavailable.')
+        if result == 'deny':
+            raise PermissionError('Current access denied.')
+        return result
+
+    def validate_permit(self, db, permit, request, command, session_digest):
+        self.sessions.local(self.session_token)
+        if command != self.command or session_digest != hashlib.sha256(self.session_token.encode()).hexdigest():
+            raise PermissionError('The command binding changed.')
+        validate_permit(db,permit,request,command,session_digest,clock=self.clock,monotonic_clock=self.monotonic)
+
+    def _decision(self, request, permit=False):
         identity, context, principal = self.principal(request.campaign_id)
         if (request.capability not in CAPABILITIES or request.actor_id != principal['actor']['principal_id']
                 or (request.client_id, request.brand_id, request.workspace_id, request.installation_id) !=
@@ -151,4 +171,10 @@ class GateplaneAccess:
                 raise ValueError('Access expired during native verification')
         except Exception:
             raise AccessUnavailable('Current access decision is unavailable.') from None
+        if permit:
+            wall_expiry = min(expiry, identity.expires_at, session[6])
+            deadline = min(start+min(5000,result['valid_for_ms'])/1000,
+                           self.monotonic()+max(0,wall_expiry-self.clock()))
+            return CommandPermit(request, hash_value(self.command), hashlib.sha256(self.session_token.encode()).hexdigest(),
+                                 revision, snapshot_hash, result['decision_id'], deadline, wall_expiry)
         return 'allow'

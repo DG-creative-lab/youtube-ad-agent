@@ -4,6 +4,17 @@
 
 ## Implemented slice
 
+The A2a foreground provider commands use this same staff/session/origin boundary.
+Connect, catalogue and select collect bounded current command permits outside
+write transactions, then fence commit using local session/native checks. The
+disconnect exception uses only the original local staff session and CSRF proof
+to revoke its connection during upstream outage. The offline fixture accepts
+authored metadata/key sentinels only; no real provider adapter is auto-installed.
+Fresh web inference remains disabled until A2b admission/recovery. The real
+metadata adapter's socket timeout/elapsed admission fence does not establish a
+hard DNS/slow-stream cancellation bound; real composition retains that latency
+gate alongside ingress redaction and identity/access activation.
+
 The ASGI entrypoint invokes the existing campaign commands. Staff and public
 viewer applications have separately pinned origins. The existing loopback
 `http.server` remains the portable local demo; it is not wrapped or exposed as a
