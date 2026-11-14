@@ -9,6 +9,8 @@ Start with the [product brief](docs/product-brief.md), [architecture](docs/archi
 
 ## Task routing
 
+- Use [factory-coordination](.agents/skills/factory-coordination/SKILL.md) to scope, dispatch, resume or integrate work across factory roles. Complete a versioned task contract before worker dispatch.
 - Use [campaign-engineering](.agents/skills/campaign-engineering/SKILL.md) for feature slices, behavior changes and UI implementation.
 - Use [campaign-tests](.agents/skills/campaign-tests/SKILL.md) when deciding what to test for a change to durable state or authority, or when adding, changing or removing tests.
 - Use [campaign-adversarial-review](.agents/skills/campaign-adversarial-review/SKILL.md) for substantive reviews and before handing off changes to persistence, authority, provider effects or agent execution. Its security reference covers changed trust boundaries.
+- Use [campaign-verification](.agents/skills/campaign-verification/SKILL.md) for independent acceptance or release verification of a specific commit. Keep its evidence separate from implementation and review.
