@@ -1,4 +1,5 @@
 import {useId, useRef, useState} from "react";
+import {AgentCapabilities} from "./AgentCapabilities";
 
 export type DraftPermission = "none" | "placements" | "instruction_test";
 export const draftPermissionLabels: Record<DraftPermission, string> = {
@@ -12,6 +13,7 @@ export type PlannerOptions = {
   specialist_label: string;
 };
 type Props = {
+  capabilityScope: string;
   options: PlannerOptions;
   model: string;
   onModel: (model: string) => void;
@@ -29,12 +31,14 @@ type Props = {
 };
 
 export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText,
-  draftPermission, onDraftPermission, request}: Props) {
+  draftPermission, onDraftPermission, request, capabilityScope}: Props) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
-  const [panel, setPanel] = useState<"model" | "catalog" | "import" | "permission" | null>(null);
+  const [panel, setPanel] = useState<"model" | "catalog" | "import" | "permission" | "capabilities" | null>(null);
   const panelId = useId();
   const modelButton = useRef<HTMLButtonElement>(null);
+  const capabilityButton = useRef<HTMLButtonElement>(null);
+  const messageInput = useRef<HTMLTextAreaElement>(null);
   const chosen = catalogId || options.catalogs[0]?.id || "";
   const selectedModel = options.models.find(item => item.id === model);
   const selectedCatalog = options.catalogs.find(item => item.id === chosen);
@@ -57,7 +61,10 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
     }
   }
   return <form className="agent-composer" onKeyDown={event => {
-    if (event.key === "Escape") {setPanel(null); modelButton.current?.focus();}
+    if (event.key === "Escape") {
+      const trigger = panel === "capabilities" ? capabilityButton : modelButton;
+      setPanel(null); trigger.current?.focus();
+    }
   }} onBlur={event => {
     if (panel === "model" && !event.currentTarget.contains(event.relatedTarget)) setPanel(null);
   }} onSubmit={event => {
@@ -66,7 +73,7 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
   }}>
     <div className="composer-input">
       <label className="sr-only" htmlFor={`${panelId}-message`}>{followup ? "Your message" : "Campaign request"}</label>
-      <textarea id={`${panelId}-message`} value={text} onChange={event => onText(event.target.value)} maxLength={1500} rows={3}
+      <textarea ref={messageInput} id={`${panelId}-message`} value={text} onChange={event => onText(event.target.value)} maxLength={1500} rows={3}
         placeholder={followup ? "Answer the agent or refine this campaign…" : "Describe what you would like to prepare…"}
         disabled={disabled} required />
       <div className="composer-toolbar">
@@ -112,8 +119,16 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
         aria-controls={`${panelId}-import`} onClick={() => setPanel(panel === "import" ? null : "import")}>
         <span aria-hidden="true">+</span> Import
       </button>
+      <button ref={capabilityButton} type="button" className="composer-pill" aria-expanded={panel === "capabilities"}
+        aria-controls={`${panelId}-capabilities`} onClick={() => setPanel(panel === "capabilities" ? null : "capabilities")}>
+        Capabilities
+      </button>
       <span className="catalog-caption" title={selectedCatalog?.label}>{selectedCatalog?.label}</span>
     </div>
+    {panel === "capabilities" && <section id={`${panelId}-capabilities`} className="composer-panel" aria-label="Agent capabilities">
+      <AgentCapabilities key={capabilityScope} scope={capabilityScope} request={request} disabled={disabled}
+        onExample={example => {onText(example); setPanel(null); messageInput.current?.focus();}} />
+    </section>}
     {panel === "permission" && <section id={`${panelId}-permission`} className="composer-panel" aria-label="Draft permissions">
       <label>Allowed draft changes
         <select value={draftPermission} disabled={disabled}

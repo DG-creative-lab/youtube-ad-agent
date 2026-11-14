@@ -427,7 +427,8 @@ class PlacementAgent:
             approved = False
             if args['topic'] == 'approval_and_launch':
                 approved = self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None
-            return reply(args['topic'], draft, approved=approved), 'answered'
+            capabilities = self.owner.capabilities() if args['topic'] == 'capabilities' else None
+            return reply(args['topic'], draft, approved=approved, capabilities=capabilities), 'answered'
         raise ValueError('Unknown tool')
 
     def read(self, run_id):

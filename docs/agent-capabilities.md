@@ -162,3 +162,34 @@ fresh scoped access and outage behavior, native ownership, local/hosted/public
 routes, no domain writes or provider/readiness calls, component modes, and actual
 denied/replayed/unknown dispatch. The catalogue never supplies execution authority
 and does not change provider tool schemas, prompts, reply wording or dispatch.
+
+## Workspace discovery and chat answers
+
+The **Capabilities** control beside the composer fetches the current scoped
+catalogue through the existing authenticated API client. It shares the composer's
+single options panel: Escape returns focus to its trigger. Each expandable row
+shows the outcome, availability, execution mode and requirements, with model tools,
+application requests, workspace actions and planned features labelled separately.
+
+**Use example** fills the message and focuses the textarea. It does not send,
+change **Changes**, grant access, approve a package or call a provider. Examples
+are presentation wording, not another tool registry. Planned features have no
+example action. Draft outcomes explain the explicit per-request Changes setting;
+the supported-finding action remains in its workspace rather than becoming a
+model tool. Actual commands still recheck permissions, revisions and prerequisites.
+
+The catalogue stays in component memory, never browser storage. Opening the panel,
+using **Refresh capabilities**, or reloading refetches current access. A scope key
+includes actor, client, brand, workspace and campaign; changing it clears the
+rendered result and ignores obsolete responses. A failed refresh hides the previous
+catalogue and shows a retry message. The existing application resolves workspace
+scope at bootstrap; this slice does not add a workspace-switching interface.
+
+For the supported `capabilities` response topic, the real tool dispatcher loads
+`AgentRuntime.capabilities()` and application code groups its titles by current
+availability. It explains offline simulation, blocked access/draft requirements,
+workspace-only actions and planned features, rather than accepting model-authored
+claims. Access outages propagate without saving an optimistic answer. The answer
+retains the existing no-change/approval/export/launch notice and verified reply
+format. Saved conversations keep the factual answer from their original turn;
+ask again or refresh discovery for current access.
