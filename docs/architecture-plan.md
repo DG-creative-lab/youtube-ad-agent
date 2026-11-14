@@ -1,5 +1,10 @@
 # Campaign agent architecture
 
+14 November provider preparation: [OpenRouter foreground session contract v1](openrouter-session-contract.md)
+specifies browser-memory credentials, scoped selection, admission and recovery for
+issue #54. It is a proposed implementation handoff; current runtime behavior is
+unchanged. Real identity, paid-route qualification and deployment retain their gates.
+
 Updated 6 November 2026 · Proposed for the ElevenLabs application. The product brief defines the two Text to Speech creatives and viewer task. This plan defines the system boundaries. [Product brief](product-brief.md) · [Build plan](build-plan.md) · [Design direction](design-direction.md)
 
 ## Decision
