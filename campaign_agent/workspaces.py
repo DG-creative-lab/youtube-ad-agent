@@ -4,19 +4,11 @@ import sqlite3
 from pathlib import Path
 
 from .access import LOCAL_CONTEXT, require_access
+from .migrations import migrate
 
 
 def initialize(db):
-    db.execute('''CREATE TABLE IF NOT EXISTS brand_workspaces (
-        client_id TEXT NOT NULL, brand_id TEXT NOT NULL, workspace_id TEXT NOT NULL UNIQUE,
-        installation_id TEXT NOT NULL, PRIMARY KEY(client_id,brand_id))''')
-    db.execute('''CREATE TABLE IF NOT EXISTS campaign_owners (
-        campaign_id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL)''')
-    for table in ("brand_workspaces", "campaign_owners"):
-        for operation in ("UPDATE", "DELETE"):
-            db.execute(f'''CREATE TRIGGER IF NOT EXISTS {table}_no_{operation.lower()}
-                BEFORE {operation} ON {table} BEGIN
-                SELECT RAISE(ABORT,'Product ownership is immutable'); END''')
+    migrate(db)
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='campaign_revisions'").fetchone():
         for campaign_id, in db.execute("SELECT DISTINCT campaign_id FROM campaign_revisions WHERE campaign_id IN ('tts-sample','tts-catalog')"):
             admit_demo_campaign(db, campaign_id)

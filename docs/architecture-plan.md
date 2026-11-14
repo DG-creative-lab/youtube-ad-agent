@@ -4,6 +4,12 @@ Updated 6 November 2026 · Proposed for the ElevenLabs application. The product 
 
 ## Decision
 
+13 November enterprise storage preparation: the first #37 slice uses one
+application worker, SQLite and private immutable filesystem media on durable
+local storage. It adds versioned ownership/asset migrations and verified
+whole-store backup/restore while preserving exact historical snapshots.
+[Storage topology, recovery and retained deployment gates](storage-recovery.md)
+
 Each chat run pins an explicit `draft_permission` from the buyer's **Changes** control: `none` (default), `placements`, or `instruction_test`. `draft_permissions.py` defines the tool capabilities. The provider sees only permitted write tools; application dispatch checks the saved permission inside the draft transaction even for unadvertised or replayed tool calls. Prose, dialogue memory and model arguments cannot grant authority. Retry identity includes the permission; changing it requires a new request. Missing permission on legacy runs fails closed. The composer resets to Review only after sending and when changing conversations. This grant permits an unapproved draft of the selected kind, never approval or launch.
 
 Chat review uses the same main-model loop and campaign commands as the workspace. `CampaignReviewTools` resolves package and review references from the run; model arguments cannot substitute campaign IDs, fingerprints, scenarios or review IDs. Pin the initial package fingerprint and the latest saved sample scenario for that package (balanced by default). Capture reporting outside the write transaction, then recheck approval and current activity and commit the saved review with its tool step. Before another inference or a test write, verify the captured activity, media and active buyer correction. Stale review evidence produces a saved refresh outcome without a draft; changed campaign revisions continue to return a conflict. Superseded runs cannot commit late results.
