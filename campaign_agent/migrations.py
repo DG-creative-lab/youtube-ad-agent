@@ -44,6 +44,24 @@ MIGRATIONS = (
             BEGIN SELECT RAISE(ABORT,'Asset owner must be provisioned'); END'''
           for table in ('asset_blobs', 'asset_catalogs')),
     )),
+    ('foreground-provider-metadata', (
+        '''CREATE TABLE provider_connections (
+            id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, session_digest TEXT NOT NULL,
+            client_id TEXT NOT NULL, brand_id TEXT NOT NULL, workspace_id TEXT NOT NULL, installation_id TEXT NOT NULL,
+            campaign_id TEXT NOT NULL, tab_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+            salt TEXT NOT NULL, key_verifier TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL,
+            revoked_at REAL, UNIQUE(session_digest,operation_id))''',
+        '''CREATE TABLE provider_selections (
+            id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL, snapshot TEXT NOT NULL, created_at REAL NOT NULL,
+            UNIQUE(connection_id,operation_id), FOREIGN KEY(connection_id) REFERENCES provider_connections(id))''',
+        '''CREATE TABLE provider_connection_operations (
+            session_digest TEXT NOT NULL, operation_id TEXT NOT NULL, connection_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL, PRIMARY KEY(session_digest,operation_id),
+            FOREIGN KEY(connection_id) REFERENCES provider_connections(id))''',
+        *immutable('provider_connection_operations'),
+        *immutable('provider_selections'),
+    )),
 )
 
 
