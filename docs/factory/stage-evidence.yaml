@@ -1,0 +1,25 @@
+# TEMPLATE ONLY. Replace unresolved values with observations; do not imply checks ran.
+schema_version: 1
+task_id: null
+contract_version: null
+stage: null # build, review, verify or integrate
+base_commit: null
+head_commit: null
+integration_commit: null # If not checked, explain in limitations.
+dirty_state: null # Clean tracked source/lockfiles/workflows required for normal acceptance.
+generated_artifacts: []
+checks:
+  - name: null
+    acceptance_scenario: null
+    kind: null # executed, source_inspection or historical
+    cwd: null
+    command_or_path: null
+    exit_code: null # Null for non-command evidence, blocked or not-run checks.
+    outcome: not_run # passed, failed, blocked or not_run
+    evidence: null # Sanitized result or durable evidence reference; include reason if not run.
+findings: []
+limitations: []
+provider_calls: null # Observed count, not assumed from an offline label.
+live_spend_gbp: null # Observed amount or unknown with explanation.
+next_owner: null
+recommendation: null # ready for review, needs repair, blocked or ready for human merge
