@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 import sqlite3
@@ -112,7 +113,7 @@ class PackageHandoffTests(unittest.TestCase):
     def test_legacy_approval_is_listed_without_inventing_a_snapshot(self):
         campaign_id = self.drafts.campaign_id
         fingerprint = "a" * 64
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("ALTER TABLE campaign_package_approvals DROP COLUMN snapshot")
             db.execute(
                 "INSERT INTO campaign_package_approvals VALUES (?, ?, ?, ?, ?, ?, ?)",

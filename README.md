@@ -138,6 +138,12 @@ pnpm --dir web/planner build
 
 Open `http://127.0.0.1:18985/fixture`. Use a fresh database reserved for this fixture. The existing portable demo remains available through its original command.
 
+The fixture keeps immutable, brand-scoped private media beside the database in
+its `.assets` directory; `--assets` selects an explicit private root. The
+[storage/recovery guide](docs/storage-recovery.md) covers versioned ownership and
+asset migrations, offline backup/restore and the supported single-instance
+topology. Restores preserve approvals/fingerprints and require fresh authority.
+
 ## Placement review
 
 Run the local workspace with Python 3.12 or newer and open the planner link printed in the terminal. The default mode uses fictional candidates and needs no external credentials. Add `--live-youtube` after providing your own YouTube Data API key in the ignored `.local/google/youtube-data-key.json` file as a JSON object with a `key` field. Search phrases are editable for each creative. In live mode, the export contains the selected video URLs for one creative, one per line. Verify those URLs in the intended Google Ads campaign before using them.

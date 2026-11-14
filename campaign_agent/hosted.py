@@ -14,9 +14,10 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Route
 
 from campaign_agent.access import Operator
+from campaign_agent.assets import AssetUnavailable
 from campaign_agent.adapters.gateplane import GateplaneAccess
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
-from campaign_agent.handoff import caption_bytes, media_sha256
+from campaign_agent.handoff import caption_bytes, media_sha256, read_media
 from campaign_agent.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable
@@ -103,7 +104,7 @@ class HostedApplication:
                 response = JSONResponse({'error': 'This action is unavailable in this workspace.'}, status_code=403)
             except (PackageConflict, StaleDraft) as exc:
                 response = JSONResponse({'error': str(exc)}, status_code=409)
-            except (ViewerNotFound, LookupError):
+            except (ViewerNotFound, LookupError, AssetUnavailable):
                 response = JSONResponse({'error': 'Resource unavailable.'}, status_code=404)
             except (ValueError, TypeError, UnicodeError, RecursionError):
                 response = JSONResponse({'error': 'Invalid command or unsupported fields.'}, status_code=400)
@@ -199,7 +200,7 @@ class HostedApplication:
             if example is None:
                 raise ViewerNotFound()
             name = example.preview if take == 'preview' else next((name for key, _, name in example.takes if key == take), None)
-            data = caption_bytes(example) if take == 'captions' else (r.drafts.media_dir / name).read_bytes()
+            data = caption_bytes(example) if take == 'captions' else read_media(r.drafts.media_dir, name)
             fields(q, {'sha256'})
             if q['sha256'] != media_sha256(data):
                 raise PackageConflict('The media changed.')

@@ -5,7 +5,7 @@ import secrets
 import sqlite3
 from time import time
 
-from .handoff import caption_bytes, example_content, media_sha256, package_fingerprint
+from .handoff import caption_bytes, example_content, media_sha256, package_fingerprint, read_media
 from .measurement import ViewerMeasurement, ViewerNotFound
 from scripts.campaign_drafts import PackageConflict
 
@@ -135,7 +135,7 @@ class Publications:
         source = next((item for item in group['content']['takes'] if item['id'] == take), None)
         if source is None:
             raise ViewerNotFound('This sample is unavailable.')
-        data = (media_dir / source['asset']).read_bytes()
+        data = read_media(media_dir, source['asset'])
         if media_sha256(data) != source['sha256']:
             raise PackageConflict('The published comparison media changed.')
         return data, 'video/mp4' if source['asset'].endswith('.mp4') else 'audio/mpeg'

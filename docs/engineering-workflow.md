@@ -21,3 +21,9 @@ python3 -m venv .venv
 Exercise affected UI behavior in the browser. Use the [design direction](design-direction.md) for visual and accessibility checks. Keep live model, provider and human usability evidence separate from the offline suite.
 
 The hosted access checks use Starlette’s in-process ASGI client with synthetic identity/access dependencies and temporary SQLite. Dependency installation may need registry access; the tests make no external provider calls. The original portable-demo runtime still uses the standard library.
+
+Storage changes also run `tests/test_product_storage.py` against temporary native
+histories and private media. The [storage/recovery guide](storage-recovery.md)
+declares the single-instance topology, migration coverage, whole-store commands
+and authority invalidation on restore. Use authored stores and temporary backup
+destinations for these checks.

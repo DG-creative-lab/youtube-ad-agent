@@ -7,6 +7,7 @@ from time import time
 from uuid import uuid4
 
 from campaign_agent.access import BrandScope, Operator, WorkspaceContext
+from campaign_agent.assets import AssetStore
 from campaign_agent.adapters.gateplane import timestamp, validate_record
 from campaign_agent.agent.run import AgentRuntime
 from campaign_agent.creatives import EXAMPLES
@@ -100,7 +101,7 @@ class _SeedAccess:
         return 'allow'
 
 
-def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origin='http://127.0.0.1:18986'):
+def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origin='http://127.0.0.1:18986', asset_root=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as db, db:
@@ -110,6 +111,9 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
             raise ValueError('Use a fresh database for the offline staff fixture; existing product data is not admitted.')
         db.execute('CREATE TABLE IF NOT EXISTS offline_access_fixture(version INTEGER PRIMARY KEY CHECK(version=1))')
         db.execute('INSERT OR IGNORE INTO offline_access_fixture VALUES(1)')
+        db.execute('''CREATE TABLE IF NOT EXISTS offline_fixture_asset_bindings (
+            client_id TEXT NOT NULL, brand_id TEXT NOT NULL, catalog_id TEXT NOT NULL,
+            PRIMARY KEY(client_id,brand_id))''')
     contexts = {
         'campaign-a': WorkspaceContext(BrandScope('tenant-a', 'brand'), 'workspace-a', 'install-a'),
         'campaign-a-sibling': WorkspaceContext(BrandScope('tenant-a', 'brand'), 'workspace-a', 'install-a'),
@@ -118,13 +122,28 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
     }
     seed = _SeedAccess()
     operator = Operator('fixture-provisioner', frozenset(context.scope for context in contexts.values()))
+    store = AssetStore(path, asset_root if asset_root is not None else path.with_suffix('.assets'))
+    catalogs = {}
     def assets(client, brand):
         scope = BrandScope(client, brand)
         if scope not in operator.grants:
             raise PermissionError('Unknown fixture assets')
-        return tuple(replace(example, scope=scope) for example in EXAMPLES), DEMO_MEDIA_DIR
+        return store.catalog(scope, catalogs[scope])
     for campaign, context in contexts.items():
         provision_workspace(path, context, campaign, operator=operator, access=seed)
+        if context.scope not in catalogs:
+            with closing(sqlite3.connect(path)) as db:
+                binding = db.execute('SELECT catalog_id FROM offline_fixture_asset_bindings WHERE client_id=? AND brand_id=?',
+                                     (context.scope.client_id, context.scope.brand_id)).fetchone()
+            if binding:
+                catalogs[context.scope] = binding[0]
+            else:
+                catalog = store.import_catalog(context, campaign, tuple(replace(e, scope=context.scope) for e in EXAMPLES),
+                                               DEMO_MEDIA_DIR, operator=operator, access=seed)
+                with closing(sqlite3.connect(path)) as db, db:
+                    db.execute('INSERT INTO offline_fixture_asset_bindings VALUES(?,?,?)',
+                               (context.scope.client_id, context.scope.brand_id, catalog))
+                catalogs[context.scope] = catalog
         examples, media_dir = assets(context.scope.client_id, context.scope.brand_id)
         r = AgentRuntime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
         r.planner.catalogs.register('Authored fixture catalog', [

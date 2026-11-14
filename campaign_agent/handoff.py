@@ -19,10 +19,15 @@ def caption_bytes(example):
     return f"WEBVTT\n\n00:00:00.000 --> 00:00:08.000\n{example.passage}\n".encode()
 
 
+def read_media(source, name):
+    """The portable demo uses Path; hosted composition supplies scoped private media."""
+    return source.read_asset(name) if hasattr(source, 'read_asset') else (source / name).read_bytes()
+
+
 def example_content(example, media_dir):
     def asset(name):
         try:
-            return media_sha256((media_dir / name).read_bytes())
+            return media_sha256(read_media(media_dir, name))
         except FileNotFoundError:
             return None
 
