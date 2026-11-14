@@ -31,6 +31,7 @@ from campaign_agent.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAM
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
+from campaign_agent.ports.access import AccessUnavailable
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
 from scripts.google_ads_sandbox import google_transport
 
@@ -545,6 +546,28 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
                     })
+                return
+            if url.path == '/api/agent/capabilities':
+                if not self.check_operator():
+                    return
+                try:
+                    if url.query:
+                        raise ValueError('The capability catalogue accepts no query fields.')
+                    if agent is None:
+                        raise LookupError('Capabilities are unavailable in this mode.')
+                    result = agent.capabilities()
+                except AccessUnavailable:
+                    self.send(503, {'error': 'Current workspace authority is unavailable.'})
+                except PermissionError:
+                    self.send(403, {'error': 'Capabilities are unavailable in this workspace.'})
+                except LookupError:
+                    self.send(404, {'error': 'Capabilities are unavailable in this mode.'})
+                except ValueError:
+                    self.send(400, {'error': 'The capability catalogue accepts no query fields.'})
+                except sqlite3.Error:
+                    self.send(503, {'error': 'Could not load capabilities. Try again.'})
+                else:
+                    self.send(200, result)
                 return
             if url.path in {"/api/agent/conversations", "/api/agent/conversation"}:
                 if not self.check_operator():
