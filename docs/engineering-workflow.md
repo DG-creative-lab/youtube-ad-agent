@@ -27,13 +27,28 @@ the work; executable checks establish the properties they exercise.
 
 ## Verification
 
-Run the offline suite locally for behavior changes. GitHub Actions runs the same command on pushes to main and pull requests.
+Run the offline suite locally for behavior changes. GitHub Actions runs the same
+Python checks and a separate planner build on pushes to main and pull requests.
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.txt
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+For planner changes, install the locked dependencies and run the existing
+TypeScript check and Vite production build:
+
+```sh
+pnpm --dir web/planner install --frozen-lockfile
+pnpm --dir web/planner build
+```
+
+CI pins Node.js 24.22.3 and pnpm 10.33.0, matching the planner's package-manager
+version. Setup actions are pinned to full commit SHAs. Both jobs run without
+provider credentials; dependency installation may access public package registries,
+but application/provider checks stay offline. A passing build does not establish
+browser behavior or live model quality.
 
 Exercise affected UI behavior in the browser. Use the [design direction](design-direction.md) for visual and accessibility checks. Keep live model, provider and human usability evidence separate from the offline suite.
 
