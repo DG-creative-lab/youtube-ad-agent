@@ -238,6 +238,80 @@ class OpenRouterHttpTests(unittest.TestCase):
         self.post('models',{'connection_id':connection,'tab_id':self.tab,'search':'','cursor':None},status=503)
 
 
+    def test_saved_selection_replays_after_cache_eviction_and_service_reopen(self):
+        from campaign_agent.provider_sessions import ProviderSessions
+        connection=self.connect()['connection_id'];catalogue=self.models(connection)
+        data=self.selection(connection,catalogue['catalogue_revision'])
+        selected=self.post('select',data)
+        self.service.cache.invalidate(connection)
+        self.metadata.requests.clear()
+        self.assertEqual(self.post('select',data),selected)
+        self.assertEqual(self.metadata.requests,['key','models','endpoints'])
+        reopened=ProviderSessions(self.path,metadata=self.metadata,profiles=self.service.profiles)
+        self.app.provider_sessions=self.service=reopened
+        self.assertEqual(self.post('select',data),selected)
+        # A refreshed catalogue may expire; the admitted original operation remains recoverable.
+        self.models(connection)
+        self.service.cache.entries[connection]['expires_at']=0
+        self.assertEqual(self.post('select',data),selected)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections').fetchone()[0],1)
+
+    def test_cacheless_selection_replay_keeps_key_access_and_profile_drift_fences(self):
+        connection=self.connect()['connection_id'];catalogue=self.models(connection)
+        data=self.selection(connection,catalogue['catalogue_revision'])
+        self.post('select',data);self.service.cache.invalidate(connection)
+        self.metadata.requests.clear()
+        original_key=self.key;self.key=self.metadata.keys[1]
+        self.post('select',data,status=403);self.key=original_key
+        self.post('select',{**data,'max_run_cost_usd':'0.25'},status=409)
+        self.app.client.permissions['buyer-a'].remove('youtube:agent.run')
+        self.post('select',data,status=403)
+        self.app.client.permissions['buyer-a'].add('youtube:agent.run')
+        self.assertEqual(self.metadata.requests,[])
+        original=self.service.profiles
+        self.service.profiles=(replace(original[0],version='changed-authorized-profile'),)
+        self.assertEqual(self.post('select',data,status=409)['code'],'selection_stale')
+        self.service.profiles=original
+        self.metadata.endpoint['pricing']={'prompt':'0.1','completion':'0.1','request':'0'}
+        self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections').fetchone()[0],1)
+
+    def test_blocked_model_modalities_cannot_admit_a_qualified_selection_or_replay(self):
+        connection=self.connect()['connection_id']
+        for architecture in ({'input_modalities':['image'],'output_modalities':['text']},
+                             {'input_modalities':['text'],'output_modalities':['audio']}):
+            with self.subTest(architecture=architecture):
+                self.metadata.rows[0]['architecture']=architecture
+                self.service.cache.invalidate(connection)
+                catalogue=self.models(connection)
+                self.assertEqual(catalogue['models'][0]['state'],'blocked')
+                data=self.selection(connection,catalogue['catalogue_revision'])
+                self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM provider_selections').fetchone()[0],0)
+        self.metadata.rows[0]['architecture']={'input_modalities':['text'],'output_modalities':['text']}
+        self.service.cache.invalidate(connection);catalogue=self.models(connection)
+        data=self.selection(connection,catalogue['catalogue_revision']);self.post('select',data)
+        self.service.cache.invalidate(connection)
+        self.metadata.rows[0]['architecture']={'input_modalities':['image'],'output_modalities':['text']}
+        self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
+
+    def test_model_capabilities_are_checked_for_the_selected_task_profile(self):
+        connection=self.connect()['connection_id']
+        self.metadata.rows[0]['supported_parameters']=['response_format','structured_outputs']
+        catalogue=self.models(connection)
+        structured=self.selection(connection,catalogue['catalogue_revision']);structured['profile']='structured_review'
+        self.assertEqual(self.post('select',structured)['profile'],'structured_review')
+        self.assertEqual(self.post('select',self.selection(connection,catalogue['catalogue_revision']),status=409)['code'],'route_unqualified')
+        self.metadata.rows[0]['supported_parameters']=['tools','tool_choice']
+        self.service.cache.invalidate(connection);catalogue=self.models(connection)
+        self.assertEqual(self.post('select',self.selection(connection,catalogue['catalogue_revision']))['profile'],'planner')
+        structured=self.selection(connection,catalogue['catalogue_revision']);structured['profile']='structured_review'
+        self.assertEqual(self.post('select',structured,status=409)['code'],'route_unqualified')
+
+
 class OpenRouterLocalTests(unittest.TestCase):
     def test_actual_local_handler_allowed_path_denials_and_no_new_web_inference(self):
         from contextlib import ExitStack,redirect_stdout
@@ -289,4 +363,3 @@ class OpenRouterLocalTests(unittest.TestCase):
                     from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
                     with self.assertRaises(ReviewInferenceError):adapter.require_available(adapter.settings('example/model:free'))
                     adapter.transport.assert_not_called()
-

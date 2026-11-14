@@ -60,6 +60,18 @@ def endpoint_fingerprint(endpoint):
         'supports_tool_choice','context_length','max_prompt_tokens','max_completion_tokens','supports_implicit_caching')})
 
 
+def compatible_model(raw, task):
+    """Model-level facts must support the selected task as well as its endpoint."""
+    architecture=raw.get('architecture')
+    parameters=raw.get('supported_parameters')
+    if (not isinstance(architecture,dict) or not isinstance(parameters,list)
+            or any(not isinstance(item,str) for item in parameters)
+            or architecture.get('input_modalities')!=['text'] or architecture.get('output_modalities')!=['text']):
+        return False
+    required={'planner':{'tools','tool_choice'},'structured_review':{'response_format','structured_outputs'}}
+    return task in required and required[task]<=set(parameters)
+
+
 def normalize(rows, profiles=(), *, now=None):
     if not isinstance(rows,list) or len(rows)>2000:
         raise ProviderError('catalogue_unavailable')
@@ -88,13 +100,13 @@ def normalize(rows, profiles=(), *, now=None):
             parameters=raw.get('supported_parameters',[])
             if not isinstance(architecture,dict) or not isinstance(parameters,list) or any(not isinstance(x,str) for x in parameters):
                 raise ProviderError('catalogue_unavailable')
-            compatible=(architecture.get('input_modalities')==['text'] and architecture.get('output_modalities')==['text']
-                        and isinstance(parameters,list) and {'tools','tool_choice'}<=set(parameters))
+            compatible=any(compatible_model(raw,task) for task in ('planner','structured_review'))
             state='candidate' if compatible else 'blocked'
             reasons=['endpoint_qualification_required'] if compatible else ['unsupported_capabilities']
             if not simple_prices:
                 state,reasons='blocked',['unsupported_pricing']
-            elif compatible and any(p.model==ident and p.expires_at>now and p.evidence for p in profiles):
+            elif compatible and any(p.model==ident and p.expires_at>now and p.evidence
+                    and any(compatible_model(raw,task) for task in p.tasks) for p in profiles):
                 state,reasons='eligible',[]
             result.append({'id':ident,'name':name,'input_usd_per_million':decimal_text(price(amounts['prompt'])*1_000_000),
                            'output_usd_per_million':decimal_text(price(amounts['completion'])*1_000_000),

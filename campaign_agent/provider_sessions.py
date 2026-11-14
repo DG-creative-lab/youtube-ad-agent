@@ -12,7 +12,7 @@ from time import time
 
 from .access import WorkspaceContext
 from .migrations import migrate_path
-from .model_catalogue import CatalogueCache, fingerprint, normalize, select_endpoint, model_id, price
+from .model_catalogue import CatalogueCache, fingerprint, normalize, select_endpoint, compatible_model, model_id, price
 from .ports.access import AccessRequest, AccessUnavailable
 from .ports.inference import ForegroundCredential, ProviderError
 
@@ -239,9 +239,20 @@ class ProviderSessions:
         if existing and existing[0]!=request_hash:
             raise ProviderError('operation_conflict')
         entry=self.cache.get(ident,self.clock())
-        if entry is None or entry['catalogue_revision']!=data['catalogue_revision'] or not any(r['id']==data['model_id'] for r in entry['models']):
+        if not existing and (entry is None or entry['catalogue_revision']!=data['catalogue_revision']
+                or not any(r['id']==data['model_id'] for r in entry['models'])):
             raise ProviderError('selection_stale')
         self.metadata.validate_key(credential)
+        # An admitted operation is durable, but neither its former cache entry nor
+        # its old compatibility result supplies current selection authority.
+        current_models=self.metadata.models(credential)
+        current_rows=self._safe(normalize(current_models,self.profiles,now=self.clock()),credential)
+        current=next((row for row in current_rows if row['id']==data['model_id']),None)
+        raw=next((row for row in current_models if row.get('id')==data['model_id']),None)
+        if current is None or current['state']=='blocked' or raw is None or not compatible_model(raw,data['profile']):
+            raise ProviderError('route_unqualified')
+        if not existing and current!=next(row for row in entry['models'] if row['id']==data['model_id']):
+            raise ProviderError('selection_stale')
         selected=select_endpoint(data['model_id'],data['profile'],self.metadata.endpoints(credential,data['model_id']),self.profiles,self.clock())
         rates=selected['prices']
         maximum=price(rates['prompt'])*selected['max_input_tokens']+price(rates['completion'])*selected['max_output_tokens']+price(rates.get('request','0'))
@@ -259,8 +270,6 @@ class ProviderSessions:
             self._owned(db,ident,data['tab_id'],context,credential)
             found=db.execute('SELECT request_hash,snapshot FROM provider_selections WHERE connection_id=? AND operation_id=?',
                              (ident,data['operation_id'])).fetchone()
-            if entry['expires_at']<=self.clock():
-                raise ProviderError('selection_stale')
             if selected['charging_profile_expires_at']<=self.clock():
                 raise ProviderError('route_unqualified')
             if found:
@@ -270,6 +279,10 @@ class ProviderSessions:
                 if {k:v for k,v in saved.items() if k!='selection_id'}!=selected:
                     raise ProviderError('selection_stale')
                 return saved
+            if existing:
+                raise ProviderError('operation_conflict')
+            if entry is None or entry['expires_at']<=self.clock():
+                raise ProviderError('selection_stale')
             selected={'selection_id':secrets.token_hex(32),**selected}
             db.execute('INSERT INTO provider_selections VALUES(?,?,?,?,?,?)',
                 (selected['selection_id'],ident,data['operation_id'],request_hash,json.dumps(selected,sort_keys=True),self.clock()))

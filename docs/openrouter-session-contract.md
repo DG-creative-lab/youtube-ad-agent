@@ -376,6 +376,15 @@ new operation IDs bound to an existing connection. Backups/restores revoke conne
 authority while retaining selections and domain history. Disconnect uses local
 session proof and works when upstream authority is unavailable.
 
+First selection admission requires its current catalogue revision. Replaying an
+already admitted operation recovers the same durable selection after cache expiry,
+eviction or service reopen without requiring that former cache entry. Both paths
+still prove current connection/key/access and refresh model/endpoint metadata and
+charging-profile validation. Current text modalities and advertised capabilities
+must support the selected planner or structured-review profile; an eligible
+catalogue row is not permission to use every profile. Changed operation inputs,
+incompatible current metadata or changed pinned profile/settings fail closed.
+
 New metadata commands collect command-bound permits from the existing access
 adapters, then check original deadlines, local session and native campaign identity
 at admission without remote authority/provider calls under the write lock.

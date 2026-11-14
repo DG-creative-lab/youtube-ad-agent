@@ -32,7 +32,8 @@ class AuthoredProviderMetadata:
     def __init__(self):
         self.requests=[]
         self.rows=[{'id':'fixture/tool-model','name':'Authored tool model','architecture':{'input_modalities':['text'],'output_modalities':['text']},
-                    'supported_parameters':['tools','tool_choice'],'pricing':{'prompt':'0','completion':'0','request':'0'}}]
+                    'supported_parameters':['tools','tool_choice','response_format','structured_outputs'],
+                    'pricing':{'prompt':'0','completion':'0','request':'0'}}]
         self.endpoint={'tag':'fixture/qualified','model_id':'fixture/tool-model','context_length':32000,
             'supported_parameters':['tools','tool_choice','parallel_tool_calls','max_completion_tokens','response_format','structured_outputs'],
             'supports_tool_choice':{'required':True},'pricing':{'prompt':'0','completion':'0','request':'0'}}

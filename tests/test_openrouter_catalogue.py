@@ -76,4 +76,3 @@ class OpenRouterMetadataTests(unittest.TestCase):
             self.assertEqual(result[ident]['state'],'blocked')
         self.assertEqual(result['fixture/conditional']['input_usd_per_million'],'1.000000')
         with self.assertRaises(ProviderError):select_endpoint('fixture/tool-model','planner',[self.fixture.endpoint],(),__import__('time').time())
-

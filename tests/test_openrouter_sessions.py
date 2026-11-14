@@ -99,4 +99,3 @@ class CapturedReceiptCompatibilityTests(unittest.TestCase):
         self.assertEqual(reopened.start_next_test(case.case.campaign,2,case.case.fingerprint,case.review['id'],
             mode='openrouter',model=draft_fixtures.MODEL,operation_id=op),run)
         reopened.resume(run);blocked.assert_not_called();self.assertEqual(case.transport.call_count,1)
-
