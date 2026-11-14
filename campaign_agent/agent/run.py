@@ -65,7 +65,8 @@ class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
-                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None):
+                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
+                 web=False):
         operator.require_brand(context.scope)
         self.operator = operator
         self.scope = context.scope
@@ -113,6 +114,9 @@ class AgentRuntime:
 
         self.planner = PlacementAgent(self, main_models, transport=main_transport,
                                       simulator=planner_simulator, classifier=placement_classifier)
+        # Fresh web inference stays disabled until the shared A2b admission ledger exists.
+        # Existing received receipts remain readable/recoverable without a new call.
+        self.openrouter.web_disabled = self.openrouter_drafts.web_disabled = self.planner.remote.web_disabled = web
 
     def require(self, capability):
         self.operator.require_brand(self.scope)
@@ -189,6 +193,8 @@ class AgentRuntime:
                 if json.loads(existing[0]) != source or (json.loads(saved[0]) if saved else {"mode": "offline"}) != settings:
                     raise ValueError("This drafting operation was already used for a different request.")
                 return run_id
+            if mode=='openrouter' and self.openrouter_drafts.web_disabled:
+                self.openrouter_drafts.require_available(settings)
             self._next_test_context(db, source)
             db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (run_id, self.scope.client_id, self.scope.brand_id,
@@ -236,6 +242,8 @@ class AgentRuntime:
                     if json.loads(row[0])["test_id"] != test_id or json.loads(row[1]) != settings:
                         raise ValueError("This review operation was already used for a different request.")
                     return run_id
+        if mode=='openrouter' and self.openrouter.web_disabled:
+            self.openrouter.require_available(settings)
         context = self.instruction_tests.review_context(test_id)
         if operation_id is None:
             run_id = package_fingerprint({

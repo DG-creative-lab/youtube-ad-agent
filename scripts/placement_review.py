@@ -12,6 +12,7 @@ import secrets
 import sqlite3
 import sys
 from threading import Thread
+from time import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -32,6 +33,8 @@ from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.ports.access import AccessUnavailable
+from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, parse_command
+from campaign_agent.ports.inference import ProviderError
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
 from scripts.google_ads_sandbox import google_transport
 
@@ -75,7 +78,8 @@ def youtube_search(key, query, page):
 
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None):
+          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
+          provider_metadata=None, provider_profiles=()):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -94,7 +98,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
     agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
                                           openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
                                           openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
-                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario)
+                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,web=True)
+    providers=ProviderSessions(draft_path,metadata=provider_metadata,profiles=provider_profiles) if agent else None
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
@@ -137,6 +142,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
 
         def check_host(self):
             if self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}":
+                if self.path.startswith('/api/openrouter/'):
+                    error=ProviderError('access_denied');self.send(error.status,error.response())
+                    return False
                 self.send(403, {"error": "Open the loopback URL printed in the terminal."})
                 return False
             return True
@@ -156,6 +164,12 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     self.post_viewer()
                 else:
                     self.send(404, {"error": "Not found."})
+                return
+            if self.path.startswith('/api/openrouter/'):
+                self.post_provider()
+                return
+            if self.headers.get('X-OpenRouter-Key') is not None:
+                self.send(400,{'error':'Use credential headers only on provider commands.'})
                 return
             if self.path in {"/api/agent/run", "/api/agent/next-test", "/api/agent/instruction-review",
                              "/api/agent/experiment-next-test", "/api/agent/placements"}:
@@ -281,6 +295,37 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(503, {"error": "Could not complete this action. Try again."})
             else:
                 self.send(200, result)
+
+        def post_provider(self):
+            try:
+                if not secrets.compare_digest(self.headers.get('X-Local-Operator','').encode(),operator_token.encode()):
+                    raise ProviderError('access_denied')
+                if self.headers.get('Origin')!=f'http://127.0.0.1:{self.server.server_port}':
+                    raise ProviderError('access_denied')
+                if providers is None or '?' in self.path:
+                    raise ProviderError('invalid_request')
+                length=self.headers.get('Content-Length','')
+                if self.headers.get_content_type()!='application/json' or not re.fullmatch(r'[0-9]{1,4}',length) or not 0<int(length)<=4096:
+                    raise ProviderError('invalid_request')
+                data=parse_command(self.rfile.read(int(length)))
+                action=self.path.removeprefix('/api/openrouter/')
+                values=self.headers.get_all('X-OpenRouter-Key',[]) if hasattr(self.headers,'get_all') else ([self.headers['X-OpenRouter-Key']] if 'X-OpenRouter-Key' in self.headers else [])
+                command={'method':'POST','path':self.path,'query':{},'body':data}
+                context=ProviderContext(agent.operator.id,agent.drafts.context,agent.drafts.campaign_id,
+                    hashlib.sha256(operator_token.encode()).hexdigest(),time()+3600,command,
+                    lambda:agent.operator.require_brand(agent.drafts.context.scope))
+                result=providers.command(action,data,values,context,agent.drafts.access)
+                self.send(200,result)
+            except ProviderError as error:
+                self.send(error.status,error.response())
+            except AccessUnavailable:
+                error=ProviderError('authority_unavailable');self.send(error.status,error.response())
+            except PermissionError:
+                error=ProviderError('access_denied');self.send(error.status,error.response())
+            except (ValueError,TypeError,UnicodeError,RecursionError):
+                error=ProviderError('invalid_request');self.send(error.status,error.response())
+            except Exception:
+                error=ProviderError('catalogue_unavailable');self.send(error.status,error.response())
 
         def post_catalog(self):
             if not self.check_operator():
@@ -539,8 +584,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "googleAdsReporting": reporting is not None,
                         "instructionTestLimits": {"initial": INITIAL_SAMPLE_SIZE, "batch": ADDITIONAL_BATCH_SIZE,
                                                   "cap": SAMPLE_CAP, "batchCost": POLICY_V1["batch_cost"]},
-                        "openrouterReviewModels": list(agent.openrouter.models) if agent else [],
-                        "openrouterDraftModels": list(agent.openrouter_drafts.models) if agent else [],
+                        "openrouterReviewModels": [],
+                        "openrouterDraftModels": [],
                         "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,
                         "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}

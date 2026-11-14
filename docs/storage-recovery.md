@@ -4,6 +4,13 @@
 
 ## Supported topology
 
+A2a adds schema version 3 for foreground provider connection/verifier,
+reconnect-operation and immutable selection metadata. Raw keys are absent from
+SQLite and backups. Backup copies and restored stores revoke all connection
+authority, including local operator connections without a staff-session table;
+selections/domain history remain intact. No inference ledger or provider vault is
+added by this migration. [Foreground contract](openrouter-session-contract.md)
+
 This slice targets one application instance/worker with SQLite and a private
 filesystem on the same durable local volume. SQLite serializes competing writers;
 commands retain expected-revision conflicts and existing bounded lock waits.

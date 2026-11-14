@@ -26,3 +26,16 @@ class GateplaneClient(Protocol):
 
 class AccessUnavailable(RuntimeError):
     """Current authorization cannot be established; no private action is permitted."""
+
+
+@dataclass(frozen=True)
+class CommandPermit:
+    """In-process projection of an already validated command decision; never a browser token."""
+    request: AccessRequest
+    command_hash: str
+    staff_session_digest: str
+    campaign_revision: str
+    native_snapshot_hash: str
+    decision_id: str
+    valid_until: float
+    wall_expires_at: float

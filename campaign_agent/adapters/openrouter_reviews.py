@@ -62,6 +62,7 @@ class OpenRouterInference:
             raise ValueError("Configure explicit OpenRouter model IDs ending in :free.")
         self.models = tuple(dict.fromkeys(models))
         self.transport = transport or send_request
+        self.web_disabled = False
 
     def settings(self, model):
         if model not in self.models:
@@ -69,10 +70,12 @@ class OpenRouterInference:
         return {"mode": "openrouter", "model": model, "prompt_version": self.prompt_version,
                 "max_calls": 1, "max_output_tokens": MAX_OUTPUT_TOKENS, "max_cost_usd": 0}
 
-    def require_available(self, settings):
+    def require_available(self, settings, credential=None):
+        if self.web_disabled:
+            raise ReviewInferenceError('Browser inference awaits scoped admission and recovery. Use offline mode.')
         if settings != self.settings(settings["model"]):
             raise ReviewInferenceError("This inference configuration is unavailable. Start a new operation.")
-        if not os.environ.get("OPENROUTER_API_KEY", "").strip():
+        if credential is None and not os.environ.get("OPENROUTER_API_KEY", "").strip():
             raise ReviewInferenceError("Configure OPENROUTER_API_KEY on the server before using OpenRouter inference.")
 
     def complete(self, context, settings, evidence, *, system, schema, name, output_key):
@@ -105,11 +108,11 @@ class OpenRouterInference:
             raise ReviewInferenceError("The inference input exceeds the configured request limit.")
         return encoded
 
-    def chat(self, context, settings, body):
-        self.require_available(settings)
+    def chat(self, context, settings, body, *, credential=None):
+        self.require_available(settings, credential)
         encoded = self.encode_request(settings, body)
         request = Request(ENDPOINT, data=encoded, headers={
-            "Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"], "Content-Type": "application/json",
+            "Authorization": "Bearer " + (credential.key if credential is not None else os.environ["OPENROUTER_API_KEY"]), "Content-Type": "application/json",
         })
         try:
             with self.transport(request, timeout=30) as response:
