@@ -149,8 +149,9 @@ staff/public origins and current exact approval semantics.
 Return a proposed topology, migration/transaction contract, region/plan eligibility,
 cost assumptions, performance/recovery acceptance and unresolved decisions. Do not
 provision accounts, deploy, migrate data, call models or rewrite persistence. Send
-schema proposals to the #37 owner and job/credential requirements to #38/#39; do
-not implement competing foundations.
+schema proposals and job/credential requirements to the coordinator for the
+#37/#38/#39 owners; do not post messages, mutate issues or implement competing
+foundations from this read-only assignment.
 
 ## Independent reviewer handoff
 
@@ -177,6 +178,10 @@ path when browser behavior changes. Check persisted outcome/export as well as
 visible text. Exercise restart and adversarial cases where the changed boundary
 makes them relevant; do not add tests merely to mirror code.
 
+Normal acceptance requires clean tracked source, lockfiles and workflows matching
+the recorded commit. List generated artifacts separately. Fault injection belongs
+in a disposable copy and cannot replace final acceptance on the actual head.
+
 Return a separate evidence record. A check needing an unavailable dependency is
 blocked, not passed. A source inspection is not an executed test. Historical green
 CI does not establish current integration success, live model quality, usability
@@ -191,7 +196,7 @@ stage: "build | review | verify | integrate"
 base_commit: "actual SHA"
 head_commit: "actual SHA"
 integration_commit: "actual SHA, or not_run with reason"
-dirty_state: "clean, or explicitly listed changes"
+dirty_state: "clean tracked source/lockfiles/workflows; list generated artifacts separately"
 checks:
   - name: "check or acceptance scenario"
     kind: "executed | source_inspection | historical"
