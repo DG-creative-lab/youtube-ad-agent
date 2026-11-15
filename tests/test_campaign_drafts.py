@@ -1,4 +1,6 @@
+from contextlib import closing
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -53,6 +55,53 @@ class CampaignDraftTests(unittest.TestCase):
                 self.save(1, [EDITING, invalid])
         self.assertEqual(self.drafts.read()["placements"], [])
         self.assertIsNone(self.drafts.read(2))
+
+    def test_borrowed_connection_leaves_commit_and_rollback_to_the_caller(self):
+        payload = {"campaign_id": "tts-sample", "revision": 1, "placements": [EDITING]}
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute("CREATE TABLE draft_markers (label TEXT PRIMARY KEY)")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT INTO draft_markers VALUES ('rolled back')")
+            self.drafts.save(payload, connection=db)
+            self.assertEqual(self.drafts.read()["revision"], 1)
+            db.rollback()
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [])
+            self.assertEqual(self.drafts.read()["revision"], 1)
+
+            db.execute("BEGIN IMMEDIATE")
+            saved = self.drafts.save(payload, connection=db)
+            db.execute("INSERT INTO draft_markers VALUES ('committed')")
+            self.assertEqual(self.drafts.read()["revision"], 1)
+            db.commit()
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), saved)
+        self.assertIsNone(reopened.read(3))
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
+
+    def test_write_unit_rolls_back_post_save_failure_and_commits_sibling_records(self):
+        payload = {"campaign_id": "tts-sample", "revision": 1, "placements": [EDITING]}
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("CREATE TABLE draft_markers (label TEXT PRIMARY KEY)")
+            seed = db.execute("SELECT * FROM campaign_revisions").fetchall()
+        for failure in (RuntimeError, KeyboardInterrupt):
+            with self.subTest(failure=failure), self.assertRaises(failure):
+                with self.drafts.write_unit() as db:
+                    self.drafts.save(payload, connection=db)
+                    db.execute("INSERT INTO draft_markers VALUES ('interrupted')")
+                    raise failure('Interrupted after draft and sibling write')
+            with closing(sqlite3.connect(self.path)) as db:
+                self.assertEqual(db.execute("SELECT * FROM campaign_revisions").fetchall(), seed)
+                self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [])
+        with self.drafts.write_unit() as db:
+            saved = self.drafts.save(payload, connection=db)
+            db.execute("INSERT INTO draft_markers VALUES ('committed')")
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), saved)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT * FROM campaign_revisions WHERE revision=1").fetchall(), seed)
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
 
     def test_catalog_and_sample_campaigns_are_separate(self):
         self.save(1, [EDITING])

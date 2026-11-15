@@ -29,12 +29,12 @@ the coordinator records dispatch and acceptance evidence against exact commits.
 | A4 | [#56 Conversational briefs/versioned guidance](https://github.com/DG-creative-lab/youtube-ad-agent/issues/56) | Blocked on #52/#55 | Separate runtime skills/guidance from development-agent skills. |
 | A5 | [#57 Reviewed voice artifacts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/57) | Blocked on provider/guidance/assets/budget contracts | Offline first; later live trial ceiling is £4 total. |
 | A6 | [#58 Reviewed project-learning proposals](https://github.com/DG-creative-lab/youtube-ad-agent/issues/58) | Blocked on #55/#56 | Preserve native evidence eligibility and uncertainty. |
-| E41a | [#59 Hosted topology/migration decision](https://github.com/DG-creative-lab/youtube-ad-agent/issues/59) | Concrete proposed v1 decision for independent review/human acceptance | [Selected topology and first port](../hosted-topology-decision.md); child of #41; no deployment or schema implementation. |
+| E41a | [#59 Hosted topology/migration decision](https://github.com/DG-creative-lab/youtube-ad-agent/issues/59) | Accepted design, merged PR #73; #59 closed | [Selected topology and first port](../hosted-topology-decision.md); child of #41; no deployment or schema implementation. |
 
 Do not dispatch all backlog issues as simultaneous builders. Earlier #49/#50 and
-#52/#53 delivery order is historical. The current #59 documentation contract is
-dependency-ready; #55 runtime is blocked. Research on later dependencies can run
-as bounded read-only work without authorizing implementation.
+#52/#53 delivery order is historical. #59's merged design is an accepted dependency;
+#37 implementation remains open and #55 runtime is blocked. Research on later
+dependencies can run as bounded read-only work without authorizing implementation.
 
 ## Baseline and dispatch gate
 
@@ -285,7 +285,7 @@ storage/all-campaign restore/admission agreement. No producer/storage acceptance
 or runtime dispatch follows from human product-document acceptance. Refresh main,
 next migration ownership and a complete new task contract before A3b.
 
-### Current #59 decision and retained implementation gates · 15 November 2026
+### Accepted #59 decision and retained implementation gates · 15 November 2026
 
 PR #72 merged at `51e4b6dfd9a90794230572ae96f0eff27656cdb0`, tree
 `39eaa19fd823840b2f212371154604fff5046d05`, accepting the A3a artifacts only.
@@ -294,12 +294,28 @@ service/recipient/revoke evidence and separate #36/#37 acceptance. The accepted
 all-campaign missing-link restore fence remains mandatory. #52/#53 and #54
 implementation are delivered; #70 retains real foreground qualification.
 
-E41a-59 v1 owns exactly five documentation paths on
-`feature/hosted-topology-decision` from that accepted base. The
-[proposed decision](../hosted-topology-decision.md) selects Frankfurt Vercel Python
-ASGI staff/viewer projects, Neon Postgres and private Vercel Blob, names the first
-native transaction caller and defines integrity-before-bytes, coherent recovery,
-preview isolation and measurable owner gates. Earlier #59 research is not accepted
-runtime. Human merge accepts the design proposal only, with independent exact-head
-review/document verification and unchanged CI; no service/account/cost/deploy,
-database/browser/performance or provider acceptance is claimed.
+E41a-59 v1 merged in PR #73 at
+`a7fba7151f2755a93ff61cccf369d089c63df96c`, accepting the
+[hosted decision](../hosted-topology-decision.md) as design only. #59 is closed;
+#37 remains open. The Frankfurt Vercel Python ASGI staff/viewer projects, Neon
+Postgres, private Vercel Blob, integrity-before-bytes, coherent recovery, preview
+isolation and measured owner gates are not runtime or deployment acceptance.
+
+### E37a.1 native SQLite write unit · 15 November 2026
+
+The bounded implementation starts from accepted base `a7fba7151f2755a93ff61cccf369d089c63df96c`
+on `feature/placement-write-unit`. `CampaignDrafts.write_unit()` now owns the
+native SQLite connection/transaction for standalone saves and the planner's
+extracted final tool commit. Existing application owners retain all validation,
+authority, savepoint and revision checks; received inference receipts remain in
+their original separate phase. Only two source files, their two native test files
+and three mapping/status documents are owned by this slice.
+
+Independent exact-head review/verification and current unchanged CI remain
+required before human merge. The next serial #37 scope is the complete native
+repository/read/start/initializer graph, followed by actual PostgreSQL
+repositories, transactions and conformance. Foreground sessions/ledger/semantic
+receipts/permit reads require their own complete port before provider activation.
+No database switch, Postgres driver/schema, cloud/media adapter, project authority
+or migration slot is introduced here. #55's merged artifacts remain separate
+from its blocked runtime and all-campaign restore admission acceptance.

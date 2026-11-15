@@ -302,39 +302,44 @@ class PlacementAgent:
                         setup_id=source['delivery_setup_id'], demo_scenario=source.get('delivery_demo_scenario'))
                 except PackageConflict:
                     pass
-            with closing(sqlite3.connect(self.path)) as db, db:
-                db.execute('BEGIN IMMEDIATE')
-                _, status = self.owner._owned_run(db, run_id)
-                if status != 'running':
-                    return self.read(run_id)
-                source = self._context(db, run_id)
-                if db.execute('SELECT 1 FROM agent_steps WHERE run_id=? AND position=?', (run_id, position)).fetchone():
-                    continue
-                history = self._history(db, run_id)
-                self.owner.require("youtube:agent.run")
-                db.execute('SAVEPOINT planner_tool')
-                try:
-                    result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
-                except PackageConflict:
-                    db.execute('ROLLBACK TO planner_tool')
-                    if receipt['tool'] not in {'review_performance', 'load_experiment_evidence',
-                                               'assess_instruction_experiment', 'prepare_next_test', 'respond'}:
-                        raise
-                    result, status = self.review_tools.refresh_outcome(source, history, receipt['tool']), 'needs_input'
-                except (ValueError, TypeError):
-                    db.execute('ROLLBACK TO planner_tool')
-                    result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
-                db.execute('RELEASE planner_tool')
-                db.execute('INSERT INTO agent_steps VALUES(?,?,?,?)',
-                           (run_id, position, receipt['tool'], json.dumps(result)))
-                if status == 'running' and position + 1 >= source['max_turns']:
-                    result, status = {'revision': source['revision'], 'ambiguous': [],
-                                      'message': 'The turn allowance is exhausted. Start a new request with more context.',
-                                      'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
-                if status != 'running':
-                    self._finish(db, run_id, result, status)
+            if not self._commit_turn(run_id, position, receipt, classified, captured_review):
+                return self.read(run_id)
         if self.owner.foreground: self.owner.foreground.policy.refresh()
         return self.read(run_id)
+
+    def _commit_turn(self, run_id, position, receipt, classified, captured_review):
+        """Commit one received tool turn, rechecking current native state."""
+        with self.drafts.write_unit() as db:
+            _, status = self.owner._owned_run(db, run_id)
+            if status != 'running':
+                return False
+            source = self._context(db, run_id)
+            if db.execute('SELECT 1 FROM agent_steps WHERE run_id=? AND position=?', (run_id, position)).fetchone():
+                return True
+            history = self._history(db, run_id)
+            self.owner.require("youtube:agent.run")
+            db.execute('SAVEPOINT planner_tool')
+            try:
+                result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
+            except PackageConflict:
+                db.execute('ROLLBACK TO planner_tool')
+                if receipt['tool'] not in {'review_performance', 'load_experiment_evidence',
+                                           'assess_instruction_experiment', 'prepare_next_test', 'respond'}:
+                    raise
+                result, status = self.review_tools.refresh_outcome(source, history, receipt['tool']), 'needs_input'
+            except (ValueError, TypeError):
+                db.execute('ROLLBACK TO planner_tool')
+                result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
+            db.execute('RELEASE planner_tool')
+            db.execute('INSERT INTO agent_steps VALUES(?,?,?,?)',
+                       (run_id, position, receipt['tool'], json.dumps(result)))
+            if status == 'running' and position + 1 >= source['max_turns']:
+                result, status = {'revision': source['revision'], 'ambiguous': [],
+                                  'message': 'The turn allowance is exhausted. Start a new request with more context.',
+                                  'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
+            if status != 'running':
+                self._finish(db, run_id, result, status)
+        return True
 
     def _finish(self, db, run_id, result, status):
         db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
