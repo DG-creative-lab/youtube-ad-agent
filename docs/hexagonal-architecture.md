@@ -34,7 +34,11 @@ marked `proposed` does not exist at base; these path strings are plans, not link
 to implemented code. Shared `rules` are referenced per module. Python imports are
 rows using `import_columns`: kind, source module, relative level, imported name /
 alias pairs, line, resolved dependencies, nested flag, TYPE_CHECKING flag, migration
-owner and removal milestone. Both literal `__import__('json')` in local access
+owner and final removal milestone, followed by dependency class, retirement targets
+and retirement rule. A null removal milestone is valid only for retained pure,
+core-contract, technology-adapter or explicit support uses; their role and actual
+operations still require checking. It is not a module exemption. Both literal
+`__import__('json')` in local access
 and `__import__('math')` in OpenRouter metadata are included. Web imports are
 source-observed specifiers/resources; API literals are observations, not a complete
 JavaScript execution graph. No runtime checker is provided by this table.
@@ -70,15 +74,28 @@ caller; no generic framework or speculative interface layer is required.
 
 Domain permits deterministic stdlib values/calculations (`dataclasses`, `enum`,
 `typing`, `collections.abc`, `functools`, `math`, `decimal`, `hashlib`, `json`, `re`,
-`datetime`, `unicodedata`) when used without I/O, clock reads or environment access.
+`datetime`, `unicodedata`, and deterministic `hmac.compare_digest`) when used
+without I/O, clock reads or environment access. Reviewed deterministic
+`urllib.parse` parsing/encoding (`urlsplit`, `quote`, `urlencode`, `parse_qs`)
+may remain beside business URI validation. These text operations neither open a
+URL nor require a parser port; they must not move business validation outward
+solely because their package is named urllib.
 Application/ports may use stdlib in the same effect-free way for their inputs and
 orchestration. No third-party pure dependency exception is currently approved;
 #84 requires an exact package/module/use justification before adding one.
-`sqlite3`, SQL, driver exceptions, Starlette/http.server/Uvicorn, urllib/requests,
+`sqlite3`, SQL, driver exceptions, Starlette/http.server/Uvicorn,
+`urllib.request`/`urllib.error`/requests network mechanics,
 Google SDKs, provider adapters, Path/file operations, environment key lookup and
 startup schema effects belong outside core. Clock/ID/media/cache dependencies are
 injected purpose-specific contracts only where an existing caller needs the effect.
-A bootstrap default cannot be hidden in an application constructor.
+A bootstrap default cannot be hidden in an application constructor. The map
+explicitly assigns current Path/file, os/stat, native closing/transactions,
+clock/UUID/secrets and cache/lock uses to their actual adapter/composition owners.
+`runtime_values` port/adapter targets support existing clock/ID callers beginning
+with #86; later caller adoption remains separately owned. Mathematical memoization
+in `instruction_policy` remains deterministic policy; mutable connection-scoped
+catalogue/cache/locks move to `memory_catalogue` under #87. Time-zone database
+lookup is an adapter effect; core window validation uses supplied zone facts.
 
 Approved proposed construction roots are `bootstrap/services.py`, `planner.py`, `local.py`,
 `hosted.py`, `authored.py`, `agent_cli.py`, `google_ads_cli.py`, `fixture_cli.py`,
@@ -210,7 +227,7 @@ The manifest's milestone graph is authoritative and acyclic:
 | 85-core | 84-initial | #85 relocates reusable core/errors and flips internal imports; outward debt stays explicitly owned. |
 | 87-foundation | 85-core | #87 first provides MainModel/ModelInference/classifier typed contracts and real injectable offline adapters needed by the pilot; other external adoption follows later. |
 | 86-first-uow | 87-foundation | #86 adopts the complete bounded local placement workflow below, including native supporting reads/startup and its minimal composition root. |
-| 87-external | 86-first-uow | #87 serially inverts shared model/access/effect construction and typed errors; #36/#39/#70 retain activation. |
+| 87-external | 86-first-uow | #87 serially inverts shared model/access/effect construction/errors and supplies the minimal services factory for real callers; #88 later consolidates the other roots. #36/#39/#70 retain activation. |
 | 88-composition | 87-external | #88 makes local/hosted/CLI/tool startup explicit and transport thin; all accepted initial graphs remain supported. |
 | 37-native-graph | 88-composition | #37 finishes every residual native graph listed below using accepted contracts. No PG required. |
 | 84-strict | 37-native-graph | #84 baseline empty; all classified core has zero outward violations. |
@@ -233,11 +250,14 @@ terminal conversation reply. #87-foundation supplies actual model/classifier
 contracts/offline implementations first. #86 owns `bootstrap/planner.py` as minimal
 composition, with all native owner/preimage/catalogue/revision/approval/instruction-
 version/session/message/job/turn/run/step and classifier-phase participants,
-`sqlite_schema.py`, `sqlite_workspace_admission.py`, `sqlite_planner_startup.py`
-and logical media reads required by that workflow. It must move every needed
+`sqlite_schema.py`, `sqlite_workspace_admission.py`, `sqlite_planner_startup.py`,
+`sqlite_conversation_lifecycle.py` and logical media reads required by that
+workflow. It must move every needed
 constructor/adoption effect into explicit adapter startup before instantiating
 adopted core services. No dependency on a future #88 factory or #37 final native
-participant is permitted.
+participant is permitted. First-pilot original-permit/preimage policy in
+`application/access.py` is also delivered at #86 with typed owner facts; #87
+external authority adoption does not delay that local acceptance fence.
 
 In particular, placement `start` always invokes `CampaignReviewTools.pin`, reading
 `CampaignPerformance.saved_review` and `InstructionTests.started_for_package`;
@@ -245,6 +265,19 @@ In particular, placement `start` always invokes `CampaignReviewTools.pin`, readi
 participants: #86 extracts typed `ports/planner_context.py`,
 `application/planner_context.py` and `sqlite_planner_context.py` for these reads.
 It must not bypass them, hardcode missing evidence or defer them to #37.
+
+Conversation `begin` is also mandatory on every placement `start`: it executes
+its joined prior-running-run SELECT even on an empty store, then supersedes each
+matching unfinished run by status, planner-job outcome and assistant reply before
+creating the new turn. #86 explicitly owns all these operations in the typed
+conversation/run/planner repositories and `sqlite_conversation_lifecycle.py`.
+The same #86 adapter startup owns constructor DDL and legacy transcript adoption
+(including original message/outcome replay). Preserve full owner/actor/session,
+settings/prompt-version and stale-after-message checks. Superseded writes and the
+new settings/user message/default/run/job remain in the caller's parent UOW;
+a failed new message rolls them all back while preserving prior received evidence.
+None of this first-pilot startup, selection, outcome, status or reply work waits
+for #37, and no raw handle callback may bridge it.
 
 Other review/setup/delivery/experiment/structured/foreground commands stay supported
 on their original single native store under named shrinking-baseline debt until
@@ -255,11 +288,11 @@ reusing the accepted minimal root. No backend switch is allowed for partial grap
 
 | Current family | Residual responsibility / acceptance |
 | --- | --- |
-| Drafts/planner/run/conversations/review | Eager DDL/admission/seed; approvals/instruction versions/catalogue backfill; planner joined history/defaults; conversation legacy adoption and supersession selection/outcome; structured test-source/inference records and review freshness. First planner participants and pin/correction reads #86; residual structured/review graph #37. Native rollback, followup, received-write fault and reopen/replay retain exact rows. |
-| Access/workspaces/staff/capabilities | Native ownership/preimage/permit reads, immutable provisioning/demo admission, sessions/CSRF/expiry and advisory catalogue facts. #87 owns consumer access/identity inversion; #37 owns same-store records; #88 startup. Full owner/private scope checks precede projection. |
+| Drafts/planner/run/conversations/review | All pilot DDL/admission/seed, draft/approval/instruction/catalogue facts, planner joined history/defaults, conversation constructor/adoption and begin supersession selection/status/job-outcome/reply belong to #86, including nonempty followups. Only genuinely nonpilot structured test-source/inference and review/experiment write/freshness participants remain #37; no conversation lifecycle prerequisite is deferred. Native rollback, followup, received-write fault and reopen/replay retain exact rows. |
+| Access/workspaces/staff/capabilities | First-pilot owner/preimage/permit policy/reads and explicit local admission are #86. Remaining trusted provisioning, staff session/CSRF/expiry and advisory catalogue records are #37; #87 completes external access/identity integration and #88 other startup. Full owner/private scope checks precede projection. |
 | Discovery/setup/reporting | Catalogue/provenance and selection; exact setup approval/reservation/receipt/unknown/readback; report snapshots/native grain/tagged attribution. #86 owns pilot catalogue records, #87 provider ports, #37 remaining storage. Denied/stale setup causes zero dispatch; uncertain effects never repeat. |
-| Measurement/performance/instruction tests/learning | Visit/event/assignment/aggregate reads, review/correction freshness, pair/snapshot/source-test/finding lineage and fresh-brief saves. #37 owns complete same-store record graph; #85 pure policy splits. Preserve denominators, scoped source evidence, current corrections and atomic followup. |
-| Assets/publications/recovery/schema | Private catalog/blob metadata, publication/link/event atomicity, exact media integrity and filenames, operator checkpoint/restore invalidation and ordered legacy migrations. #37 native graph, #88 explicit startup; actual object storage/PG recovery is later. No copied authority or absent-link bypass. |
+| Measurement/performance/instruction tests/learning | Visit/event/assignment/aggregate reads, review/correction freshness, pair/snapshot/source-test/finding lineage and fresh-brief saves. #86 owns the already named pilot saved-review/correction/started-for-package reads. #37 owns remaining writes/aggregation/assessment/evidence/finding records; #85 pure policy splits. Preserve denominators, scoped source evidence, current corrections and atomic followup. |
+| Assets/publications/recovery/schema | Private catalog/blob metadata, publication/link/event atomicity, exact media integrity and filenames, operator checkpoint/restore invalidation and ordered legacy migrations. #86 owns pilot logical media and existing schema/admission/startup extraction with checksums preserved. #37 owns remaining native assets/publications/recovery and future schema allocation; #88 other startup. Actual object storage/PG recovery is later. No copied authority or absent-link bypass. |
 | Provider sessions/catalogue/ledger/foreground | Verifier/operation/immutable selection records, cache/bounded metadata, quota aggregate/dispatch/cost settlement and all semantic receipt writers/permit/step reads. #87 contracts/transport, #37 one native store graph, #88 wiring. Preserve original settings/request/actor identity, unresolved reserves across reconnect/day/restore and receipt-before-domain phases. |
 | HTTP/local/CLI/tools/UI | #88 extracts local/hosted parser, origin/session/CSRF/credential transport and dependency factories; every path delegates to same application commands. Scripts/evaluation drivers remain classified support consumers; client URLs/payloads/draft controls unchanged. |
 
@@ -275,7 +308,20 @@ at module and core component levels, native handles/SQL and concrete constructio
 as well as names. Seed forbidden import/SQL/handle/alias/reexport/dynamic/cycle and
 unclassified-file tests. The initial baseline is a reviewed finite set of exact
 source/symbol/edge/rule identities with owner/removal milestone, not an auto-generated
-count or broad folder exemption. CI may shrink it, never silently grow/regenerate
+count or broad folder exemption. Import facts are now explicitly classified:
+retained deterministic operations and existing inward contracts are not debt;
+technology effects already in an outbound adapter or explicit support driver stay
+restricted to that role. Actual mixed-core effects have a concrete final owner,
+removal milestone and target paths. #85's reusable-code placement does not retire
+Path/file/OS/native lifecycle/clock/random/cache/network effects scheduled for
+#86, #87, #88 or #37. A target may exist before its last consumer adopts it.
+`partial_adoption` names #86's mandatory participants while later final import
+removal applies only to nonpilot code. Neither moving an import nor splitting a
+file resets the original debt identity. For example assets' filesystem imports
+retire under #37, hosted transport/Path/CSRF helpers under #88, and catalogue
+cache/lock mechanics under #87; deterministic `urllib.parse` stays allowed at
+its business-validation caller without being labelled network debt. CI may shrink
+it, never silently grow/regenerate
 it; new violations fail. This ADR's observed import rows do not approve violations
 or implement that checker. Strict mode requires **zero** remaining violations.
 
@@ -325,13 +371,16 @@ baseline median for each workload. If exceeded, reproduce with at least 10 sampl
 report host/noise and obtain a reviewed explanation or fix before acceptance.
 These are refactor comparison tolerances, not a product latency promise.
 
-Relevant existing limits stay independently enforced: original decision-use window
-at most 5 s, foreground connection at most 1 h/session expiry, profile deadline at
-reservation/dispatch, metadata deadline 5 s and completion bound 30 s, catalogue
-TTL 5 min, planner eight calls / 512 target output tokens / 32 KB full envelope,
-structured one-call limit and current quota/cost bounds. Local SQLite uses its
-existing connect/lock behavior; this baseline does not tune timeouts or validate
-real transport hard deadlines (still #70). The [hosted decision](hosted-topology-decision.md)
+Existing local expiry/admission fences remain distinct from transport timeout
+configuration: original decision use at most 5 s, foreground connection at most
+1 h/session expiry, charging-profile expiry at reservation/dispatch, catalogue TTL
+5 min, planner eight calls / 512 target output tokens / 32 KB full envelope,
+structured one-call and current quota/cost bounds. The provider adapters pass
+**nominal timeout arguments** of 5 s for metadata and 30 s for completion. These
+arguments do not establish an enforced total DNS/connect/slow-stream request
+deadline; hard total transport-bound qualification remains #70. Local SQLite uses
+its existing connect/lock behavior; this baseline neither tunes timeouts nor
+measures a real provider deadline. The [hosted decision](hosted-topology-decision.md)
 proposes separate deployment targets; none is established here. Future #89 compares
 resource/deadline behavior in addition to local timing.
 
