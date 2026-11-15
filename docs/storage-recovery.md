@@ -36,7 +36,7 @@ report capture and foreground authority refresh retain their separate phases;
 failed final writes recover from the original received receipt on explicit resume.
 Historical JSON, approvals, fingerprints and receipts are not rewritten.
 
-PR #74 merged this first write-unit seam. E37a.2 adds the concrete
+PR #74 merged this first write-unit seam. PR #75 merged E37a.2, the concrete
 `campaign_agent/adapters/sqlite_drafts.py` store on the caller's native SQLite
 connection. `CampaignDrafts` uses it for seed existence, latest/exact raw snapshot
 reads, seed/placement/fresh-brief/instruction revision appends and the two fixed
@@ -45,10 +45,22 @@ serialization, ownership/access checks, approvals, catalog registration/backfill
 and DDL stay in their existing application owners; the store never opens,
 commits, rolls back or closes a connection and preserves raw snapshot text.
 
-These seams are SQLite-only. Eager initializers, planner start/read and remaining
-records, conversations, access/permit reads and media retain their current SQL
-and filesystem owners; this is not the complete same-store graph. PostgreSQL repositories,
-transactions and conformance require a separately accepted slice; there is no
+E37a.3 ([#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76))
+adds `SQLiteConversationStore`, borrowed by `CampaignConversations` for raw session
+rows, joined message histories, message appends, job context, latest message/count,
+session creation/settings and fully client/brand/actor/campaign-scoped list rows.
+Full tuples retain missing versus present malformed/NULL values; IDs, timestamps,
+raw settings/content/outcomes and native conflict behavior are preserved.
+Application code retains JSON, current access and private ownership checks, model
+and stale-follow-up policy, bounded context, verified replies and title filtering.
+Its constructor DDL/legacy backfill and `begin()` running-run selection/status/
+outcome supersession writes stay in place, on the same caller-owned transaction.
+
+These seams are SQLite-only. Eager initializers, planner/default/job/turn records,
+remaining conversation legacy/supersession SQL, access/permit reads and media retain
+their current SQL and filesystem owners; this is not the complete same-store graph.
+PostgreSQL repositories, transactions and conformance require a separately
+accepted slice; there is no
 backend selector or `DATABASE_URL` interpretation. Foreground provider sessions,
 quota ledger, semantic receipts and permit reads must move as one graph before
 Postgres inference. Private Blob integrity-before-bytes, coherent DB/blob

@@ -262,15 +262,28 @@ class PlacementPlannerTests(unittest.TestCase):
             self.send_message('Audiobook only', runtime=other, after=current['latest_message'])
         self.assertEqual(self.runtime.planner.conversations.read(self.session), current)
         self.assertEqual(self.runtime.read(first)['status'], 'running')
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute('UPDATE planner_sessions SET campaign_id=? WHERE id=?', ('other-campaign', self.session))
-        self.assertEqual(self.runtime.planner.conversations.list(), [])
-        with self.assertRaises(PermissionError):
-            self.runtime.planner.conversations.read(self.session)
-        with self.assertRaises(PermissionError):
-            self.send_message('Audiobook only', after=current['latest_message'])
-        with self.assertRaises(PermissionError):
-            self.runtime.resume(first)
+        # Each valid-shaped foreign owner must be rejected before malformed private settings are parsed.
+        with closing(sqlite3.connect(self.path)) as db:
+            original = db.execute('SELECT client_id,brand_id,actor_id,campaign_id,settings FROM planner_sessions WHERE id=?',
+                                  (self.session,)).fetchone()
+        for column in ('client_id', 'brand_id', 'actor_id', 'campaign_id'):
+            with self.subTest(column=column):
+                with closing(sqlite3.connect(self.path)) as db, db:
+                    db.execute(f'UPDATE planner_sessions SET {column}=?,settings=? WHERE id=?',
+                               ('other-owner', '{malformed private settings', self.session))
+                before = self.persisted(first)
+                self.assertEqual(self.runtime.planner.conversations.list(), [])
+                with self.assertRaises(PermissionError):
+                    self.runtime.planner.conversations.read(self.session)
+                with self.assertRaises(PermissionError):
+                    self.send_message('Audiobook only', after=current['latest_message'])
+                with self.assertRaises(PermissionError):
+                    self.runtime.resume(first)
+                self.assertEqual(self.persisted(first), before)
+                with closing(sqlite3.connect(self.path)) as db, db:
+                    db.execute('UPDATE planner_sessions SET client_id=?,brand_id=?,actor_id=?,campaign_id=?,settings=? WHERE id=?',
+                               (*original, self.session))
+        self.assertEqual(self.runtime.planner.conversations.read(self.session), current)
         self.assertEqual(self.runtime.drafts.read()['revision'], 1)
 
     def test_bounded_model_context_retains_full_transcript_and_asks_for_missing_reference(self):
@@ -305,6 +318,65 @@ class PlacementPlannerTests(unittest.TestCase):
         self.assertEqual([message['role'] for message in chat['messages']], ['user', 'assistant', 'user', 'assistant'])
         self.assertEqual(chat['messages'][1]['kind'], 'superseded')
         self.assertEqual(chat['latest_run_id'], next_run)
+
+    def test_failed_followup_message_rolls_back_supersession_and_preserves_received_evidence(self):
+        simulator = Mock(wraps=SimulatedPlanner())
+        classifier = Mock(route='simulated_decision', wraps=SimulatedClassifier())
+        runtime = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
+        first = self.send_message('Find placements', runtime=runtime, after=0, draft_permission='placements')
+        runtime.resume(first, max_steps=2)
+        # Capture the next main-model receipt durably, but interrupt its local tool commit.
+        with patch.object(runtime.planner, '_commit_turn', side_effect=sqlite3.OperationalError('Interrupted tool commit')):
+            with self.assertRaisesRegex(sqlite3.OperationalError, 'Interrupted tool commit'):
+                runtime.resume(first)
+        before = self.persisted(first)
+        self.assertEqual(before['turns'][-1], (2, 'received', self.saved_placement_receipt(), None))
+        self.assertEqual(before['job'][1], 'received')
+        latest = runtime.planner.conversations.read(self.session)['latest_message']
+        # Prompt-version drift is allowed and would update settings before the failing insert.
+        with closing(sqlite3.connect(self.path)) as db, db:
+            old_settings = {'mode': 'simulated', 'model': 'simulated', 'prompt_version': 'historical'}
+            db.execute('UPDATE planner_sessions SET settings=? WHERE id=?', (json.dumps(old_settings), self.session))
+            sessions = db.execute('SELECT * FROM planner_sessions').fetchall()
+            runs = db.execute('SELECT * FROM agent_runs').fetchall()
+            jobs = db.execute('SELECT * FROM planner_jobs').fetchall()
+            messages = db.execute('SELECT * FROM planner_messages').fetchall()
+            defaults = db.execute('SELECT * FROM planner_defaults').fetchall()
+            db.execute('''CREATE TRIGGER fail_followup BEFORE INSERT ON planner_messages
+                          WHEN NEW.role='user' AND NEW.content='What have we saved?'
+                          BEGIN SELECT RAISE(ABORT, 'Authored followup message failure'); END''')
+        next_run = uuid4().hex
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'Authored followup message failure'):
+            self.send_message('What have we saved?', runtime=runtime, after=latest, run_id=next_run)
+        self.assertEqual(self.persisted(first), before)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT * FROM planner_sessions').fetchall(), sessions)
+            self.assertEqual(db.execute('SELECT * FROM agent_runs').fetchall(), runs)
+            self.assertEqual(db.execute('SELECT * FROM planner_jobs').fetchall(), jobs)
+            self.assertEqual(db.execute('SELECT * FROM planner_messages').fetchall(), messages)
+            self.assertEqual(db.execute('SELECT * FROM planner_defaults').fetchall(), defaults)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('DROP TRIGGER fail_followup')
+        reopened = self.reopen()
+        self.assertEqual(self.send_message('What have we saved?', runtime=reopened, after=latest, run_id=next_run), next_run)
+        superseded = self.persisted(first)
+        self.assertEqual(superseded['status'], 'superseded')
+        self.assertEqual(superseded['turns'], before['turns'])
+        self.assertEqual(superseded['job'][:3], before['job'][:3])
+        self.assertIn('superseded', json.loads(superseded['job'][3])['message'])
+        self.assertEqual(superseded['messages'][:-1], before['messages'])
+        self.assertEqual(superseded['messages'][-1][3], 'assistant')
+        self.assertEqual(superseded['messages'][-1][7], 'superseded')
+        self.assertEqual(reopened.resume(first)['status'], 'superseded')
+        self.assertEqual(self.persisted(first), superseded)
+        self.assertEqual(self.finish(next_run, reopened)['status'], 'answered')
+        committed = self.persisted(next_run)
+        self.assertEqual(self.send_message('What have we saved?', runtime=reopened, after=latest, run_id=next_run), next_run)
+        self.assertEqual(self.persisted(next_run), committed)
+        self.assertEqual(reopened.drafts.read()['revision'], 1)
+        self.assertEqual(reopened.planner.conversations.read(self.session)['settings'], {'mode': 'simulated', 'model': 'simulated'})
+        self.assertEqual(simulator.next_turn.call_count, 3)
+        self.assertEqual(classifier.classify.call_count, 1)
 
     def test_reply_and_draft_commit_together_and_retry_reuses_receipt(self):
         simulator = Mock(wraps=SimulatedPlanner())
