@@ -13,8 +13,8 @@ import {InstructionTest} from "./InstructionTest";
 import type {InstructionTestLimits, ReviewSelection} from "./InstructionTest";
 import {BriefLearning} from "./BriefLearning";
 import type {InstructionReuse} from "./BriefLearning";
-import {openrouter, request, RequestError} from "./openrouter-session";
-import type {Selection} from "./openrouter-session";
+import {openrouter, request, RequestError, forgetFailedOfflineRun} from "./openrouter-session";
+import type {Selection, RunAttempt} from "./openrouter-session";
 import {OpenRouterAccount} from "./OpenRouterAccount";
 import "../../brand/tokens.css";
 import "./planner.css";
@@ -327,6 +327,9 @@ function App() {
     const guard = () => {openrouter.assertCurrent(providerEpoch); if (epoch !== viewEpoch.current) throw new RequestError("The conversation changed. Open its saved history to continue.", 409, "client_context_changed");};
     const id = !source && pendingId ? pendingId : crypto.randomUUID().replaceAll("-", "");
     setBusy(true); setError(""); setStale(false);
+    const originalSettings = run?.planner?.settings ?? run?.inference?.settings;
+    const attempt: RunAttempt = {kind: originalSettings?.mode === "openrouter" ? "provider" : originalSettings ? "offline" : "unknown",
+      phase: "read", acknowledged: run?.run_id === id};
     let chatId = source?.kind === "placement_request" ? source.sessionId : run?.planner?.session_id;
     try {
       let current: Run;
@@ -356,6 +359,7 @@ function App() {
         const saved = sessionStorage.getItem(pendingStartKey);
         if (saved) {
           const pending = JSON.parse(saved);
+          attempt.kind = pending.provider ? "provider" : "offline";
           if (pending.provider) {
             // Only a known run can recover a lost start receipt. Never reconstruct a provider payload from browser storage.
             if (!pending.run_id) throw new RequestError("The original start receipt is unavailable. Operation " + pending.operation_id + " is retained; no replacement request was sent.", 409, "inference_outcome_unknown");
@@ -364,6 +368,7 @@ function App() {
       }
       if (start) {
         const remote = !!start.body.provider_selection_id;
+        attempt.kind = remote ? "provider" : "offline"; attempt.phase = "start"; attempt.acknowledged = false;
         if (start.path === "/api/agent/placements") chatId = String(start.body.session_id);
         sessionStorage.setItem(pendingStartKey, openrouter.serializeStart(start));
         if (remote) {
@@ -377,10 +382,12 @@ function App() {
         current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(pendingId)); guard();
         sessionStorage.removeItem(pendingStartKey); pendingProviderStart.current = null;
       } else {
+        attempt.kind = "offline"; attempt.phase = "start"; attempt.acknowledged = false;
         const demoStart = {path: "/api/agent/run", body: {run_id: id, request: mode.demoRequest}};
         sessionStorage.setItem(pendingStartKey, JSON.stringify(demoStart));
         current = await request<Run>(demoStart.path, demoStart.body); guard(); sessionStorage.removeItem(pendingStartKey);
       }
+      attempt.acknowledged = true; attempt.phase = "advance";
       setPendingId(current.run_id); sessionStorage.setItem(runKey, current.run_id);
       if (current.planner) chatId = current.planner.session_id;
       setRun(current);
@@ -400,11 +407,10 @@ function App() {
       setRun(current); return true;
     } catch (failure) {
       if (epoch !== viewEpoch.current || failure instanceof RequestError && failure.code === "client_context_changed") return false;
-      const providerCode = failure instanceof RequestError && failure.code;
-      // Provider denials, waiting and unknown outcomes preserve the original run and operation.
-      if (!providerCode && failure instanceof RequestError && [400, 403, 404, 409].includes(failure.status)) {
-        sessionStorage.removeItem(pendingStartKey);
-        setStale(failure.status === 409);
+      // A definitive denied offline start has no saved run to resume. Saved/provider/uncertain operations keep their original identity.
+      if (forgetFailedOfflineRun(failure, attempt)) {
+        sessionStorage.removeItem(pendingStartKey); sessionStorage.removeItem(runKey);
+        setPendingId(null); setRun(null); setStale(false);
       }
       const lostStructuredStart = pendingProviderStart.current;
       setError(lostStructuredStart && !lostStructuredStart.body.run_id

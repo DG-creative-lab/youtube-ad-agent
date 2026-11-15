@@ -13,6 +13,13 @@ export type AccountSnapshot = {state: "disconnected" | "reconnect" | "connecting
 export class RequestError extends Error {
   constructor(message: string, readonly status: number, readonly code = "", readonly retryable = false) {super(message);}
 }
+export type RunAttempt = {kind: "offline" | "provider" | "unknown"; phase: "start" | "read" | "advance"; acknowledged: boolean};
+/** A rejected unsaved offline start can be discarded; a saved or provider operation cannot. */
+export function forgetFailedOfflineRun(error: unknown, attempt: RunAttempt) {
+  return error instanceof RequestError && !error.code && attempt.kind === "offline" && !attempt.acknowledged
+    && (attempt.phase === "start" && [400, 403, 404, 409].includes(error.status)
+      || attempt.phase === "read" && error.status === 404);
+}
 export const id = () => crypto.randomUUID().replaceAll("-", "");
 const prefix = "campaign-openrouter:";
 const keyPaths = new Set(["/api/openrouter/connect", "/api/openrouter/models", "/api/openrouter/select",
@@ -105,13 +112,25 @@ export class OpenRouterSession {
          ...(start.body.run_id ? {run_id: start.body.run_id} : {})}
       : start);
   }
+  #assertCredentialMetadata() {
+    if (this.storage.getItem(prefix + "tab_id") !== this.tabId
+      || this.storage.getItem(prefix + "connection_id") !== this.#snapshot.connectionId) {
+      this.logout();
+      throw new RequestError("This tab's connection metadata changed or was cleared. Reload the workspace before connecting again.", 409, "client_context_changed");
+    }
+  }
   async request<T>(path: string, body?: Record<string, unknown>, credential = false): Promise<T> {
+    if (path === "/api/session/end" && body) {
+      // Check the known secret before clearing it, even when logout input itself is rejected.
+      try {this.assertSafe(body);} finally {this.logout();}
+    }
     const proof = this.storage.getItem("placement-review:operator") ?? "";
     if (this.#identity !== null && this.#identity !== proof) this.logout();
     this.#identity = proof;
     const epoch = this.#snapshot.epoch;
     if (credential && location.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) throw new RequestError("OpenRouter credentials require HTTPS outside the loopback demo.", 400, "invalid_request");
     if (credential && (!body || !keyPaths.has(path))) throw new RequestError("Credential transport is not allowed for this command.", 400, "invalid_request");
+    if (credential) this.#assertCredentialMetadata();
     if (credential && path !== "/api/openrouter/connect") this.#active();
     this.assertSafe(body);
     let response: Response;
@@ -120,12 +139,12 @@ export class OpenRouterSession {
         ...(body && {"Content-Type": "application/json"}), ...(credential && this.#key && {"X-OpenRouter-Key": this.#key})},
       body: body ? JSON.stringify(body) : undefined});}
     catch {throw new RequestError("The request outcome is unavailable. No automatic retry was made; open saved history before continuing.", 503, "request_outcome_unavailable");}
-    if (credential) this.assertCurrent(epoch);
+    if (credential) {this.assertCurrent(epoch); this.#assertCredentialMetadata();}
     this.#csrf = response.headers.get("X-CSRF-Token") ?? this.#csrf;
     let result: any;
     try {result = await response.json(); this.assertSafe(result); if (!result || typeof result !== "object") throw new Error();}
     catch {throw new RequestError("The response could not be read safely. No automatic retry was made; open saved history before continuing.", 503, "request_outcome_unavailable");}
-    if (credential) this.assertCurrent(epoch);
+    if (credential) {this.assertCurrent(epoch); this.#assertCredentialMetadata();}
     if (!response.ok) {
       const code = typeof result.code === "string" ? result.code : "";
       if ([401, 403].includes(response.status) || ["credential_mismatch", "connection_expired", "sign_in_required", "access_denied"].includes(code)) {

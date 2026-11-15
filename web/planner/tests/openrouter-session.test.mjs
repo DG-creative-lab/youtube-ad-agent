@@ -151,3 +151,56 @@ test('default browser transport preserves the native global receiver for workspa
     assert.deepEqual(await session.request('/api/mode'),{workspace:'authored'});assert.equal(calls,1);
   } finally {globalThis.fetch=originalFetch;}
 });
+
+test('native logout clears synchronously before response, denial or network failure; subsequent provider commands send no key',async()=>{
+  for(const outcome of ['pending','network','denied']) {
+    let release;const {session,calls}=rig(async path=>{
+      if(path.endsWith('/connect'))return result(connectResult());
+      if(outcome==='pending')return new Promise(resolve=>release=resolve);
+      if(outcome==='network')throw Error(sentinel);
+      return new Response('{}',{status:503});
+    });
+    await connect(session);
+    const logout=session.request('/api/session/end',{});
+    const failure=assert.rejects(logout,error=>!error.message.includes(sentinel));
+    assert.equal(session.snapshot().state,'disconnected');
+    const before=calls.length;await assert.rejects(session.models(''),/Reconnect/);assert.equal(calls.length,before);
+    if(outcome==='pending')release(new Response('{}',{status:503}));
+    await failure;
+    assert.equal(calls.find(call=>call.path==='/api/session/end').headers['X-OpenRouter-Key'],undefined);
+  }
+  const {session,calls}=rig();await connect(session);await session.request('/api/session/end',{});
+  assert.equal(session.snapshot().state,'disconnected');const before=calls.length;await assert.rejects(session.models(''),/Reconnect/);assert.equal(calls.length,before);
+});
+test('logout rejects known secret in its body and still clears local memory without dispatch',async()=>{
+  const {session,calls}=rig();await connect(session);const before=calls.length;
+  await assert.rejects(session.request('/api/session/end',{secret:sentinel}),/account field/);
+  assert.equal(session.snapshot().state,'disconnected');assert.equal(calls.length,before);await assert.rejects(session.models(''),/Reconnect/);
+});
+test('removed or substituted tab/connection metadata clears and refuses credentials before any transport',async()=>{
+  for(const field of ['tab_id','connection_id'])for(const change of ['remove','replace']) {
+    const {session,storage,calls}=rig();await connect(session);
+    if(change==='remove')storage.removeItem('campaign-openrouter:'+field);else storage.setItem('campaign-openrouter:'+field,'c'.repeat(64));
+    const before=calls.length;await assert.rejects(session.models(''),/metadata changed or was cleared/);
+    assert.equal(session.snapshot().state,'disconnected');assert.equal(calls.length,before);
+  }
+});
+test('storage clearing while connect is pending cannot restore key or connection metadata from the late response',async()=>{
+  let release;const {session,storage}=rig(()=>new Promise(resolve=>release=resolve));
+  const pending=session.connect({value:sentinel});storage.values.clear();release(result(connectResult()));
+  await assert.rejects(pending,/metadata changed or was cleared/);assert.equal(session.snapshot().state,'disconnected');assert.equal(storage.getItem('campaign-openrouter:connection_id'),null);
+});
+test('offline denied-start recovery drops nonexistent operation while saved/provider/uncertain runs retain original identity',async()=>{
+  const {forgetFailedOfflineRun,RequestError}=await import('data:text/javascript;base64,'+Buffer.from(output).toString('base64'));
+  for(const status of [400,403,404,409])assert.equal(forgetFailedOfflineRun(new RequestError('denied',status),{kind:'offline',phase:'start',acknowledged:false}),true);
+  assert.equal(forgetFailedOfflineRun(new RequestError('missing',404),{kind:'offline',phase:'read',acknowledged:false}),true);
+  for(const attempt of [
+    {kind:'offline',phase:'read',acknowledged:true},
+    {kind:'offline',phase:'advance',acknowledged:true},
+    {kind:'provider',phase:'start',acknowledged:false},
+    {kind:'provider',phase:'read',acknowledged:false},
+    {kind:'unknown',phase:'read',acknowledged:false}
+  ])for(const status of [403,404,409])assert.equal(forgetFailedOfflineRun(new RequestError('retained',status),attempt),false);
+  for(const code of ['waiting_for_credentials','inference_outcome_unknown','request_outcome_unavailable'])assert.equal(forgetFailedOfflineRun(new RequestError('retained',409,code),{kind:'offline',phase:'start',acknowledged:false}),false);
+  assert.equal(forgetFailedOfflineRun(new RequestError('uncertain transport',503),{kind:'offline',phase:'start',acknowledged:false}),false);
+});

@@ -545,3 +545,25 @@ The existing pinned planner CI job runs them before the TypeScript/Vite build.
 Backend APIs, migration chain, provider activation gates and approval/draft command
 authority are unchanged. Offline authored transport checks do not qualify a live
 provider route or deployment.
+
+
+A2c recovery hardening distinguishes a definitively rejected, unacknowledged offline
+start from saved and provider operations. A denied offline start clears its
+nonexistent run locator so restored access can start normally. Acknowledged runs,
+provider waiting/unknown outcomes and uncertain transport failures retain their
+original identity and receipts.
+
+The shared request boundary clears active credentials synchronously for the native
+`/api/session/end` logout command, including local validation or network failure.
+Before any credential header is attached, and before accepting its response, the
+private service checks that persisted tab/connection references still match its
+current snapshot. Browser Clear-Site-Data or replaced/removed metadata clears and
+refuses that connection before further credential transport; the UI requests a
+reload. This also fences a connection response arriving after storage clearing.
+It neither patches global fetch nor treats browser metadata as server authority.
+
+Catalogue search stays focusable with aria-disabled while loading and guards
+repeated activation. Pagination and model selection transfer focus to that stable
+search action only when their own disappearing/disabled button held focus. Native
+keyboard Escape therefore continues through the existing composer boundary and
+returns focus to its model trigger; catalogue loading results leave later focus untouched.
