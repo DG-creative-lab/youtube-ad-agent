@@ -53,10 +53,11 @@ Full tuples retain missing versus present malformed/NULL values; IDs, timestamps
 raw settings/content/outcomes and native conflict behavior are preserved.
 Application code retains JSON, current access and private ownership checks, model
 and stale-follow-up policy, bounded context, verified replies and title filtering.
-Its constructor DDL/legacy backfill and `begin()` running-run selection/status/
-outcome supersession writes stay in place, on the same caller-owned transaction.
+Its constructor DDL/legacy backfill and `begin()` running-run selection/outcome
+supersession writes stay in place, on the same caller-owned transaction; the
+status write now uses the common run store described below.
 
-E37a.4 ([#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78)) adds
+PR #79 merged E37a.4 and closed [#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78). It adds
 `SQLitePlannerStore`, immediately used by `PlacementAgent` for 17 fixed native
 default/job/turn operations and joined raw step history. Defaults keep their
 original client/brand/actor scope. Tuples, missing versus present NULL rows, raw
@@ -67,10 +68,21 @@ write retains the durable requested/unknown phase; explicit resume cannot repeat
 that attempted main-model or classifier effect. Separately committed received
 receipts still recover local terminal failures.
 
-These seams are SQLite-only. Eager DDL/initializers, common `agent_runs`/`agent_steps`
-reads and writes, remaining conversation legacy/supersession SQL, access/permit
-reads and media retain their current SQL and filesystem owners; this is not the
-complete same-store graph.
+E37a.5 ([#80](https://github.com/DG-creative-lab/youtube-ad-agent/issues/80)) adds
+`SQLiteRunStore`, immediately borrowed by runtime, planner, conversation
+supersession status and foreground step counting. Nine fixed operations retain
+fully client/brand/actor/campaign-scoped raw request/status pairs, three distinct
+strict/id-conflict/all-conflict run inserts, status-only updates, ordered raw steps,
+strict step appends, count and existence. Application code still requires current
+access before its private run lookup and owns JSON, dispatch and recovery policy.
+The store never opens, commits, rolls back or closes a connection. Native trigger
+tests cover a step INSERT failure after draft save and terminal status UPDATE
+failure after finish-step insertion, exact reopened rollback and explicit retry/replay.
+
+These seams are SQLite-only. Eager DDL/initializers and legacy campaign backfill,
+joined planner history and conversation legacy/supersession selection/outcome SQL,
+structured test-source/inference records, access/permit reads and media retain
+their current SQL and filesystem owners; this is not the complete same-store graph.
 PostgreSQL repositories, transactions and conformance require a separately
 accepted slice; there is no
 backend selector or `DATABASE_URL` interpretation. Foreground provider sessions,

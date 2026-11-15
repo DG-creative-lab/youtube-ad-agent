@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
+from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.creatives import render_instruction_choices
 from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
@@ -138,9 +139,9 @@ class AgentRuntime:
         if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
             raise ValueError("Invalid run ID.")
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
-                       (run_id, self.scope.client_id, self.scope.brand_id,
-                        self.operator.id, request, "running", self.drafts.campaign_id))
+            SQLiteRunStore(db).create_run_if_id_absent(
+                run_id, self.scope.client_id, self.scope.brand_id,
+                self.operator.id, request, "running", self.drafts.campaign_id)
             self._owned_run(db, run_id)
         return run_id
 
@@ -199,9 +200,9 @@ class AgentRuntime:
             if mode=='openrouter' and self.openrouter_drafts.web_disabled:
                 self.openrouter_drafts.require_available(settings)
             self._next_test_context(db, source)
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       (run_id, self.scope.client_id, self.scope.brand_id,
-                        self.operator.id, NEXT_TEST_REQUEST, "running", self.drafts.campaign_id))
+            SQLiteRunStore(db).create_run(
+                run_id, self.scope.client_id, self.scope.brand_id,
+                self.operator.id, NEXT_TEST_REQUEST, "running", self.drafts.campaign_id)
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?)", (run_id, json.dumps(source)))
             db.execute("INSERT INTO agent_review_inference (run_id, settings) VALUES (?, ?)",
                        (run_id, json.dumps(settings)))
@@ -209,11 +210,9 @@ class AgentRuntime:
 
     def _owned_run(self, db, run_id):
         self.require("youtube:campaign.read")
-        row = db.execute(
-            "SELECT request, status FROM agent_runs WHERE id = ? AND client_id = ? "
-            "AND brand_id = ? AND actor_id = ? AND campaign_id = ?",
-            (run_id, self.scope.client_id, self.scope.brand_id, self.operator.id, self.drafts.campaign_id),
-        ).fetchone()
+        row = SQLiteRunStore(db).scoped_run_row(
+            run_id, self.scope.client_id, self.scope.brand_id, self.operator.id, self.drafts.campaign_id,
+        )
         if row is None:
             raise PermissionError("The run is unavailable to this operator.")
         return row
@@ -257,9 +256,9 @@ class AgentRuntime:
             })[:32]
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("INSERT INTO agent_runs VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                       (run_id, self.scope.client_id, self.scope.brand_id,
-                        self.operator.id, REVIEW_TEST_REQUEST, "running", self.drafts.campaign_id))
+            SQLiteRunStore(db).create_run_if_no_conflict(
+                run_id, self.scope.client_id, self.scope.brand_id,
+                self.operator.id, REVIEW_TEST_REQUEST, "running", self.drafts.campaign_id)
             self._owned_run(db, run_id)
             db.execute("INSERT INTO agent_test_sources VALUES (?, ?) ON CONFLICT DO NOTHING",
                        (run_id, json.dumps(context)))
@@ -291,9 +290,7 @@ class AgentRuntime:
                 if self.foreground and run[1]!='running': return self.read(run_id)
                 history = [
                     {"tool": tool, "result": json.loads(result)}
-                    for tool, result in db.execute(
-                        "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
-                    )
+                    for tool, result in SQLiteRunStore(db).step_rows(run_id)
                 ]
                 if run[1] in {"ready_for_review", "waiting_for_evidence"}:
                     return self.read(run_id)
@@ -306,11 +303,10 @@ class AgentRuntime:
                 else:
                     result = self._dispatch(db, tool, history)
                 self.require("youtube:agent.run")
-                db.execute("INSERT INTO agent_steps VALUES (?, ?, ?, ?)",
-                           (run_id, len(history), tool, json.dumps(result)))
+                SQLiteRunStore(db).append_step(run_id, len(history), tool, json.dumps(result))
                 if tool in {"finish", "finish_test", "finish_test_review", "wait_for_evidence"}:
-                    db.execute("UPDATE agent_runs SET status = ? WHERE id = ?",
-                               ("waiting_for_evidence" if tool == "wait_for_evidence" else "ready_for_review", run_id))
+                    SQLiteRunStore(db).update_status(
+                        run_id, "waiting_for_evidence" if tool == "wait_for_evidence" else "ready_for_review")
         if self.foreground: self.foreground.policy.refresh()
         return self.read(run_id)
 
@@ -321,9 +317,7 @@ class AgentRuntime:
         with closing(sqlite3.connect(self.path)) as db:
             db.execute("BEGIN")
             request, status = self._owned_run(db, run_id)
-            steps = [{"tool": tool, "result": json.loads(result)} for tool, result in db.execute(
-                "SELECT tool, result FROM agent_steps WHERE run_id = ? ORDER BY position", (run_id,)
-            )]
+            steps = [{"tool": tool, "result": json.loads(result)} for tool, result in SQLiteRunStore(db).step_rows(run_id)]
             inference = db.execute(
                 "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
             ).fetchone()
@@ -346,7 +340,7 @@ class AgentRuntime:
             row = db.execute(
                 "SELECT settings, state, receipt, error FROM agent_review_inference WHERE run_id = ?", (run_id,),
             ).fetchone()
-            count = db.execute("SELECT COUNT(*) FROM agent_steps WHERE run_id = ?", (run_id,)).fetchone()[0]
+            count = SQLiteRunStore(db).step_count(run_id)
             if request not in {REVIEW_TEST_REQUEST, NEXT_TEST_REQUEST} or count != 1 or not row:
                 return False
             settings = json.loads(row[0])
@@ -383,7 +377,7 @@ class AgentRuntime:
             db.execute("BEGIN IMMEDIATE")
             self.require("youtube:agent.run")
             if self._owned_run(db, run_id)[1]!='running': return True
-            if db.execute("SELECT 1 FROM agent_steps WHERE run_id = ? AND position = 1", (run_id,)).fetchone():
+            if SQLiteRunStore(db).step_exists_row(run_id, 1):
                 return True
             self._inference_context(db, request, source)
             usage = receipt["inference"]["usage"]
@@ -407,7 +401,7 @@ class AgentRuntime:
                 raise ReviewInferenceError(
                     "The model output did not pass validation. Start a new operation to retry."
                 ) from None
-            db.execute("INSERT INTO agent_steps VALUES (?, 1, ?, ?)", (run_id, tool, json.dumps(result)))
+            SQLiteRunStore(db).append_step(run_id, 1, tool, json.dumps(result))
         return True
 
     def _inference_context(self, db, request, source):

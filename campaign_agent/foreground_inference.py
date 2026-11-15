@@ -7,6 +7,7 @@ import re
 import sqlite3
 
 from .access import CommandAccess
+from .adapters.sqlite_runs import SQLiteRunStore
 from .inference_ledger import InferenceLedger, actual_cost
 from .model_catalogue import compatible_model, fingerprint, select_endpoint
 from .ports.inference import ForegroundCredential, ProviderError
@@ -158,7 +159,7 @@ class ForegroundInference:
         request_hash=hashlib.sha256(encoded).hexdigest()
         with closing(sqlite3.connect(self.path)) as db:
             if self.runtime.planner.owns(self.run_id):
-                position=db.execute('SELECT COUNT(*) FROM agent_steps WHERE run_id=?',(self.run_id,)).fetchone()[0]
+                position=SQLiteRunStore(db).step_count(self.run_id)
             else: position=0
             row=self.ledger.row(db,self.run_id,position)
             if row and row['state']!='released_unsent':

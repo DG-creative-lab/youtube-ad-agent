@@ -353,8 +353,9 @@ Its accepted tree is `c755b2562d798eae8ac6b808702cc3d6bf0d86b9`.
 
 ### E37a.4 native SQLite planner store · 15 November 2026
 
-[#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78) is the current
-bounded child of open #37, based on merged PR #77. `SQLitePlannerStore` supplies
+PR #79 merged [#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78)
+at `a9ddf1d5186dfa3d84bc71b38a728a53f1470d2c`, closing that bounded child of
+open #37. `SQLitePlannerStore` supplies
 17 fixed default/job/turn record operations and ordered joined raw step history
 on the caller's exact connection, immediately used by `PlacementAgent`. Raw rows,
 NULL/missing distinctions, three-field defaults, native conflicts and partial
@@ -365,11 +366,28 @@ Native tests cover constructor-created schema, borrowed transactions and real
 received-UPDATE faults for main-model and classifier receipts, preserving the
 requested unknown phase and preventing repeated attempts after reopen. Existing
 received-receipt terminal recovery, follow-up rollback and supersession remain.
-Independent exact-head review/verification and current unchanged CI are required
-before human merge; earlier test counts are historical evidence only.
+Its accepted merge tree is `e41a026f84aea599fbca8309f13cbabfc84560c8`;
+earlier test counts are historical evidence only.
 
-Eager DDL/initializers, common `agent_runs`/`agent_steps` SQL, conversation legacy/
-supersession SQL, access/permit reads, media and foreground sessions/ledger/semantic
-receipts still require their complete same-store port. PostgreSQL conformance,
+### E37a.5 native SQLite common run/step store · 15 November 2026
+
+[#80](https://github.com/DG-creative-lab/youtube-ad-agent/issues/80) is the current
+bounded child of open #37, based on merged PR #79. `SQLiteRunStore` supplies nine
+fixed native operations on the caller's exact connection: fully scoped raw run
+pairs, three distinct insert conflict forms, status-only update, ordered raw step
+pairs, strict step append, count and existence. Runtime/planner/conversation status
+and foreground count use it immediately. The application keeps current access and
+private scope checks, JSON, provider/policy decisions and transaction ownership.
+
+Native tests cover raw/native conflict semantics and borrowed rollback/visibility.
+Real runtime triggers fail step insertion after draft save and terminal status
+update after finish insertion; reopened rows remain exact and explicit retries
+complete once. Independent exact-head review/verification and current unchanged
+Python/planner CI remain required before human merge.
+
+Eager DDL/initializers and legacy campaign backfill, joined planner history,
+conversation legacy/supersession selection/outcome SQL, structured test-source/
+inference records, access/permit reads, media and foreground sessions/ledger/
+semantic receipts still require their complete same-store port. PostgreSQL conformance,
 coherent DB/blob recovery and all-campaign restore admission remain separate
 acceptance; #37 stays open. No backend selection, live effects or deployment is enabled.
