@@ -166,13 +166,15 @@ function App() {
           request<Mode>("/api/mode"),
           request<Draft>("/api/campaign"),
         ]);
-        openrouter.bindScope(JSON.stringify([workspace.workspace ?? "local", currentDraft.campaign_id]));
+        const nativeBinding = workspace.workspace ? {actor_id: workspace.workspace.actor, client_id: workspace.workspace.client_id,
+          brand_id: workspace.workspace.brand_id, workspace_id: workspace.workspace.id, campaign_id: currentDraft.campaign_id} : null;
+        openrouter.bindScope(JSON.stringify([workspace.workspace ?? "local", currentDraft.campaign_id]), nativeBinding);
         if (workspace.workspace) {
           const scope = JSON.stringify([workspace.workspace.actor, workspace.workspace.client_id,
             workspace.workspace.brand_id, workspace.workspace.id, currentDraft.campaign_id]);
           if (sessionStorage.getItem("staff-workspace-scope") !== scope) {
             openrouter.logout();
-            openrouter.bindScope(JSON.stringify([workspace.workspace, currentDraft.campaign_id]));
+            openrouter.bindScope(JSON.stringify([workspace.workspace, currentDraft.campaign_id]), nativeBinding);
             for (const key of Object.keys(sessionStorage)) {
               if (key.startsWith("campaign-planner:")) sessionStorage.removeItem(key);
             }

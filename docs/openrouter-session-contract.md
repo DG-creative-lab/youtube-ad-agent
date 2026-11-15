@@ -567,3 +567,23 @@ repeated activation. Pagination and model selection transfer focus to that stabl
 search action only when their own disappearing/disabled button held focus. Native
 keyboard Escape therefore continues through the existing composer boundary and
 returns focus to its model trigger; catalogue loading results leave later focus untouched.
+
+A2c hosted session proof does not depend on the browser applying Clear-Site-Data.
+Bootstrap's native CSRF header identifies the hosted composition; its existing
+actor/client/brand/workspace/campaign tuple is passed explicitly to the private
+session boundary. Explicit connect/reconnect pins that tuple and an immutable
+key-session CSRF marker, separate from the rolling CSRF used by ordinary requests.
+Before each credential-bearing hosted POST, one fresh keyless no-store same-origin
+GET of `/api/session` must return 200 with that exact nonempty marker and tuple.
+A logout, session rotation, scope substitution, malformed response or outage
+clears the current key and prevents the credential POST. The original harmless
+reconnect locator is retained for recovery from a transient outage; a changed
+server session still cannot reconnect an original server binding.
+
+The check uses the private fetch seam directly, with no recursion, cache or retry.
+Epoch, browser metadata and local-operator proof are rechecked after awaiting it
+and immediately before credential transport. An intervening ordinary read cannot
+replace the key's pinned marker; a stale check cannot clear a newer explicitly
+connected key. Local composition without native bootstrap CSRF skips the hosted
+session route. Logout after the GET and before its POST remains an unavoidable
+client race; backend original-session/selection checks still fence dispatch.

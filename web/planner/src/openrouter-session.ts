@@ -1,4 +1,10 @@
 /** Foreground credential boundary. Raw keys never leave this module except an allowed HTTP header. */
+export type NativeBinding = {actor_id: string; client_id: string; brand_id: string; workspace_id: string; campaign_id: string};
+function nativeTuple(binding: NativeBinding) {
+  const values = [binding.actor_id, binding.client_id, binding.brand_id, binding.workspace_id, binding.campaign_id];
+  if (values.some(value => typeof value !== "string" || !value)) throw new Error("Invalid native binding");
+  return JSON.stringify(values);
+}
 export type Budget = "0" | "0.25" | "1.00";
 export type Selection = {
   selection_id: string; connection_id: string; model: string; profile: "planner" | "structured_review";
@@ -45,6 +51,9 @@ const messages: Record<string, string> = {
 export class OpenRouterSession {
   #key: string | null = null;
   #csrf = "";
+  #hosted = false;
+  #nativeScope: string | null = null;
+  #keySession: Readonly<{csrf: string; scope: string}> | null = null;
   #identity: string | null = null;
   #scope: string | null = null;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -63,17 +72,18 @@ export class OpenRouterSession {
   subscribe = (listener: () => void) => {this.#listeners.add(listener); return () => {this.#listeners.delete(listener);};};
   #publish(change: Partial<AccountSnapshot>) {this.#snapshot = {...this.#snapshot, ...change}; this.#listeners.forEach(listener => listener());}
   #invalidate(state: AccountSnapshot["state"], forget = false) {
-    this.#key = null;
+    this.#key = null; this.#keySession = null;
     clearTimeout(this.#timer);
     this.#query++; this.#selectionEpoch++;
     if (forget) this.storage.removeItem(prefix + "connection_id");
     this.#publish({state, epoch: this.#snapshot.epoch + 1, ...(forget && {connectionId: null, expiresAt: null, selection: null})});
   }
   clear = () => this.#invalidate(this.#snapshot.connectionId ? "reconnect" : "disconnected");
-  logout = () => {this.#invalidate("disconnected", true); this.#identity = null; this.#scope = null;};
-  bindScope(scope: string) {
-    if (this.#scope !== null && this.#scope !== scope) this.logout();
-    this.#scope = scope;
+  logout = () => {this.#invalidate("disconnected", true); this.#identity = null; this.#scope = null; this.#nativeScope = null;};
+  bindScope(scope: string, native: NativeBinding | null = null) {
+    const nextNative = native ? nativeTuple(native) : null;
+    if (this.#scope !== null && this.#scope !== scope || this.#nativeScope !== null && this.#nativeScope !== nextNative) this.logout();
+    this.#scope = scope; this.#nativeScope = nextNative;
   }
   assertCurrent(epoch: number) {if (epoch !== this.#snapshot.epoch) throw new RequestError("The workspace or connection changed. Open the saved history before continuing.", 409, "client_context_changed");}
   #active() {
@@ -119,6 +129,25 @@ export class OpenRouterSession {
       throw new RequestError("This tab's connection metadata changed or was cleared. Reload the workspace before connecting again.", 409, "client_context_changed");
     }
   }
+  async #verifyHostedSession(epoch: number) {
+    if (!this.#hosted) return;
+    const pinned = this.#keySession;
+    try {
+      if (!pinned || !this.#nativeScope || pinned.scope !== this.#nativeScope) throw new Error();
+      // One fresh native read per command; never recurse through the credential transport.
+      const response = await this.fetcher("/api/session", {method: "GET", cache: "no-store", credentials: "same-origin",
+        headers: {"X-Local-Operator": this.storage.getItem("placement-review:operator") ?? "", "X-Placement-Review": "campaign"}});
+      this.assertCurrent(epoch); this.#assertCredentialMetadata();
+      if (response.status !== 200 || !response.headers.get("X-CSRF-Token") || response.headers.get("X-CSRF-Token") !== pinned.csrf) throw new Error();
+      const binding = await response.json();
+      this.assertCurrent(epoch); this.#assertCredentialMetadata(); this.assertSafe(binding);
+      if (nativeTuple(binding) !== pinned.scope || this.#nativeScope !== pinned.scope || this.#keySession !== pinned) throw new Error();
+    } catch {
+      if (epoch !== this.#snapshot.epoch) this.assertCurrent(epoch);
+      this.clear();
+      throw new RequestError("Your staff session changed or could not be verified. Reload the workspace and sign in before connecting again. No credential request was sent.", 401, "staff_session_unverified");
+    }
+  }
   async request<T>(path: string, body?: Record<string, unknown>, credential = false): Promise<T> {
     if (path === "/api/session/end" && body) {
       // Check the known secret before clearing it, even when logout input itself is rejected.
@@ -133,14 +162,27 @@ export class OpenRouterSession {
     if (credential) this.#assertCredentialMetadata();
     if (credential && path !== "/api/openrouter/connect") this.#active();
     this.assertSafe(body);
+    if (credential) {
+      if (this.#hosted) await this.#verifyHostedSession(epoch);
+      this.assertCurrent(epoch); this.#assertCredentialMetadata();
+      if (path !== "/api/openrouter/connect") this.#active();
+      this.assertSafe(body);
+      if ((this.storage.getItem("placement-review:operator") ?? "") !== proof) {
+        this.logout();
+        throw new RequestError("The local operator changed. Reload the workspace before connecting again.", 409, "client_context_changed");
+      }
+    }
+    const csrf = credential && this.#hosted ? this.#keySession!.csrf : this.#csrf;
     let response: Response;
     try {response = await this.fetcher(path, {method: body ? "POST" : "GET", cache: "no-store", credentials: "same-origin",
-      headers: {"X-Local-Operator": proof, "X-Placement-Review": "campaign", ...(this.#csrf && {"X-CSRF-Token": this.#csrf}),
+      headers: {"X-Local-Operator": proof, "X-Placement-Review": "campaign", ...(csrf && {"X-CSRF-Token": csrf}),
         ...(body && {"Content-Type": "application/json"}), ...(credential && this.#key && {"X-OpenRouter-Key": this.#key})},
       body: body ? JSON.stringify(body) : undefined});}
     catch {throw new RequestError("The request outcome is unavailable. No automatic retry was made; open saved history before continuing.", 503, "request_outcome_unavailable");}
     if (credential) {this.assertCurrent(epoch); this.#assertCredentialMetadata();}
-    this.#csrf = response.headers.get("X-CSRF-Token") ?? this.#csrf;
+    const responseCsrf = response.headers.get("X-CSRF-Token");
+    if ((path === "/api/mode" || path === "/api/config") && responseCsrf) this.#hosted = true;
+    this.#csrf = responseCsrf ?? this.#csrf;
     let result: any;
     try {result = await response.json(); this.assertSafe(result); if (!result || typeof result !== "object") throw new Error();}
     catch {throw new RequestError("The response could not be read safely. No automatic retry was made; open saved history before continuing.", 503, "request_outcome_unavailable");}
@@ -167,6 +209,10 @@ export class OpenRouterSession {
     const epoch = this.#snapshot.epoch;
     try {
       if (!valid) throw new RequestError("Enter an ASCII OpenRouter key of at most 512 characters, without spaces or newlines.", 400, "invalid_request");
+      if (this.#hosted) {
+        if (!this.#csrf || !this.#nativeScope) throw new RequestError("Reload the workspace before connecting to OpenRouter.", 401, "staff_session_unverified");
+        this.#keySession = Object.freeze({csrf: this.#csrf, scope: this.#nativeScope});
+      }
       if (replace && old) {await this.request("/api/openrouter/disconnect", {connection_id: old, tab_id: this.tabId}); this.assertCurrent(epoch);}
       const result = await this.request<{connection_id: string; expires_at: number}>("/api/openrouter/connect",
         {operation_id: id(), tab_id: this.tabId, ...(!replace && old && {resume_connection_id: old})}, true);

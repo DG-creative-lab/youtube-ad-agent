@@ -16,7 +16,7 @@ const output = ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarge
 const {OpenRouterSession} = await import('data:text/javascript;base64,'+Buffer.from(output).toString('base64'));
 const sentinel = 'authored-memory-only-sentinel';
 const connection = 'a'.repeat(64), revision='catalogue-current';
-const result = data => new Response(JSON.stringify(data),{headers:{'X-CSRF-Token':'authored-csrf'}});
+const result = (data,csrf) => new Response(JSON.stringify(data),{headers:csrf?{'X-CSRF-Token':csrf}:{}});
 const connectResult = () => ({connection_id:connection,expires_at:Date.now()/1000+3600});
 const modelRows = () => ({catalogue_revision:revision,observed_at:Date.now()/1000,expires_at:Date.now()/1000+300,models:[{id:'fixture/model',name:'Authored model',input_usd_per_million:'0',output_usd_per_million:'0',state:'eligible',reason_codes:[]}],next_cursor:null});
 const selection = (body) => ({selection_id:'b'.repeat(64),connection_id:connection,model:body.model_id,profile:body.profile,max_run_cost_usd:body.max_run_cost_usd,catalogue_revision:body.catalogue_revision});
@@ -203,4 +203,69 @@ test('offline denied-start recovery drops nonexistent operation while saved/prov
   ])for(const status of [403,404,409])assert.equal(forgetFailedOfflineRun(new RequestError('retained',status),attempt),false);
   for(const code of ['waiting_for_credentials','inference_outcome_unknown','request_outcome_unavailable'])assert.equal(forgetFailedOfflineRun(new RequestError('retained',409,code),{kind:'offline',phase:'start',acknowledged:false}),false);
   assert.equal(forgetFailedOfflineRun(new RequestError('uncertain transport',503),{kind:'offline',phase:'start',acknowledged:false}),false);
+});
+
+const nativeBinding={actor_id:'authored-buyer',client_id:'authored-client',brand_id:'authored-brand',workspace_id:'authored-workspace',campaign_id:'authored-campaign'};
+async function hostedRig() {
+  const state={csrf:'native-session-a',binding:{...nativeBinding},status:200,error:null,hold:null};
+  const {session,storage,calls}=rig(async(path,init)=>{
+    if(path==='/api/mode')return result({workspace:'authored'},state.csrf);
+    if(path==='/api/session') {
+      if(state.hold)return state.hold();
+      if(state.error==='network')throw Error(sentinel);
+      if(state.error==='json')return new Response('{'+sentinel,{headers:{'X-CSRF-Token':state.csrf}});
+      return new Response(JSON.stringify(state.binding),{status:state.status,headers:state.csrf?{'X-CSRF-Token':state.csrf}:{}});
+    }
+    const body=init.body&&JSON.parse(init.body);
+    return result(path.endsWith('/connect')?connectResult():path.endsWith('/models')?modelRows():path.endsWith('/select')?selection(body):{ok:true},state.csrf);
+  });
+  await session.request('/api/mode');session.bindScope('authored-native-workspace',nativeBinding);
+  return {session,storage,calls,state};
+}
+test('hosted credential commands perform exactly one fresh keyless native proof, local commands skip the absent session route',async()=>{
+  const {session,calls}=await hostedRig();await connect(session);await session.models('');await session.select('fixture/model',revision,'0.25');
+  const commands=calls.filter(call=>call.headers['X-OpenRouter-Key']);assert.equal(commands.length,3);
+  const proofs=calls.filter(call=>call.path==='/api/session');assert.equal(proofs.length,3);
+  for(const proof of proofs){assert.equal(proof.method,'GET');assert.equal(proof.cache,'no-store');assert.equal(proof.credentials,'same-origin');assert.equal(proof.headers['X-OpenRouter-Key'],undefined);assert.equal(proof.body,undefined);}
+  for(const command of commands){const i=calls.indexOf(command);assert.equal(calls[i-1].path,'/api/session');assert.equal(command.headers['X-CSRF-Token'],'native-session-a');}
+  await session.disconnect();
+  const local=rig();await connect(local.session);await local.session.models('');assert.equal(local.calls.some(call=>call.path==='/api/session'),false);await local.session.disconnect();
+});
+test('native logout, rotated CSRF, substituted full native tuple and unavailable proof clear the key before any credential POST',async()=>{
+  const changes=[s=>s.status=401,s=>s.status=403,s=>s.status=503,s=>s.csrf='',s=>s.csrf='native-session-b',s=>s.error='network',s=>s.error='json',
+    ...Object.keys(nativeBinding).map(field=>s=>s.binding={...s.binding,[field]:'substituted'})];
+  for(const change of changes){
+    const {session,calls,state}=await hostedRig();await connect(session);change(state);const before=calls.length;
+    await assert.rejects(session.models(''),error=>!error.message.includes(sentinel)&&/staff session changed or could not be verified/.test(error.message));
+    assert.equal(session.snapshot().state,'reconnect');assert.deepEqual(calls.slice(before).map(call=>[call.path,!!call.headers['X-OpenRouter-Key']]),[['/api/session',false]]);
+  }
+});
+test('an intervening rolling-CSRF read cannot bless an old key after same-actor same-scope relogin',async()=>{
+  const {session,calls,state}=await hostedRig();await connect(session);state.csrf='native-session-b';
+  await session.request('/api/mode'); // Updating the rolling request token must not update the key's immutable original proof.
+  const before=calls.length;await assert.rejects(session.models(''),/staff session changed or could not be verified/);
+  assert.deepEqual(calls.slice(before).map(call=>[call.path,!!call.headers['X-OpenRouter-Key']]),[['/api/session',false]]);
+  // A new explicitly entered key may pin the new session; no old key is reused.
+  session.bindScope('authored-native-workspace',nativeBinding);await connect(session);assert.equal(calls.at(-1).headers['X-CSRF-Token'],'native-session-b');await session.disconnect();
+});
+test('late native proof after clear or storage loss cannot dispatch a credential or resurrect a key',async()=>{
+  for(const clear of [(s,storage)=>s.clear(),(s,storage)=>storage.values.clear(),(s,storage)=>storage.setItem('placement-review:operator','another-authored-operator')]){
+    const {session,storage,calls,state}=await hostedRig();await connect(session);
+    let release;state.hold=()=>new Promise(resolve=>release=resolve);const before=calls.length;
+    const pending=session.models('');const rejected=assert.rejects(pending);clear(session,storage);release(result(nativeBinding,'native-session-a'));await rejected;
+    assert.equal(calls.slice(before).some(call=>call.headers['X-OpenRouter-Key']),false);assert.notEqual(session.snapshot().state,'connected');
+  }
+});
+test('a stale native proof cannot clear a newer explicitly reconnected key',async()=>{
+  const {session,calls,state}=await hostedRig();await connect(session);let release;
+  state.hold=()=>new Promise(resolve=>release=resolve);const old=session.models('old');const rejected=assert.rejects(old);
+  session.clear();state.hold=null;await connect(session);release(result(nativeBinding,'native-session-a'));await rejected;
+  assert.equal(session.snapshot().state,'connected');const before=calls.length;await session.models('current');assert.equal(calls.slice(before).filter(call=>call.headers['X-OpenRouter-Key']).length,1);await session.disconnect();
+});
+
+test('temporary native proof outage clears memory while retaining original reconnect locator and binding',async()=>{
+  const {session,calls,state}=await hostedRig();await connect(session);state.status=503;
+  await assert.rejects(session.models(''),/could not be verified/);state.status=200;
+  await connect(session);const command=calls.filter(call=>call.path==='/api/openrouter/connect').at(-1);
+  assert.equal(JSON.parse(command.body).resume_connection_id,connection);assert.equal(command.headers['X-CSRF-Token'],'native-session-a');await session.disconnect();
 });
