@@ -49,7 +49,7 @@ type Props = {
   onPackageConflict: (message: string) => void;
   onCorrectionSaved: () => void;
   onPrepareNextTest: (reviewId: string, selection: ReviewSelection) => void;
-  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
+  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string; budget?: string};
 };
 
 const endpoint = "/api/campaign/performance";

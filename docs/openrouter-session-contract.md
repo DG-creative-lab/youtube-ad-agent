@@ -488,3 +488,60 @@ and dispatch-marker transactions recheck the original charging-profile deadline
 at their local commit fences. A crossed dispatch fence releases only its known
 unsent reservation; already received receipt recovery does not require renewed
 profile qualification or a key.
+
+
+## A2c frontend implementation checkpoint
+
+The account control in the staff rail opens a native modal dialog. It connects,
+reconnects the original connection, replaces or disconnects a key through the
+accepted foreground commands. The uncontrolled password field is read and emptied
+synchronously before validation or any await. `openrouter-session.ts` alone holds
+the active raw key and adds it to an explicit same-origin POST allowlist. Transport
+uses no-store and the existing operator/CSRF proof. Browser state exposes only
+nonsecret status and server-owned settings. There is no key getter, React key
+prop/state, provider environment fallback or completion from account/model controls.
+
+Disconnect, replacement, expiry, authentication denial, native scope changes and
+pagehide/bfcache transitions clear the active key and invalidate pending responses.
+Clearing is best effort; an in-flight HTTP request can still finish. Browser
+password-manager or forensic memory erasure is not claimed. Persisted provider
+preferences are the random tab reference, opaque connection reference and model
+display preference. Pending starts retain an original operation/run locator only;
+provider selection, budget and full provider command bodies are never serialized.
+The service checks the known current credential, including bounded embedded JSON,
+before content can enter requests or the existing pending-start persistence.
+
+The composer retains offline models and exposes explicit search, server pagination
+(up to 20 rows), decimal prices, eligibility/reasons and the exact USD 0 / 0.25 /
+1.00 local budget choices. A selected model is pinned through the server's planner
+profile. Changing settings retains typed text, starts a fresh conversation and
+resets the independent Changes grant to Review only. The three structured actions
+resolve their own structured_review selection for that same actual model and
+budget. A qualification failure remains actionable; it never substitutes another
+profile, model or offline inference. Application-only evidence waiting stays offline.
+
+`prepare()` remains the one planner/structured send and resume path. Each advance
+first attempts receipt/non-inference recovery without a credential. Only an
+explicitly invoked operation receiving waiting_for_credentials can supply a
+currently connected matching original key for its next inference. Reload and
+history reads never advance a run. Saved run/conversation settings hydrate the
+original selection only in memory; neither a copied handle nor UI preference
+supplies server authority. A newer structured run remains the reload target even
+when its last planner conversation is older.
+
+Waiting, expired, denied and unknown outcomes retain their original operation and
+history. A possibly sent completion is never retried automatically. If a structured
+start acknowledgement is lost before its server-generated run ID reaches the
+browser, the operation locator is retained and the UI reports the unavailable
+receipt. It does not reconstruct the server's identity hash, replay that start,
+resume an unrelated earlier run or persist selection/budget to invent recovery.
+Saved conversation reads remain available; this is a truthful recovery limitation
+of the existing start response contract.
+
+The dependency-free Node client tests exercise input clearing on failure, targeted
+headers, metadata-only persistence, stale response interleavings, scope/logout/
+expiry/reload clearing, matching structured selection and known-key content guards.
+The existing pinned planner CI job runs them before the TypeScript/Vite build.
+Backend APIs, migration chain, provider activation gates and approval/draft command
+authority are unchanged. Offline authored transport checks do not qualify a live
+provider route or deployment.

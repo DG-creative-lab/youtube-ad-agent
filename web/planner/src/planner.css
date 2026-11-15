@@ -203,3 +203,25 @@ textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px
 .capability-state { color: var(--muted); font-size: .75rem; }
 .capability-description { padding: 0 4px 16px 22px; overflow-wrap: anywhere; }
 .capability-list summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* Foreground account and catalogue retain the paper/ink, flat workspace vocabulary. */
+.account-trigger {display:flex; flex-direction:column; align-items:flex-start; width:100%; min-height:44px; padding:10px 0; color:inherit; background:transparent; border:0; border-top:1px solid #454545; text-align:left;}
+.account-trigger span {font-size:12px; color:#d0d0cc; margin-top:4px;}
+.openrouter-account {width:min(560px, calc(100vw - 32px)); max-height:calc(100dvh - 32px); box-sizing:border-box; border:1px solid var(--ink, #171717); padding:24px; background:#faf9f6; color:#171717; overflow:auto; overscroll-behavior:contain;}
+.openrouter-account::backdrop {background:rgb(0 0 0 / .5); overscroll-behavior:contain;}
+.account-heading {display:flex; align-items:start; justify-content:space-between; gap:16px;}
+.account-heading h2 {margin:0;}
+.openrouter-account button {min-height:44px; margin:8px 8px 8px 0;}
+.account-heading button {margin:0; min-width:44px; font-size:24px;}
+.openrouter-account label, .provider-models label {display:block; font-size:13px; line-height:1.5; font-weight:600;}
+.openrouter-account input, .provider-models input, .provider-models select {display:block; box-sizing:border-box; width:100%; min-height:44px; padding:10px; margin:6px 0 10px; border:1px solid #888; border-radius:0; background:#fff; color:#171717; font:inherit;}
+.provider-models {border-top:1px solid #deddd9; margin-top:16px; padding-top:12px; max-height:50dvh; overflow:auto; overscroll-behavior:contain;}
+.provider-models h3 {margin:0 0 12px; font-size:16px;}
+.provider-models button {min-height:44px; white-space:normal; text-align:left; max-width:100%;}
+.provider-model-list {list-style:none; margin:12px 0; padding:0;}
+.provider-model-list li {padding:14px 0; border-top:1px solid #deddd9; overflow-wrap:anywhere;}
+.provider-model-list strong, .provider-model-list .model-id {display:block;}
+.provider-model-list p, .provider-models p {font-size:12px; line-height:1.6;}
+.model-id {font:11px ui-monospace, monospace; color:#626262; margin-top:4px;}
+.model-menu {max-width:calc(100vw - 48px); box-sizing:border-box;}
+@media (max-width:600px) {.openrouter-account {padding:18px;} .account-trigger {width:auto; min-width:140px;} .provider-models {max-height:45dvh;}}

@@ -70,7 +70,7 @@ type Props = {
   limits: InstructionTestLimits;
   request: <T>(path: string, body?: Record<string, string | number | boolean>) => Promise<T>;
   onReview: (testId: string, selection: ReviewSelection) => void;
-  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string};
+  mainModel: {mode: "offline"} | {mode: "openrouter"; model: string; budget?: string};
   onPrepareNextTest: (testId: string, reviewId: string, selection: ReviewSelection) => void;
   onPackageConflict: (message: string) => void;
 };
@@ -277,7 +277,7 @@ export function InstructionTest({campaignId, revision, fingerprint, viewerOrigin
             </button>
           </div>
           {mainModel.mode === "openrouter" && <p className="revision">
-            One request for this review · Up to 512 output tokens · Free model routes with a zero-price cap.
+            One request for this review · Up to 512 output tokens · ${mainModel.budget ?? "0"} local reservation ceiling, not an external billing guarantee. The route must pass current structured-review qualification.
             The model receives the two instructions, results and buyer correction.
           </p>}
           {test.evidence.correction && <p className="revision">

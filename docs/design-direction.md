@@ -44,3 +44,19 @@ Verification used a fresh temporary SQLite database with the portable propose sc
 The navigation review reproduced both earlier failures in Chromium before the fixes. Follow-up checks cancelled Campaign, identity-link, New request and reload navigation with unsaved selections; verified that changing the visible creative did not hide another creative's edits; and confirmed no warning after saving. A request started from placements used a new conversation ID, `after_message: 0` and `draft_permission: none`. Reload retained that new conversation, and the previous transcript could still be reopened. All 156 offline tests and the planner build passed again.
 
 The follow-up review checked search results and imported proposals without selected placements in the in-app browser. Attempted navigation retained the search results and all four authored proposals. Saving an imported selection still retained the proposals and protected them from navigation. An isolated source copy without a planner build served the standalone page at both `/` and `/placements`, with planner links hidden and build commands visible. Adding the planner build enabled both links and their destinations. These checks used local sample search and authored imports, with zero live-provider calls; all 156 offline tests and the planner build passed.
+
+
+## Foreground account and model controls · 15 November 2026
+
+OpenRouter lives beside the staff identity in the rail. The account surface uses
+native dialog modal behavior, labelled password input, native Escape/focus return
+and scoped overscroll containment. It uses the existing paper/ink colors, square
+controls and 44px primary actions. The browser field clears immediately on submit;
+status and errors describe the retained connection rather than exposing key data.
+
+The composer model panel keeps offline choices visible and groups provider search,
+exact budget selection, prices, compatibility/reasons and pagination below them.
+No-training routing and possible safety retention are stated together; the budget
+is described as a local reservation ceiling. Changing model/budget retains the
+message and resets Changes to Review only. Waiting and unknown original operations
+have visible recovery wording and never silently switch inference modes.
