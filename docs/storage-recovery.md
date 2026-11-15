@@ -45,8 +45,8 @@ serialization, ownership/access checks, approvals, catalog registration/backfill
 and DDL stay in their existing application owners; the store never opens,
 commits, rolls back or closes a connection and preserves raw snapshot text.
 
-E37a.3 ([#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76))
-adds `SQLiteConversationStore`, borrowed by `CampaignConversations` for raw session
+PR #77 merged E37a.3 and closed [#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76).
+`SQLiteConversationStore` is borrowed by `CampaignConversations` for raw session
 rows, joined message histories, message appends, job context, latest message/count,
 session creation/settings and fully client/brand/actor/campaign-scoped list rows.
 Full tuples retain missing versus present malformed/NULL values; IDs, timestamps,
@@ -56,9 +56,21 @@ and stale-follow-up policy, bounded context, verified replies and title filterin
 Its constructor DDL/legacy backfill and `begin()` running-run selection/status/
 outcome supersession writes stay in place, on the same caller-owned transaction.
 
-These seams are SQLite-only. Eager initializers, planner/default/job/turn records,
-remaining conversation legacy/supersession SQL, access/permit reads and media retain
-their current SQL and filesystem owners; this is not the complete same-store graph.
+E37a.4 ([#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78)) adds
+`SQLitePlannerStore`, immediately used by `PlacementAgent` for 17 fixed native
+default/job/turn operations and joined raw step history. Defaults keep their
+original client/brand/actor scope. Tuples, missing versus present NULL rows, raw
+text, native conflicts and untouched receipt/error columns pass through unchanged.
+JSON, private owner/current-grant checks, retry/model/revision identity, inference
+decisions and transaction phases remain in the application. A failed received
+write retains the durable requested/unknown phase; explicit resume cannot repeat
+that attempted main-model or classifier effect. Separately committed received
+receipts still recover local terminal failures.
+
+These seams are SQLite-only. Eager DDL/initializers, common `agent_runs`/`agent_steps`
+reads and writes, remaining conversation legacy/supersession SQL, access/permit
+reads and media retain their current SQL and filesystem owners; this is not the
+complete same-store graph.
 PostgreSQL repositories, transactions and conformance require a separately
 accepted slice; there is no
 backend selector or `DATABASE_URL` interpretation. Foreground provider sessions,

@@ -705,6 +705,84 @@ class PlacementPlannerTests(unittest.TestCase):
         self.assertNotIn('authored-key', json.dumps(runtime.read(run_id)))
         self.assertEqual(self.runtime.drafts.read()['revision'], 1)
 
+    def test_main_received_update_fault_preserves_requested_phase_and_reopen_never_repeats_effect(self):
+        simulator = Mock(wraps=SimulatedPlanner())
+        classifier = Mock(route='simulated_decision', wraps=SimulatedClassifier())
+        runtime = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
+        run_id = self.start(runtime)
+        runtime.resume(run_id, max_steps=1)
+        before = self.persisted(run_id)
+        attempted = []
+        def model_effect(context, history, settings):
+            attempted.append(self.persisted(run_id))
+            return SimulatedPlanner().next_turn(context, history, settings)
+        simulator.next_turn.side_effect = model_effect
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('''CREATE TRIGGER fail_main_received BEFORE UPDATE OF receipt ON planner_turns
+                          WHEN NEW.position=1 AND NEW.state='received'
+                          BEGIN SELECT RAISE(ABORT, 'Authored main receipt failure'); END''')
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'Authored main receipt failure'):
+            runtime.resume(run_id, max_steps=1)
+        failed = self.persisted(run_id)
+        self.assertEqual(len(attempted), 1)
+        self.assertEqual(attempted[0]['turns'], [*before['turns'], (1, 'requested', None, None)])
+        self.assertEqual(failed, attempted[0])
+        for key in ('revisions', 'steps', 'status', 'job', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(simulator.next_turn.call_count, 2)
+        classifier.classify.assert_not_called()
+        # Remove the fault: refusal after reopening must come from durable unknown state.
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('DROP TRIGGER fail_main_received')
+        reopened = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
+        self.assertEqual(reopened.read(run_id)['planner']['turns'][-1],
+                         {'position': 1, 'state': 'requested', 'inference': None})
+        with self.assertRaisesRegex(ReviewInferenceError, 'outcome is unknown'):
+            reopened.resume(run_id, max_steps=1)
+        self.assertEqual(self.persisted(run_id), failed)
+        self.assertEqual(simulator.next_turn.call_count, 2)
+        classifier.classify.assert_not_called()
+
+    def test_classifier_received_update_fault_keeps_main_receipt_and_never_repeats_effect(self):
+        simulator = Mock(wraps=SimulatedPlanner())
+        classifier = Mock(route='simulated_decision', wraps=SimulatedClassifier())
+        runtime = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
+        run_id = self.start(runtime)
+        runtime.resume(run_id, max_steps=1)
+        before = self.persisted(run_id)
+        attempted = []
+        def classifier_effect(rows, contexts):
+            attempted.append(self.persisted(run_id))
+            return SimulatedClassifier().classify(rows, contexts)
+        classifier.classify.side_effect = classifier_effect
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('''CREATE TRIGGER fail_classifier_received BEFORE UPDATE OF classification ON planner_jobs
+                          WHEN NEW.classification_state='received'
+                          BEGIN SELECT RAISE(ABORT, 'Authored classifier receipt failure'); END''')
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'Authored classifier receipt failure'):
+            runtime.resume(run_id, max_steps=1)
+        failed = self.persisted(run_id)
+        self.assertEqual(len(attempted), 1)
+        self.assertEqual(failed, attempted[0])
+        self.assertEqual(failed['turns'][:1], before['turns'])
+        self.assertEqual(failed['turns'][1][:2], (1, 'received'))
+        main_receipt = json.loads(failed['turns'][1][2])
+        self.assertEqual((main_receipt['tool'], main_receipt['arguments']), ('classify_catalog', {}))
+        self.assertEqual(failed['job'], (before['job'][0], 'requested', None, None))
+        for key in ('revisions', 'steps', 'status', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(simulator.next_turn.call_count, 2)
+        self.assertEqual(classifier.classify.call_count, 1)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('DROP TRIGGER fail_classifier_received')
+        reopened = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
+        self.assertEqual(reopened.read(run_id)['planner']['turns'][1]['state'], 'received')
+        with self.assertRaisesRegex(ReviewInferenceError, 'specialist request outcome is unknown'):
+            reopened.resume(run_id, max_steps=1)
+        self.assertEqual(self.persisted(run_id), failed)
+        self.assertEqual(simulator.next_turn.call_count, 2)
+        self.assertEqual(classifier.classify.call_count, 1)
+
     def test_classifier_receipt_is_validated_and_cannot_override_catalog_facts(self):
         classifier = Mock(route='simulated_decision')
         classifier.classify.return_value = [{'id': 'NONEXIST001', 'context': 'video-editing'} for _ in CATALOG]

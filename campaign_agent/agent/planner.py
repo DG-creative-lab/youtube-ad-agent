@@ -5,6 +5,7 @@ import re
 import sqlite3
 
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.delivery import delivery_message
 from campaign_agent.delivery_next_test import recommendation_message
@@ -82,15 +83,15 @@ class PlacementAgent:
         if not self.remote.web_disabled:
             models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
         with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute('SELECT model FROM planner_defaults WHERE client_id=? AND brand_id=? AND actor_id=?',
-                             (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)).fetchone()
+            row = SQLitePlannerStore(db).default_row(
+                self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)
         default = row[0] if row and row[0] in {item['id'] for item in models} else 'simulated'
         return {'models': models, 'default': default, 'max_turns': MAX_TURNS,
                 'specialist': 'simulated_decision', 'specialist_label': 'Automatic · simulated decision model'}
 
     def owns(self, run_id):
         with closing(sqlite3.connect(self.path)) as db:
-            return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
+            return SQLitePlannerStore(db).job_exists_row(run_id) is not None
 
     def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none', provider_selection_id=None):
         if self.owner.foreground:
@@ -113,7 +114,7 @@ class PlacementAgent:
             settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            existing = db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+            existing = SQLitePlannerStore(db).job_snapshot_row(run_id)
             if existing:
                 self.owner._owned_run(db, run_id)
                 source = json.loads(existing[0])
@@ -156,12 +157,10 @@ class PlacementAgent:
                 if delivery_next_test:
                     report = self.owner.delivery.saved_report(db, binding) if binding else None
                     context.update(delivery_next_test=True, delivery_report_id=report['id'] if report else None)
-            db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
-                       (*expected[:3], model))
+            SQLitePlannerStore(db).upsert_default(*expected[:3], model)
             db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?,?)',
                        (run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id))
-            db.execute('INSERT INTO planner_jobs(run_id,session_id,snapshot) VALUES(?,?,?)',
-                       (run_id, session_id, json.dumps(context)))
+            SQLitePlannerStore(db).create_job(run_id, session_id, json.dumps(context))
         return run_id
 
     def _context(self, db, run_id):
@@ -169,7 +168,7 @@ class PlacementAgent:
         _, status = self.owner._owned_run(db, run_id)
         if status != 'running':
             raise PackageConflict('This request is no longer active. Read the latest conversation.')
-        source = json.loads(db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()[0])
+        source = json.loads(SQLitePlannerStore(db).job_snapshot_row(run_id)[0])
         if self.conversations.session(db, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
         if self.drafts._read(db)['revision'] != source['revision']:
@@ -178,9 +177,7 @@ class PlacementAgent:
 
     def _history(self, db, run_id):
         history = []
-        for tool, result, receipt in db.execute(
-                'SELECT s.tool,s.result,t.receipt FROM agent_steps s JOIN planner_turns t '
-                'ON t.run_id=s.run_id AND t.position=s.position WHERE s.run_id=? ORDER BY s.position', (run_id,)):
+        for tool, result, receipt in SQLitePlannerStore(db).history_rows(run_id):
             result, receipt = json.loads(result), json.loads(receipt)
             reply_status = {'respond': 'answered', 'ask_clarification': 'needs_input'}.get(tool)
             if reply_status and 'error' not in result:
@@ -193,8 +190,7 @@ class PlacementAgent:
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             source = self._context(db, run_id)
-            state, saved = db.execute('SELECT classification_state,classification FROM planner_jobs WHERE run_id=?',
-                                      (run_id,)).fetchone()
+            state, saved = SQLitePlannerStore(db).classification_row(run_id)
             if state == 'received':
                 return json.loads(saved)
             if state != 'pending':
@@ -203,7 +199,7 @@ class PlacementAgent:
                 raise ValueError('The pinned specialist route is unavailable.')
             rows = self.catalogs.read(db, source['catalog_id'])
             contexts = self.drafts._read(db)['brief']['contexts']
-            db.execute("UPDATE planner_jobs SET classification_state='requested' WHERE run_id=?", (run_id,))
+            SQLitePlannerStore(db).request_classification(run_id)
         try:
             assignments = self.classifier.classify(rows, contexts)
             if (not isinstance(assignments, list) or len(assignments) != len(rows)
@@ -215,13 +211,12 @@ class PlacementAgent:
                 raise ValueError('Invalid classification receipt')
         except Exception:
             with closing(sqlite3.connect(self.path)) as db, db:
-                db.execute("UPDATE planner_jobs SET classification_state='failed' WHERE run_id=?", (run_id,))
+                SQLitePlannerStore(db).fail_classification(run_id)
             raise ReviewInferenceError('The specialist response failed validation. Start a new run.') from None
         result = {'assignments': assignments, 'route': source['routing']['classifier'],
                   'label': 'Simulated decision response; accuracy not evaluated'}
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("UPDATE planner_jobs SET classification_state='received',classification=? WHERE run_id=?",
-                       (json.dumps(result), run_id))
+            SQLitePlannerStore(db).receive_classification(run_id, json.dumps(result))
         return result
 
     def resume(self, run_id, max_steps=1):
@@ -241,8 +236,7 @@ class PlacementAgent:
                     self._finish(db, run_id, self.review_tools.refresh_outcome(source, history), 'needs_input')
                     continue
                 position = len(history)
-                row = db.execute('SELECT state,receipt,error FROM planner_turns WHERE run_id=? AND position=?',
-                                 (run_id, position)).fetchone()
+                row = SQLitePlannerStore(db).turn_row(run_id, position)
                 if row and row[0] != 'received' and not source['settings'].get('foreground'):
                     raise ReviewInferenceError(row[2] or 'This model request is in progress or its outcome is unknown. Start a new run.')
                 receipt = json.loads(row[1]) if row and row[1] else None
@@ -250,7 +244,7 @@ class PlacementAgent:
                     if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
                         self.remote.require_available(source['settings'])
                         self.remote.prepare_turn(source, history, source['settings'])
-                    db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL) ON CONFLICT DO NOTHING", (run_id, position))
+                    SQLitePlannerStore(db).request_turn(run_id, position)
             if receipt is None:
                 try:
                     if source.get('delivery_request'):
@@ -275,12 +269,11 @@ class PlacementAgent:
                     raise
                 except Exception:
                     with closing(sqlite3.connect(self.path)) as db, db:
-                        db.execute("UPDATE planner_turns SET state='failed',error=? WHERE run_id=? AND position=?",
-                                   ('The main-model request failed or its outcome is unknown. Start a new run.', run_id, position))
+                        SQLitePlannerStore(db).fail_turn(
+                            run_id, position, 'The main-model request failed or its outcome is unknown. Start a new run.')
                     raise ReviewInferenceError('The main-model request failed or its outcome is unknown. Start a new run.') from None
                 with closing(sqlite3.connect(self.path)) as db, db:
-                    db.execute("UPDATE planner_turns SET state='received',receipt=? WHERE run_id=? AND position=?",
-                               (json.dumps(receipt), run_id, position))
+                    SQLitePlannerStore(db).receive_turn(run_id, position, json.dumps(receipt))
             if self.owner.foreground: self.owner.foreground.before_commit(source['settings'])
             self.owner.require("youtube:agent.run")
             classified = None
@@ -343,7 +336,7 @@ class PlacementAgent:
 
     def _finish(self, db, run_id, result, status):
         db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
-        db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(result), run_id))
+        SQLitePlannerStore(db).update_outcome(run_id, json.dumps(result))
         self.conversations.finish(db, run_id, result, status)
 
     def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
@@ -458,10 +451,10 @@ class PlacementAgent:
         self.owner.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.path)) as db:
             request, status = self.owner._owned_run(db, run_id)
-            snapshot, outcome = db.execute('SELECT snapshot,outcome FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+            snapshot, outcome = SQLitePlannerStore(db).job_result_row(run_id)
             source = json.loads(snapshot)
             turns = [{'position': position, 'state': state, 'inference': json.loads(receipt).get('inference') if receipt else None}
-                     for position, state, receipt in db.execute('SELECT position,state,receipt FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,))]
+                     for position, state, receipt in SQLitePlannerStore(db).turn_rows(run_id)]
             return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(db, run_id),
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],

@@ -338,8 +338,9 @@ open; this slice enables no hosted composition or new project authority.
 
 ### E37a.3 native SQLite conversation store · 15 November 2026
 
-[#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76) is the current
-bounded child of open #37, based on merged PR #75. `SQLiteConversationStore` now
+PR #77 merged [#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76)
+at `0b4b8b98c9b5a76861718faa1de397d8d88857c4`, closing that bounded child of
+open #37. `SQLiteConversationStore` now
 supplies `CampaignConversations` with fixed raw session/message/job-context reads,
 message appends, latest ID/count, session/settings writes and four-scope lists on
 the caller's exact connection. The application retains JSON, authority/private
@@ -348,9 +349,27 @@ supersession selection/status/outcome writes. Native tests exercise raw rows,
 limits/conflicts, borrowed transactions and failed follow-up insertion rollback
 with received evidence retained and explicit retry.
 
-Independent exact-head review/verification and current unchanged CI remain
-required before human merge. Planner/default/job/turn records, remaining constructor/
-legacy/supersession SQL, access/permit reads, media and foreground sessions/ledger/
-semantic receipts still need their complete same-store port before any PostgreSQL
-selection. PostgreSQL conformance, coherent DB/blob recovery and all-campaign
-restore admission remain separate acceptance; #37 stays open.
+Its accepted tree is `c755b2562d798eae8ac6b808702cc3d6bf0d86b9`.
+
+### E37a.4 native SQLite planner store · 15 November 2026
+
+[#78](https://github.com/DG-creative-lab/youtube-ad-agent/issues/78) is the current
+bounded child of open #37, based on merged PR #77. `SQLitePlannerStore` supplies
+17 fixed default/job/turn record operations and ordered joined raw step history
+on the caller's exact connection, immediately used by `PlacementAgent`. Raw rows,
+NULL/missing distinctions, three-field defaults, native conflicts and partial
+updates remain exact. Application code retains JSON, authority, request/model/
+revision checks, inference/unknown decisions, DDL and transaction phases.
+
+Native tests cover constructor-created schema, borrowed transactions and real
+received-UPDATE faults for main-model and classifier receipts, preserving the
+requested unknown phase and preventing repeated attempts after reopen. Existing
+received-receipt terminal recovery, follow-up rollback and supersession remain.
+Independent exact-head review/verification and current unchanged CI are required
+before human merge; earlier test counts are historical evidence only.
+
+Eager DDL/initializers, common `agent_runs`/`agent_steps` SQL, conversation legacy/
+supersession SQL, access/permit reads, media and foreground sessions/ledger/semantic
+receipts still require their complete same-store port. PostgreSQL conformance,
+coherent DB/blob recovery and all-campaign restore admission remain separate
+acceptance; #37 stays open. No backend selection, live effects or deployment is enabled.
