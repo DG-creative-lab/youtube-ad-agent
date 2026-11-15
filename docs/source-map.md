@@ -49,6 +49,8 @@ The browser calls the loopback API, which delegates to the owning application co
 
 ## Where the code should grow
 
+[Proposed project/sharing contract](project-sharing-contract.md) maps the next #55 ownership, access, source-resource and migration boundaries. No projects module, project capability or team-sharing API exists yet. Reuse native campaign writers and the current access/permit owner after producer/storage acceptance; the paths below remain proposed.
+
 ```text
 campaign_agent/              Python application package
   bootstrap.py               Wire concrete adapters when assembly needs a home

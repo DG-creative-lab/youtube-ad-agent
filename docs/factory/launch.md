@@ -24,8 +24,8 @@ the coordinator records dispatch and acceptance evidence against exact commits.
 | F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Blocked on #49/#50 | Define observable outcomes independently; reuse native tests. |
 | A1a | [#52 Scoped capability catalogue/API](https://github.com/DG-creative-lab/youtube-ad-agent/issues/52) | Blocked on #49/#50 | Freeze metadata/API contract; preserve existing dispatch. |
 | A1b | [#53 Capability UI and factual replies](https://github.com/DG-creative-lab/youtube-ad-agent/issues/53) | Blocked on #52 | Consume accepted catalogue contract and integration commit. |
-| A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Contract accepted in merged #65; A2a merged #66; A2b admission/recovery implemented for review; A2c awaits accepted backend integration | [Foreground v1 handoff and A2a checkpoint](../openrouter-session-contract.md); one owner of transport/access/migrations per wave. |
-| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Blocked on access/storage contracts | Reuse #36/#37; one migration owner. |
+| A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Contract #65 and implementation #66/#67/#68 merged; live adapters/qualification remain gated | [Foreground contract/checkpoints](../openrouter-session-contract.md); acceptance is offline/synthetic, not activation. |
+| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Project contract proposed; runtime blocked on accepted access/storage contracts | [Proposed v1](../project-sharing-contract.md); #36/producer and #37 own dependency acceptance; one migration owner. |
 | A4 | [#56 Conversational briefs/versioned guidance](https://github.com/DG-creative-lab/youtube-ad-agent/issues/56) | Blocked on #52/#55 | Separate runtime skills/guidance from development-agent skills. |
 | A5 | [#57 Reviewed voice artifacts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/57) | Blocked on provider/guidance/assets/budget contracts | Offline first; later live trial ceiling is £4 total. |
 | A6 | [#58 Reviewed project-learning proposals](https://github.com/DG-creative-lab/youtube-ad-agent/issues/58) | Blocked on #55/#56 | Preserve native evidence eligibility and uncertainty. |
@@ -235,3 +235,12 @@ Implementation checks use authored transports and disposable data only. Live rou
 qualification, real provider spend and deployment remain separate gates. Exact
 commit independent source/browser verification and human merge remain required;
 this checkpoint does not close umbrella #54.
+
+
+### A3-contract #55 preparation · 15 November 2026
+
+PR #68 merged at `23b0bc0f5afc6b016b46b646423272a8bf7e203b`; its tree matches the independently accepted OpenRouter head. The next slice is the [proposed project/sharing contract](../project-sharing-contract.md), not project runtime. Current campaign-only access/permits cannot authorize project creation, listing or shared bytes by substituting a campaign ID. External membership/current decisions remain Gateplane-owned; the product owns native relationships and explicit disclosure intent.
+
+Task A3-contract-55 v2 owns four documentation files on `feature/project-sharing-contract` from that merged base. Local execution became unavailable before validation/commit. V2 uses exact GitHub source/tree/commit APIs, coordinator JavaScript document/link checks, independent remote source review/verification and final CI. It makes no local clean-checkout, local commit, runtime or browser execution claim. Earlier local draft/design work is historical, not final-head evidence.
+
+The coordinator authors; independent roles return separate exact-head evidence. Human document merge does not dispatch project capabilities, schemas, APIs, UI, providers or hosting. #36/producer and #37 must accept the concrete access/migration agreement before A3b runtime dispatch. Preserve portable demo release priority and keep #55 open through implementation acceptance.
