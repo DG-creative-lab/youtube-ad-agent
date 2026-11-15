@@ -22,6 +22,8 @@ The client organization is the tenant. A brand belongs to one client. A person m
 
 ## Access port and Gateplane preparation
 
+[Project ownership/sharing proposed v1](project-sharing-contract.md) defines the next #55 boundary: same-brand logical projects, explicit version disclosure and current external access/relationship fences. It is documentation only. The current port remains campaign-only; project targets, intents and permits require accepted #36/producer/#37 extensions. Existing ownership and private conversation/provider bindings are unchanged.
+
 `campaign_agent/ports/access.py` defines the product-owned `AccessPolicy`. Application commands send an `AccessRequest` containing actor, client, brand, workspace, installation, capability and campaign. A decision must be exactly `allow`; denial, an unavailable decision and adapter errors cannot fall back to local access. Membership in the selected brand is also required.
 
 `WorkspaceContext` is supplied by trusted server composition. It must never be built directly from browser assertions or model output. Nonlocal campaigns require prior provisioning, an explicit campaign ID, explicit brand examples and an injected access adapter. `LocalDemoAccess` permits only the exact local/demo mapping. It supplies no foreign-customer fallback.
