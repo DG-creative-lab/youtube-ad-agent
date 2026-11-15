@@ -1,6 +1,6 @@
 # Factory launch board and worker handoffs
 
-14 November 2026 · Coordinator: the originating factory-planning conversation.
+15 November 2026 · Coordinator: the originating factory-planning conversation.
 
 [Architecture and implementation map](../agent-platform-factory-plan.md) ·
 [Engineering workflow](../engineering-workflow.md) · [Build priorities](../build-plan.md)
@@ -13,19 +13,19 @@ the coordinator records dispatch and acceptance evidence against exact commits.
 
 | Lane | Tracker | Owner / boundary |
 | --- | --- | --- |
-| Development factory | [Epic #47](https://github.com/DG-creative-lab/youtube-ad-agent/issues/47) | Task contracts, coordination, independent verification and executable quality checks. |
+| Development factory | [Epic #47](https://github.com/DG-creative-lab/youtube-ad-agent/issues/47) | Complete: #49/#50/#51 merged; retain task contracts, independent verification and exact-head checks. |
 | Agent workspace | [Epic #48](https://github.com/DG-creative-lab/youtube-ad-agent/issues/48) | Capabilities, user-funded models, projects, guidance, creative and learning. |
 | Hosted enterprise foundations | [Existing epic #34](https://github.com/DG-creative-lab/youtube-ad-agent/issues/34) | Current access, durable storage/jobs, provider effects, privacy and deployed acceptance. |
 
 | Package | Issue | Dispatch state at preparation | Dependency / next owner |
 | --- | --- | --- | --- |
-| F1 | [#49 Coordinator/verifier playbooks and contracts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/49) | Queued; publish and review this launch baseline first | First implementation builder, then independent reviewer/verifier. |
-| F2 | [#50 Locked planner build in offline CI](https://github.com/DG-creative-lab/youtube-ad-agent/issues/50) | Blocked on #49 | First complete factory delivery pilot. |
-| F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Frozen v1 corpus and offline implementation prepared; independent exact-commit acceptance and final CI required | [Portfolio command/report](../agent-behavior-evals.md); human merge remains required. |
+| F1 | [#49 Coordinator/verifier playbooks and contracts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/49) | Merged complete | Accepted development playbooks/contracts. |
+| F2 | [#50 Locked planner build in offline CI](https://github.com/DG-creative-lab/youtube-ad-agent/issues/50) | Merged complete | Unchanged locked planner CI remains required on each candidate. |
+| F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Merged complete in PR #71, base d409d7b | [Accepted 11-case portfolio](../agent-behavior-evals.md); historical 298-test checkpoint is not current candidate evidence. |
 | A1a | [#52 Scoped capability catalogue/API](https://github.com/DG-creative-lab/youtube-ad-agent/issues/52) | Blocked on #49/#50 | Freeze metadata/API contract; preserve existing dispatch. |
 | A1b | [#53 Capability UI and factual replies](https://github.com/DG-creative-lab/youtube-ad-agent/issues/53) | Blocked on #52 | Consume accepted catalogue contract and integration commit. |
-| A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Contract #65 and implementation #66/#67/#68 merged; live adapters/qualification remain gated | [Foreground contract/checkpoints](../openrouter-session-contract.md); acceptance is offline/synthetic, not activation. |
-| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Project contract proposed; runtime blocked on accepted access/storage contracts | [Proposed v1](../project-sharing-contract.md); #36/producer and #37 own dependency acceptance; one migration owner. |
+| A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Implementation delivered/merged; activation tracked by #70 | [Foreground checkpoints](../openrouter-session-contract.md); #70 owns foreground transport/route/charging qualification; real identity remains #36 and deployment stays gated. |
+| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Open: PR #69 product rules accepted; current A3a artifact agreement proposed; runtime blocked | [Integration v1](../project-access-integration.md); #36/Gateplane and #37 separately own acceptance; no migration slot reserved. |
 | A4 | [#56 Conversational briefs/versioned guidance](https://github.com/DG-creative-lab/youtube-ad-agent/issues/56) | Blocked on #52/#55 | Separate runtime skills/guidance from development-agent skills. |
 | A5 | [#57 Reviewed voice artifacts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/57) | Blocked on provider/guidance/assets/budget contracts | Offline first; later live trial ceiling is £4 total. |
 | A6 | [#58 Reviewed project-learning proposals](https://github.com/DG-creative-lab/youtube-ad-agent/issues/58) | Blocked on #55/#56 | Preserve native evidence eligibility and uncertainty. |
@@ -220,7 +220,7 @@ coordinator integrates serially and refreshes affected review and verification
 on the resulting commit. Issue closure follows accepted evidence and merged work;
 issuing a handoff or opening a PR is not completion.
 
-### F3 #51 offline portfolio checkpoint · 15 November 2026
+### Historical F3 #51 preparation · 15 November 2026
 
 F3-51 v1 starts from accepted dependency base
 `0e6e1e2f9847d18c789bd3f1d4a771973877b5e7`. An independent specification froze
@@ -235,7 +235,7 @@ Independent review/verification must name the exact candidate commit and final C
 issue #51 closes only after accepted implementation is human-merged.
 
 
-### A2c #54 frontend checkpoint · 15 November 2026
+### Historical A2c #54 frontend preparation · 15 November 2026
 
 The frozen A2c v1 slice builds account connection controls, private tab-memory
 credential handling, searchable priced model/budget selection and existing planner /
@@ -251,10 +251,36 @@ commit independent source/browser verification and human merge remain required;
 this checkpoint does not close umbrella #54.
 
 
-### A3-contract #55 preparation · 15 November 2026
+### Historical A3-contract #55 preparation · 15 November 2026
 
 PR #68 merged at `23b0bc0f5afc6b016b46b646423272a8bf7e203b`; its tree matches the independently accepted OpenRouter head. The next slice is the [proposed project/sharing contract](../project-sharing-contract.md), not project runtime. Current campaign-only access/permits cannot authorize project creation, listing or shared bytes by substituting a campaign ID. External membership/current decisions remain Gateplane-owned; the product owns native relationships and explicit disclosure intent.
 
 Task A3-contract-55 v2 owns four documentation files on `feature/project-sharing-contract` from that merged base. Local execution became unavailable before validation/commit. V2 uses exact GitHub source/tree/commit APIs, coordinator JavaScript document/link checks, independent remote source review/verification and final CI. It makes no local clean-checkout, local commit, runtime or browser execution claim. Earlier local draft/design work is historical, not final-head evidence.
 
 The coordinator authors; independent roles return separate exact-head evidence. Human document merge does not dispatch project capabilities, schemas, APIs, UI, providers or hosting. #36/producer and #37 must accept the concrete access/migration agreement before A3b runtime dispatch. Preserve portable demo release priority and keep #55 open through implementation acceptance.
+
+
+### Current accepted baseline and A3a artifact gate · 15 November 2026
+
+Factory #47 and portfolio #51 are merged complete; PR #71 provides source base
+`d409d7b96c3e2313f961af7fd78f0523ed1b4418`. #54 implementation is delivered;
+[activation #70](https://github.com/DG-creative-lab/youtube-ad-agent/issues/70)
+retains foreground transport/route/charging qualification gates; real identity/issuer remains #36. Historical preparation sections
+above describe their dispatch time, not outstanding implementation work.
+
+PR #69 accepted project product rules at
+`0e6e1e2f9847d18c789bd3f1d4a771973877b5e7`. A3a-contract-55 v1 now prepares
+the [concrete native integration agreement](../project-access-integration.md),
+closed profile, literal request/result/hash vectors and a small offline checker.
+One builder owns eight artifact/checker/test/docs paths. Runtime access, API/UI,
+migrations, dependencies, provider effects and the pinned producer wire stay
+unchanged. Independent review/verification must name the exact final head/tree;
+existing Python/11-case portfolio and current unchanged planner CI remain required.
+No browser/service/storage execution is claimed by these artifact checks.
+
+#55 remains open. The current artifact agreement is proposed: first accept its
+exact-head artifact evidence, then obtain separate #36/Gateplane registration,
+native adapter, recipient/revoke, deadline and request-budget agreement and #37
+storage/all-campaign restore/admission agreement. No producer/storage acceptance
+or runtime dispatch follows from human product-document acceptance. Refresh main,
+next migration ownership and a complete new task contract before A3b.

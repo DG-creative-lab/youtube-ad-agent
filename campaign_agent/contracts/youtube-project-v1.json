@@ -1,0 +1,1558 @@
+{
+  "profile": "youtube-project-v1",
+  "version": 1,
+  "status": "proposed_artifact_only",
+  "producer_commit": "d8eb4f4073753573fc809a557521e4428719ea1d",
+  "producer_schema_git_blob": "9bfc7650019f5fe9cb852cbcba088557e01366fd",
+  "fact_source": "youtube-project-sqlite-v1",
+  "actions": [
+    {
+      "actions": [
+        "create"
+      ],
+      "capability": "youtube:project.create.v1",
+      "effect": "write",
+      "target_type": "workspace",
+      "target_id_field": "workspace_id",
+      "requires": [
+        "workspace.create",
+        "reserved_identity",
+        "initial_manager_intent"
+      ]
+    },
+    {
+      "actions": [
+        "list"
+      ],
+      "capability": "youtube:project.list.v1",
+      "effect": "read",
+      "target_type": "workspace",
+      "target_id_field": "workspace_id",
+      "requires": [
+        "workspace.list",
+        "per_row_project.read"
+      ]
+    },
+    {
+      "actions": [
+        "read"
+      ],
+      "capability": "youtube:project.read.v1",
+      "effect": "read",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "current_intent",
+        "active_or_manager_metadata"
+      ]
+    },
+    {
+      "actions": [
+        "rename"
+      ],
+      "capability": "youtube:project.edit.v1",
+      "effect": "write",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "manager_intent",
+        "metadata_CAS"
+      ]
+    },
+    {
+      "actions": [
+        "audience.list"
+      ],
+      "capability": "youtube:project.share.v1",
+      "effect": "read",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "manager_intent",
+        "current_recipient_resolution_gate"
+      ]
+    },
+    {
+      "actions": [
+        "audience.set",
+        "audience.revoke"
+      ],
+      "capability": "youtube:project.share.v1",
+      "effect": "write",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "manager_intent",
+        "current_recipient_resolution_gate"
+      ]
+    },
+    {
+      "actions": [
+        "campaign.link",
+        "campaign.unlink"
+      ],
+      "capability": "youtube:project.link.v1",
+      "effect": "write",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "manager_intent",
+        "campaign.project_link",
+        "unlink_broadening_confirmation"
+      ]
+    },
+    {
+      "actions": [
+        "relationship.link",
+        "relationship.unlink"
+      ],
+      "capability": "youtube:campaign.project_link.v1",
+      "effect": "write",
+      "target_type": "campaign",
+      "target_id_field": "campaign_id",
+      "requires": [
+        "same_native_owner",
+        "campaign_revision",
+        "fresh_or_expected_link_generation"
+      ]
+    },
+    {
+      "actions": [
+        "archive",
+        "restore"
+      ],
+      "capability": "youtube:project.archive.v1",
+      "effect": "write",
+      "target_type": "project",
+      "target_id_field": "project_id",
+      "requires": [
+        "manager_intent",
+        "lifecycle_only"
+      ]
+    },
+    {
+      "actions": [
+        "resource.read"
+      ],
+      "capability": "youtube:project.resource.read.v1",
+      "effect": "read",
+      "target_type": "project_resource",
+      "target_id_field": "resource_ref",
+      "requires": [
+        "project.read",
+        "campaign.read",
+        "active_exact_package_disclosure"
+      ]
+    },
+    {
+      "actions": [
+        "resource.share",
+        "resource.unshare"
+      ],
+      "capability": "youtube:project.resource.share.v1",
+      "effect": "write",
+      "target_type": "project_resource",
+      "target_id_field": "resource_ref",
+      "requires": [
+        "manager_intent",
+        "campaign.read",
+        "exact_native_source"
+      ]
+    },
+    {
+      "actions": [
+        "recover-campaign"
+      ],
+      "capability": "youtube:project.recover.v1",
+      "effect": "write",
+      "target_type": "workspace",
+      "target_id_field": "workspace_id",
+      "requires": [
+        "independent_workspace_recovery",
+        "all_campaign_reconciliation_fence"
+      ]
+    }
+  ],
+  "native_state_schema": {
+    "type": "object",
+    "properties": {
+      "owner": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "brand_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "installation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "required": [
+          "client_id",
+          "brand_id",
+          "workspace_id",
+          "installation_id"
+        ],
+        "additionalProperties": false
+      },
+      "store_incarnation": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "target": {
+        "type": "object",
+        "properties": {
+          "namespace": {
+            "const": "youtube"
+          },
+          "type": {
+            "enum": [
+              "workspace",
+              "project",
+              "campaign",
+              "project_resource"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "required": [
+          "namespace",
+          "type",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "action": {
+        "enum": [
+          "create",
+          "list",
+          "read",
+          "rename",
+          "audience.list",
+          "audience.set",
+          "audience.revoke",
+          "campaign.link",
+          "campaign.unlink",
+          "relationship.link",
+          "relationship.unlink",
+          "archive",
+          "restore",
+          "resource.read",
+          "resource.share",
+          "resource.unshare",
+          "recover-campaign"
+        ]
+      },
+      "workspace_revision": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,15}$"
+      },
+      "project_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "campaign_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "link_generation": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resource_ref": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reservation_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "project_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "security_epoch": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "intent_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "campaign_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resource_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "projection_version": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "disclosure_revision": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,15}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "actor_intent_digest": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "campaign_snapshot_hash": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "package_fingerprint": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "media_manifest_hash": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "recipient_proof_hash": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "project_state": {
+        "anyOf": [
+          {
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "recovery_state": {
+        "enum": [
+          "normal",
+          "quarantined",
+          "reconciled"
+        ]
+      }
+    },
+    "required": [
+      "owner",
+      "store_incarnation",
+      "target",
+      "action",
+      "workspace_revision",
+      "project_id",
+      "campaign_id",
+      "link_generation",
+      "resource_ref",
+      "reservation_id",
+      "project_revision",
+      "security_epoch",
+      "intent_revision",
+      "campaign_revision",
+      "resource_revision",
+      "projection_version",
+      "disclosure_revision",
+      "actor_intent_digest",
+      "campaign_snapshot_hash",
+      "package_fingerprint",
+      "media_manifest_hash",
+      "recipient_proof_hash",
+      "project_state",
+      "recovery_state"
+    ],
+    "additionalProperties": false
+  },
+  "command_schemas": {
+    "create": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "create"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "initial_intents": {
+          "const": [
+            "manager"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "name",
+        "initial_intents"
+      ],
+      "additionalProperties": false
+    },
+    "list": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "list"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "page_size": {
+          "const": 20
+        },
+        "cursor_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "page_size",
+        "cursor_digest"
+      ],
+      "additionalProperties": false
+    },
+    "read": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "read"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id"
+      ],
+      "additionalProperties": false
+    },
+    "rename": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "rename"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "audience.list": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "audience.list"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "page_size": {
+          "const": 20
+        },
+        "cursor_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "page_size",
+        "cursor_digest"
+      ],
+      "additionalProperties": false
+    },
+    "audience.set": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "audience.set"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "recipient": {
+          "type": "object",
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 256
+            },
+            "subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "principal_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            }
+          },
+          "required": [
+            "issuer",
+            "subject",
+            "principal_id"
+          ],
+          "additionalProperties": false
+        },
+        "recipient_proof_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intents": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "editor",
+              "manager",
+              "reviewer",
+              "viewer"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "recipient",
+        "recipient_proof_hash",
+        "intents"
+      ],
+      "additionalProperties": false
+    },
+    "audience.revoke": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "audience.revoke"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "recipient": {
+          "type": "object",
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 256
+            },
+            "subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "principal_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            }
+          },
+          "required": [
+            "issuer",
+            "subject",
+            "principal_id"
+          ],
+          "additionalProperties": false
+        },
+        "recipient_proof_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intents": {
+          "const": []
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "recipient",
+        "recipient_proof_hash",
+        "intents"
+      ],
+      "additionalProperties": false
+    },
+    "campaign.link": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "campaign.link"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "confirm_standalone_broadening": {
+          "const": false
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "campaign_id",
+        "expected_campaign_revision",
+        "link_generation",
+        "confirm_standalone_broadening"
+      ],
+      "additionalProperties": false
+    },
+    "campaign.unlink": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "campaign.unlink"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "confirm_standalone_broadening": {
+          "const": true
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "campaign_id",
+        "expected_campaign_revision",
+        "link_generation",
+        "confirm_standalone_broadening"
+      ],
+      "additionalProperties": false
+    },
+    "relationship.link": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "relationship.link"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "confirm_standalone_broadening": {
+          "const": false
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "campaign_id",
+        "expected_campaign_revision",
+        "link_generation",
+        "confirm_standalone_broadening"
+      ],
+      "additionalProperties": false
+    },
+    "relationship.unlink": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "relationship.unlink"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "confirm_standalone_broadening": {
+          "const": true
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "campaign_id",
+        "expected_campaign_revision",
+        "link_generation",
+        "confirm_standalone_broadening"
+      ],
+      "additionalProperties": false
+    },
+    "archive": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "archive"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    "restore": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "restore"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    "resource.read": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "resource.read"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "resource_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "resource_ref"
+      ],
+      "additionalProperties": false
+    },
+    "resource.share": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "resource.share"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "resource_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "package_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "projection_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "media_manifest_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "recipient_proof_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "resource_ref",
+        "campaign_id",
+        "campaign_revision",
+        "package_fingerprint",
+        "projection_version",
+        "media_manifest_hash",
+        "link_generation",
+        "recipient_proof_hash"
+      ],
+      "additionalProperties": false
+    },
+    "resource.unshare": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "resource.unshare"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "resource_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "package_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "projection_version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "media_manifest_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "link_generation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "recipient_proof_hash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "project_id",
+        "expected_revision",
+        "resource_ref",
+        "campaign_id",
+        "campaign_revision",
+        "package_fingerprint",
+        "projection_version",
+        "media_manifest_hash",
+        "link_generation",
+        "recipient_proof_hash"
+      ],
+      "additionalProperties": false
+    },
+    "recover-campaign": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "recover-campaign"
+        },
+        "operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "campaign_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "expected_campaign_revision": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "expected_store_incarnation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "classification": {
+              "enum": [
+                "standalone",
+                "project"
+              ]
+            },
+            "project_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "link_generation": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "resource_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "maxItems": 20,
+              "uniqueItems": true
+            },
+            "recipient_proof_hash": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "classification",
+            "project_id",
+            "link_generation",
+            "resource_refs",
+            "recipient_proof_hash"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "operation_id",
+        "campaign_id",
+        "expected_campaign_revision",
+        "expected_store_incarnation",
+        "plan"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "reservation_schema": {
+    "anyOf": [
+      {
+        "type": "object",
+        "properties": {
+          "reservation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "proposed_project_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "initial_manager_subject": {
+            "type": "object",
+            "properties": {
+              "issuer": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 256
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "principal_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [
+              "issuer",
+              "subject",
+              "principal_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "reservation_id",
+          "proposed_project_id",
+          "initial_manager_subject"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "null"
+      }
+    ]
+  },
+  "attribute_fields": [
+    "youtube:profile",
+    "youtube:brand_id",
+    "youtube:store_incarnation",
+    "youtube:project_id",
+    "youtube:project_revision",
+    "youtube:security_epoch",
+    "youtube:project_state",
+    "youtube:actor_intent_digest",
+    "youtube:intent_revision",
+    "youtube:campaign_id",
+    "youtube:campaign_revision",
+    "youtube:campaign_snapshot_hash",
+    "youtube:link_generation",
+    "youtube:resource_ref",
+    "youtube:resource_revision",
+    "youtube:package_fingerprint",
+    "youtube:projection_version",
+    "youtube:media_manifest_hash",
+    "youtube:disclosure_revision",
+    "youtube:recipient_proof_hash",
+    "youtube:reservation_id",
+    "youtube:recovery_state",
+    "youtube:native_state_hash",
+    "youtube:workspace_revision"
+  ],
+  "encoding": {
+    "canonical": "UTF-8; sorted keys; compact comma/colon; literal Unicode; no trailing newline; no Unicode normalization",
+    "counters": "positive decimal strings, 1..9007199254740991; explicit null for inapplicable fields",
+    "ids": "ASCII wire grammar, 1..128 characters; unsupported existing longer IDs block activation",
+    "names": "1..120 Unicode code points, <=480 UTF-8 bytes; reject Unicode category Cc; preserve exact text",
+    "resource_version": "yp1:<SHA-256 lowercase hex of canonical native state>",
+    "native_state_hash": "sha256:<same native-state digest>",
+    "input_hash": "sha256(canonical({profile:youtube-project-input-v1,command:<closed native command>,reservation:<explicit null or reservation>}))",
+    "subject_hash": "sha256(canonical({profile:youtube-project-subject-v1,application_id,installation_id,tenant_id,brand_id,workspace_id,actor,session_id,target,capability,effect,input_hash,resource_version,native_state_hash}))",
+    "idempotency_key": "subject_hash without sha256:; operation_id remains native durable retry identity",
+    "package_fingerprint": "Exact unchanged handoff.package_fingerprint native bare 64 lowercase hex; forward stored approval/source identity without prefix, recomputation, Unicode normalization or the project-profile canonicalizer. Existing helper uses sorted compact JSON with ensure_ascii=True."
+  },
+  "supported_obligations": [
+    "product.verify_current_resource.v1"
+  ],
+  "pending_acceptance": [
+    "producer_registration_and_attester",
+    "#36_native_adapter_and_original_deadlines",
+    "#36_current_recipient_lookup_and_revoke_semantics",
+    "#36_opaque_ID_reconciliation",
+    "#36_list_aggregate_budget",
+    "#37_migration_allocation_and_constraints",
+    "#37_restore_admission_and_reconciliation"
+  ],
+  "limits": {
+    "input_bytes": 262144,
+    "max_depth": 32,
+    "max_integer": 9007199254740991,
+    "list_candidates": 20,
+    "list_results": 20,
+    "cursor_seconds": 300,
+    "decision_window_ms": 5000
+  }
+}
