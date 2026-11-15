@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, require_access
 from campaign_agent.adapters.local_access import LocalDemoAccess
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.workspaces import initialize, verify, admit_demo_campaign
 from campaign_agent import handoff
@@ -173,26 +174,15 @@ class CampaignDrafts:
                 "policy": POLICY,
                 "placements": [],
             }
-            if not db.execute("SELECT 1 FROM campaign_revisions WHERE campaign_id=?", (self.campaign_id,)).fetchone():
+            if not SQLiteDraftStore(db).has_revisions(self.campaign_id):
                 self.require("youtube:campaign.draft")
-                db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
-                           (self.campaign_id, 1, json.dumps(seed)))
+                SQLiteDraftStore(db).append_snapshot(self.campaign_id, 1, json.dumps(seed))
 
     def _read(self, db, revision=None):
         self.require("youtube:campaign.read")
         verify(db, self.context, self.campaign_id)
-        if revision is None:
-            row = db.execute(
-                "SELECT snapshot FROM campaign_revisions WHERE campaign_id = ? "
-                "ORDER BY revision DESC LIMIT 1",
-                (self.campaign_id,),
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT snapshot FROM campaign_revisions WHERE campaign_id = ? AND revision = ?",
-                (self.campaign_id, revision),
-            ).fetchone()
-        return json.loads(row[0]) if row else None
+        snapshot = SQLiteDraftStore(db).read_snapshot(self.campaign_id, revision)
+        return json.loads(snapshot) if snapshot is not None else None
 
     def read(self, revision=None):
         with closing(sqlite3.connect(self.path)) as db:
@@ -378,8 +368,7 @@ class CampaignDrafts:
                 "placements": [row for row in current["placements"] if row["creative"] == context],
             }
             self.require("youtube:campaign.draft")
-            db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
-                       (campaign_id, saved["revision"], json.dumps(saved)))
+            SQLiteDraftStore(db).append_snapshot(campaign_id, saved["revision"], json.dumps(saved))
         return saved
 
     def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
@@ -426,8 +415,7 @@ class CampaignDrafts:
               package_fingerprint({"instruction": text}), text)
              for text in (group["content"]["instruction"], instruction)],
         )
-        db.execute("INSERT INTO campaign_revisions VALUES (?, ?, ?)",
-                   (self.campaign_id, saved["revision"], json.dumps(saved)))
+        SQLiteDraftStore(db).append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
         return saved
 
     @contextmanager
@@ -466,10 +454,7 @@ class CampaignDrafts:
             return current
         saved = {**current, "revision": revision + 1, "placements": placements}
         self.require("youtube:campaign.draft")
-        db.execute(
-            "INSERT INTO campaign_revisions VALUES (?, ?, ?)",
-            (self.campaign_id, saved["revision"], json.dumps(saved)),
-        )
+        SQLiteDraftStore(db).append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
         return saved
 
     def require(self, capability):
@@ -500,13 +485,11 @@ class CampaignDrafts:
                 ref, entry = row["catalog_ref"], None
                 if isinstance(ref, str) and re.fullmatch(r"[0-9a-f]{32}", ref):
                     if self.live:
-                        entry = db.execute("SELECT video_id,title,source,source_reference FROM catalog_entries "
-                                           "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
-                                           (ref, self.scope.client_id, self.scope.brand_id, self.campaign_id)).fetchone()
+                        entry = SQLiteDraftStore(db).live_catalog_entry(
+                            self.scope.client_id, self.scope.brand_id, self.campaign_id, ref)
                     else:
-                        entry = db.execute("SELECT video_id,title,source,source_reference FROM placement_catalog_entries "
-                                           "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
-                                           (ref, self.scope.client_id, self.scope.brand_id, self.campaign_id)).fetchone()
+                        entry = SQLiteDraftStore(db).placement_catalog_entry(
+                            self.scope.client_id, self.scope.brand_id, self.campaign_id, ref)
                 if (entry is None or entry[:3] != (video_id, title, source)
                         or not isinstance(entry[3], str) or not entry[3].strip()
                         or ("source_reference" in row and row["source_reference"] != entry[3])):
