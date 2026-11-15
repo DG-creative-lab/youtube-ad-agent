@@ -1,4 +1,5 @@
 from contextlib import closing
+import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -135,8 +136,38 @@ class CampaignDraftTests(unittest.TestCase):
             {**BOOK, "source": "creator_supplied", "catalog_ref": ref},
             {**EDITING, "source": "licensed", "catalog_ref": ref},
             {**EDITING, "source": "creator_supplied", "title": "Search title", "catalog_ref": ref},
+            {**EDITING, "source": "creator_supplied", "catalog_ref": ref, "source_reference": "Unverified substitute"},
         )
         for row in attempts:
             with self.subTest(row=row), self.assertRaises(ValueError):
                 catalog.save({"campaign_id": "tts-catalog", "revision": 1, "placements": [row]})
         self.assertIsNone(catalog.read(2))
+
+    def test_reopen_and_append_preserve_noncanonical_historical_snapshot_text(self):
+        historical = self.save(1, [{**EDITING, "title": "Café é · 朗読 🎙"}])
+        raw = " \n" + json.dumps(historical, ensure_ascii=False, indent=3) + "\n\t"
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE campaign_revisions SET snapshot=? WHERE campaign_id=? AND revision=2",
+                       (raw, "tts-sample"))
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), historical)
+        saved = reopened.save({"campaign_id": "tts-sample", "revision": 2, "placements": []})
+        self.assertEqual(saved["revision"], 3)
+        self.assertEqual(reopened.read(2), historical)
+        with closing(sqlite3.connect(self.path)) as db:
+            retained = db.execute("SELECT snapshot FROM campaign_revisions WHERE campaign_id=? AND revision=2",
+                                  ("tts-sample",)).fetchone()[0]
+        self.assertEqual(retained.encode("utf-8"), raw.encode("utf-8"))
+
+    def test_admitted_legacy_null_snapshot_still_fails_closed(self):
+        path = self.path.parent / "legacy.sqlite3"
+        with closing(sqlite3.connect(path)) as db, db:
+            db.execute("CREATE TABLE campaign_revisions (campaign_id TEXT, revision INTEGER, snapshot TEXT, "
+                       "PRIMARY KEY(campaign_id, revision))")
+            db.execute("INSERT INTO campaign_revisions VALUES ('tts-sample', 1, NULL)")
+        drafts = CampaignDrafts(path, live=False)
+        with self.assertRaises(TypeError):
+            drafts.read()
+        with self.assertRaises(TypeError):
+            drafts.read(1)
+        self.assertIsNone(drafts.read(2))

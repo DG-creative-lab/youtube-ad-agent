@@ -311,11 +311,26 @@ authority, savepoint and revision checks; received inference receipts remain in
 their original separate phase. Only two source files, their two native test files
 and three mapping/status documents are owned by this slice.
 
-Independent exact-head review/verification and current unchanged CI remain
-required before human merge. The next serial #37 scope is the complete native
+PR #74 merged this first seam at `3ee18e0b7f87afeaa931bebc04b6e3a0f2fd6f8f`.
+The remaining #37 scope is the complete native
 repository/read/start/initializer graph, followed by actual PostgreSQL
 repositories, transactions and conformance. Foreground sessions/ledger/semantic
 receipts/permit reads require their own complete port before provider activation.
 No database switch, Postgres driver/schema, cloud/media adapter, project authority
 or migration slot is introduced here. #55's merged artifacts remain separate
 from its blocked runtime and all-campaign restore admission acceptance.
+
+### E37a.2 native SQLite draft store · 15 November 2026
+
+`SQLiteDraftStore` now consumes the caller's existing SQLite connection for all
+`CampaignDrafts` revision record reads/appends and both fixed scoped catalog fact
+lookups. Application code retains DDL/legacy recovery, catalog registration,
+authorization, revision policy, JSON serialization and approvals. The adapter
+passes raw text through and owns no connection or transaction lifecycle.
+
+Independent exact-head review/verification and unchanged CI remain required
+before human merge. Initializers, planner start/read and remaining records,
+conversations, access/permit reads, media and foreground sessions/ledger/receipts
+remain to be ported as their full same-store graph. Actual PostgreSQL, DB/blob
+recovery and all-campaign restore admission acceptance remain pending. #37 is
+open; this slice enables no hosted composition or new project authority.

@@ -15,7 +15,8 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [scripts/hosted_access_fixture.py](../scripts/hosted_access_fixture.py) and [adapters/fixture_access.py](../campaign_agent/adapters/fixture_access.py) | Loopback-only synthetic identity/access composition; refuses nonfixture data and cannot select a real provider. |
 | [campaign_agent/access.py](../campaign_agent/access.py), [ports/access.py](../campaign_agent/ports/access.py) and [adapters/local_access.py](../campaign_agent/adapters/local_access.py) | Server-resolved workspace context, operator brand grants, current capability decisions and the exact local-only access adapter. |
 | [campaign_agent/workspaces.py](../campaign_agent/workspaces.py) | Immutable brand/workspace/installation and campaign ownership, trusted provisioning and explicit legacy demo admission. |
-| [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, catalog registration, draft validation, revision checks, approval snapshots and immutable instruction versions. Native SQLite `write_unit()` owns standalone save and planner final-commit transactions; borrowed saves retain caller ownership. |
+| [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, schema/legacy recovery, catalog registration, draft validation, revision checks, JSON serialization, approval snapshots and immutable instruction versions. Native SQLite `write_unit()` owns standalone save and planner final-commit transactions; borrowed saves retain caller ownership. |
+| [campaign_agent/adapters/sqlite_drafts.py](../campaign_agent/adapters/sqlite_drafts.py) | Concrete native SQLite revision existence/latest/exact raw reads, raw appends and two fixed scoped catalog fact lookups, used by `CampaignDrafts` seed/read/placement/fresh-brief/instruction paths. Borrows the supplied connection without owning its lifecycle or authority. |
 | [campaign_agent/agent/planner.py](../campaign_agent/agent/planner.py) and [planning_models.py](../campaign_agent/agent/planning_models.py) | Main-model port, tool schemas, simulated profiles, OpenRouter tool calling, pinned conversations, request receipts and the bounded placement loop. `_commit_turn()` uses the native draft write unit for draft/step/outcome/reply atomicity; inference and receipt phases remain separate. |
 | [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Campaign-scoped persisted messages, transcript migration, history reads, follow-up ordering and supersession of unfinished conversation requests. |
 | [campaign_agent/agent/replies.py](../campaign_agent/agent/replies.py) | Application-owned reply topics, clarification wording and safe projection of legacy unverified replies. |
@@ -46,6 +47,13 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [tests/](../tests/) and [examples/](../examples/) | Offline behavior tests, authored catalogs and synthetic evidence. Private state and credentials live under the ignored `.local/` directory. |
 
 The browser calls the loopback API, which delegates to the owning application commands. Agent tools use those same commands. SQLite retains campaign revisions, approvals, reviews, corrections, viewer activity and agent progress. Live YouTube search results stay in the browser session.
+
+PR #74's write unit and the SQLite draft store are bounded #37 seams. Eager
+initializers, planner start/read and remaining records, conversations, access,
+media, foreground sessions/ledger/semantic receipts and permit reads still need
+their complete same-store port. Actual Postgres repositories and conformance,
+DB/blob recovery and all-campaign restore admission remain pending; no hosted
+composition or new project authority is enabled.
 
 ## Where the code should grow
 
