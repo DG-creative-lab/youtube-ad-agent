@@ -14,6 +14,7 @@ from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.agent.run import AgentRuntime
 from campaign_agent.agent.planning_models import SimulatedPlanner
 from campaign_agent.creatives import EXAMPLES
+from campaign_agent.placement_discovery import SimulatedClassifier
 from campaign_agent.handoff import package_fingerprint, sample_package
 from scripts.campaign_drafts import PackageConflict
 
@@ -59,6 +60,23 @@ class PlacementPlannerTests(unittest.TestCase):
             'choices': [{'finish_reason': 'tool_calls', 'message': {'role': 'assistant', 'content': None,
                 'tool_calls': [{'id': uuid4().hex, 'type': 'function', 'function': {
                     'name': tool, 'arguments': json.dumps(arguments or {})}}]}}]}).encode())
+
+    def persisted(self, run_id):
+        # Reopen native storage rather than trusting the public result projection.
+        with closing(sqlite3.connect(self.path)) as db:
+            return {
+                'revisions': db.execute('SELECT * FROM campaign_revisions ORDER BY campaign_id,revision').fetchall(),
+                'steps': db.execute('SELECT position,tool,result FROM agent_steps WHERE run_id=? ORDER BY position', (run_id,)).fetchall(),
+                'turns': db.execute('SELECT position,state,receipt,error FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,)).fetchall(),
+                'status': db.execute('SELECT status FROM agent_runs WHERE id=?', (run_id,)).fetchone()[0],
+                'job': db.execute('SELECT snapshot,classification_state,classification,outcome FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone(),
+                'messages': db.execute('SELECT * FROM planner_messages WHERE run_id=? ORDER BY id', (run_id,)).fetchall(),
+            }
+
+    def saved_placement_receipt(self, position=2, selected=('SAMPLE00001', 'SAMPLE00002')):
+        return json.dumps({'call_id': f'simulated-{position}', 'tool': 'save_placement_draft',
+                          'arguments': {'video_ids': list(selected)},
+                          'inference': {'mode': 'simulated', 'model': 'simulated', 'usage': None}})
 
     def test_models_choose_different_orders_and_catalogs_change_the_saved_proposal(self):
         first = self.finish(self.start())
@@ -290,9 +308,11 @@ class PlacementPlannerTests(unittest.TestCase):
 
     def test_reply_and_draft_commit_together_and_retry_reuses_receipt(self):
         simulator = Mock(wraps=SimulatedPlanner())
-        runtime = self.reopen(planner_simulator=simulator)
+        classifier = Mock(route='simulated_decision', wraps=SimulatedClassifier())
+        runtime = self.reopen(planner_simulator=simulator, placement_classifier=classifier)
         run_id = self.send_message('Find placements', runtime=runtime, after=0, draft_permission='placements')
         runtime.resume(run_id, max_steps=2)
+        before = self.persisted(run_id)
         finish = runtime.planner.conversations.finish
         def interrupted(*args):
             finish(*args)
@@ -300,14 +320,41 @@ class PlacementPlannerTests(unittest.TestCase):
         with patch.object(runtime.planner.conversations, 'finish', side_effect=interrupted):
             with self.assertRaises(sqlite3.OperationalError):
                 runtime.resume(run_id)
-        self.assertEqual(self.runtime.drafts.read()['revision'], 1)
-        self.assertEqual(len(self.runtime.planner.conversations.read(self.session)['messages']), 1)
-        reopened = self.reopen()
-        self.assertEqual(reopened.resume(run_id)['status'], 'ready_for_review')
-        reopened.resume(run_id)
+        failed = self.persisted(run_id)
+        self.assertEqual(failed['revisions'], before['revisions'])
+        self.assertEqual(failed['steps'], before['steps'])
+        self.assertEqual([row[:2] for row in failed['steps']], [(0, 'read_campaign'), (1, 'classify_catalog')])
+        self.assertEqual(failed['status'], 'running')
+        self.assertEqual(failed['job'], before['job'])
+        self.assertIsNone(failed['job'][3])
+        self.assertEqual(failed['messages'], before['messages'])
+        self.assertEqual([row[3] for row in failed['messages']], ['user'])
+        self.assertEqual(failed['turns'], [*before['turns'], (2, 'received', self.saved_placement_receipt(), None)])
+        no_model, no_classifier = Mock(), Mock()
+        no_model.next_turn.side_effect = AssertionError('Must reuse received main-model receipt')
+        no_classifier.classify.side_effect = AssertionError('Must reuse stored classification')
+        reopened = self.reopen(planner_simulator=no_model, placement_classifier=no_classifier)
+        result = reopened.resume(run_id)
+        self.assertEqual(result['status'], 'ready_for_review')
+        committed = self.persisted(run_id)
+        self.assertEqual([row[1] for row in committed['revisions']], [1, 2])
+        self.assertEqual(committed['revisions'][:1], before['revisions'])
+        self.assertEqual(committed['steps'][:2], before['steps'])
+        self.assertEqual([row[:2] for row in committed['steps']],
+                         [(0, 'read_campaign'), (1, 'classify_catalog'), (2, 'save_placement_draft')])
+        self.assertEqual(committed['status'], 'ready_for_review')
+        self.assertEqual(committed['job'][:3], before['job'][:3])
+        self.assertEqual(json.loads(committed['job'][3]), result['result'])
+        self.assertEqual(committed['messages'][:1], before['messages'])
+        self.assertEqual([row[3] for row in committed['messages']], ['user', 'assistant'])
+        self.assertEqual(committed['messages'][1][5:8], (2, self.catalog, 'ready_for_review'))
+        self.assertEqual(committed['turns'], failed['turns'])
+        self.assertEqual(reopened.resume(run_id), result)
+        self.assertEqual(self.persisted(run_id), committed)
         self.assertEqual(simulator.next_turn.call_count, 3)
-        self.assertEqual(len(reopened.planner.conversations.read(self.session)['messages']), 2)
-        self.assertEqual(reopened.drafts.read()['revision'], 2)
+        self.assertEqual(classifier.classify.call_count, 1)
+        no_model.next_turn.assert_not_called()
+        no_classifier.classify.assert_not_called()
 
     def test_legacy_runs_become_a_transcript_once_and_openrouter_receives_dialogue(self):
         self.finish(self.send_message('Find placements ' + 'with permitted sources ' * 30, draft_permission='placements'))
@@ -399,6 +446,7 @@ class PlacementPlannerTests(unittest.TestCase):
         runtime = self.reopen(planner_simulator=simulator)
         run_id = self.start(runtime=runtime)
         runtime.resume(run_id, max_steps=2)
+        before = self.persisted(run_id)
         self.assertEqual(simulator.next_turn.call_count, 2)
         save = runtime.planner.catalogs.save
 
@@ -409,6 +457,10 @@ class PlacementPlannerTests(unittest.TestCase):
         with patch.object(runtime.planner.catalogs, 'save', side_effect=interrupted):
             with self.assertRaises(sqlite3.OperationalError):
                 runtime.resume(run_id, max_steps=1)
+        failed = self.persisted(run_id)
+        for key in ('revisions', 'steps', 'status', 'job', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(failed['turns'], [*before['turns'], (2, 'received', self.saved_placement_receipt(), None)])
         self.assertEqual(self.runtime.drafts.read()['revision'], 1)
         self.assertEqual(simulator.next_turn.call_count, 3)
         no_model = Mock()
@@ -417,12 +469,21 @@ class PlacementPlannerTests(unittest.TestCase):
         result = reopened.resume(run_id, max_steps=1)
         self.assertEqual(result['result']['revision'], 2)
         no_model.next_turn.assert_not_called()
+        committed = self.persisted(run_id)
+        self.assertEqual(committed['turns'], failed['turns'])
+        self.assertEqual(committed['revisions'][:1], before['revisions'])
+        self.assertEqual([row[1] for row in committed['revisions']], [1, 2])
+        self.assertEqual(committed['steps'][:2], before['steps'])
+        self.assertEqual(len(committed['steps']), 3)
+        self.assertEqual([row[3] for row in committed['messages']], ['user', 'assistant'])
         self.assertEqual(reopened.resume(run_id), result)
+        self.assertEqual(self.persisted(run_id), committed)
         self.assertIsNone(self.runtime.drafts.read(3))
 
     def test_recoverable_tool_error_rolls_back_any_partial_draft_write(self):
         run_id = self.start()
         self.runtime.resume(run_id, max_steps=2)
+        before = self.persisted(run_id)
         save = self.runtime.planner.catalogs.save
         def rejected_after_write(*args, **kwargs):
             save(*args, **kwargs)
@@ -430,8 +491,21 @@ class PlacementPlannerTests(unittest.TestCase):
         with patch.object(self.runtime.planner.catalogs, 'save', side_effect=rejected_after_write):
             result = self.runtime.resume(run_id, max_steps=1)
         self.assertIn('error', result['steps'][-1]['result'])
+        failed = self.persisted(run_id)
+        for key in ('revisions', 'status', 'job', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(failed['steps'][:2], before['steps'])
+        self.assertEqual(failed['steps'][2], (2, 'save_placement_draft', json.dumps({
+            'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'})))
+        self.assertEqual(failed['turns'], [*before['turns'], (2, 'received', self.saved_placement_receipt(), None)])
         self.assertEqual(self.runtime.drafts.read()['revision'], 1)
         self.assertEqual(self.finish(run_id)['result']['revision'], 2)
+        committed = self.persisted(run_id)
+        self.assertEqual(committed['revisions'][:1], before['revisions'])
+        self.assertEqual([row[1] for row in committed['revisions']], [1, 2])
+        self.assertEqual(committed['steps'][:3], failed['steps'])
+        self.assertEqual(len(committed['steps']), 4)
+        self.assertEqual([row[3] for row in committed['messages']], ['user', 'assistant'])
         self.assertIsNone(self.runtime.drafts.read(3))
 
     def test_openrouter_sees_tool_results_and_routes_the_classifier_automatically(self):
@@ -500,6 +574,46 @@ class PlacementPlannerTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.runtime.resume(current)
         self.assertEqual(self.runtime.drafts.read()['revision'], 2)
+
+    def test_competing_run_commits_while_inference_is_outside_the_final_write_unit(self):
+        simulator = Mock(wraps=SimulatedPlanner())
+        loser = self.reopen(planner_simulator=simulator)
+        winner = self.reopen()
+        losing_run = loser.planner.start('Find video editing placements.', 'simulated', uuid4().hex,
+            uuid4().hex, self.catalog, draft_permission='placements')
+        winning_run = winner.planner.start('Find audiobook placements.', 'simulated', uuid4().hex,
+            uuid4().hex, self.catalog, draft_permission='placements')
+        loser.resume(losing_run, max_steps=2)
+        winner.resume(winning_run, max_steps=2)
+        before = self.persisted(losing_run)
+        winning_result = []
+        def commit_competing_revision(*args):
+            winning_result.append(winner.resume(winning_run))
+            return json.loads(self.saved_placement_receipt(selected=('SAMPLE00001',)))
+        simulator.next_turn.side_effect = commit_competing_revision
+        with self.assertRaises(PackageConflict):
+            loser.resume(losing_run)
+        self.assertEqual(winning_result[0]['status'], 'ready_for_review')
+        self.assertEqual(winner.drafts.read()['revision'], 2)
+        self.assertEqual([row['id'] for row in winner.drafts.read()['placements']], ['SAMPLE00002'])
+        failed = self.persisted(losing_run)
+        self.assertEqual([row[1] for row in failed['revisions']], [1, 2])
+        self.assertEqual(failed['revisions'][:1], before['revisions'])
+        for key in ('steps', 'status', 'job', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(failed['turns'], [*before['turns'],
+            (2, 'received', self.saved_placement_receipt(selected=('SAMPLE00001',)), None)])
+        winning_state = self.persisted(winning_run)
+        self.assertEqual(len(winning_state['steps']), 3)
+        self.assertEqual([row[3] for row in winning_state['messages']], ['user', 'assistant'])
+        no_model = Mock()
+        no_model.next_turn.side_effect = AssertionError('Stale recovery cannot dispatch inference')
+        reopened = self.reopen(planner_simulator=no_model)
+        with self.assertRaises(PackageConflict):
+            reopened.resume(losing_run)
+        no_model.next_turn.assert_not_called()
+        self.assertEqual(self.persisted(losing_run), failed)
+        self.assertEqual(self.persisted(winning_run), winning_state)
 
     def test_unknown_provider_outcome_and_concurrent_resume_do_not_repeat_request(self):
         transport = Mock()

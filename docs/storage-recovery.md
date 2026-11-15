@@ -21,15 +21,28 @@ Multiple replicas, network-mounted SQLite, object storage/CDN, large-file
 streaming and production workload/SLO sizing remain outside this verified
 topology. #37 stays open for the chosen hosted composition and its acceptance.
 
-15 November: [hosted topology decision v1](hosted-topology-decision.md) proposes
-Frankfurt Vercel Python ASGI + Neon Postgres + private Vercel Blob. The bounded
-first port uses `PlacementAgent.resume` and `CampaignDrafts.save(connection=...)`
-to preserve draft/step/reply atomicity with all related reads on the same store.
-It retains separate durable inference reservation/dispatch/receipt phases and
-uncertain accounting. Changing `DATABASE_URL` is insufficient; partial ports
-cannot become the hosted composition. Private media must be fully hash/size
-verified before bytes leave, then freshly authorized and streamed from bounded
-request scratch. The proposal adds no adapter, migration slot or runtime switch.
+15 November: [hosted topology decision v1](hosted-topology-decision.md) was
+accepted in merged PR #73, closing #59 as a design decision. It selects Frankfurt
+Vercel Python ASGI + Neon Postgres + private Vercel Blob; no hosted composition
+is activated. #37 remains open.
+
+The E37a.1 native SQLite seam adds `CampaignDrafts.write_unit()`, owning a new
+connection, `BEGIN IMMEDIATE`, commit/rollback and close. Standalone `save()` and
+`PlacementAgent._commit_turn()` use it. `save(connection=db)` borrows the caller's
+transaction without committing, rolling back or closing it. The planner retains
+its tool savepoint and commits draft, step, terminal status/outcome and assistant
+reply together. Reservation, inference, received receipts, classification,
+report capture and foreground authority refresh retain their separate phases;
+failed final writes recover from the original received receipt on explicit resume.
+Historical JSON, approvals, fingerprints and receipts are not rewritten.
+
+This seam is SQLite-only. Start/read paths, eager schema initializers and the
+complete native repository graph remain unported. PostgreSQL repositories,
+transactions and conformance require a separately accepted slice; there is no
+backend selector or `DATABASE_URL` interpretation. Foreground provider sessions,
+quota ledger, semantic receipts and permit reads must move as one graph before
+Postgres inference. Private Blob integrity-before-bytes, coherent DB/blob
+recovery, all-campaign restore admission and hosted activation remain gated.
 
 ## Migration boundary
 

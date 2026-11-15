@@ -1,6 +1,6 @@
 """Local campaign draft commands and their SQLite storage."""
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -430,6 +430,13 @@ class CampaignDrafts:
                    (self.campaign_id, saved["revision"], json.dumps(saved)))
         return saved
 
+    @contextmanager
+    def write_unit(self):
+        """Own one native SQLite write transaction and its connection."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+
     def save(self, payload, *, connection=None):
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:
             raise ValueError("Send a campaign ID, expected revision and placements.")
@@ -443,8 +450,7 @@ class CampaignDrafts:
 
         if connection is not None:
             return self._save(db=connection, expected=expected, rows=rows)
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
+        with self.write_unit() as db:
             return self._save(db, expected, rows)
 
     def _save(self, db, expected, rows):
