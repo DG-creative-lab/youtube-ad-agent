@@ -6,6 +6,7 @@ from campaign_agent.adapters.openrouter_reviews import OpenRouterInference, Revi
 from .replies import QUESTIONS, TOPICS
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.instruction_tests import ASSESSMENT_REASONS, recorded_assessment
+from campaign_agent.foreground_inference import model_context
 from campaign_agent.adapters.openrouter_instructions import INSTRUCTION_SCHEMA
 from .draft_permissions import permits
 
@@ -148,7 +149,7 @@ class OpenRouterPlanner(OpenRouterInference):
             'Use respond performance_review for campaign results and respond experiment_review for experiment assessments. '
             'Respect missing evidence, approval and keep-comparison corrections. '
             'Return exactly one function call per turn. Tool errors are observations you may recover from.'
-        )}, {'role': 'user', 'content': json.dumps(context)}]
+        )}, {'role': 'user', 'content': json.dumps(model_context(context))}]
         for step in history:
             call_id = step['call_id']
             messages.extend([

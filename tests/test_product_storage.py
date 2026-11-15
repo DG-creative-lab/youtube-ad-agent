@@ -112,12 +112,12 @@ class ProductStorageTests(unittest.TestCase):
             barrier.wait(timeout=10)
             return migrate_path(self.path)
         with ThreadPoolExecutor(max_workers=3) as pool:
-            self.assertEqual(list(pool.map(lambda _: upgrade(), range(3))), [3, 3, 3])
+            self.assertEqual(list(pool.map(lambda _: upgrade(), range(3))), [4, 4, 4])
         prior = rows(self.path)
         migrate_path(self.path)
         self.assertEqual(rows(self.path), prior)
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT INTO product_schema_migrations(version,name,checksum) VALUES(4,'future','unknown')")
+            db.execute("INSERT INTO product_schema_migrations(version,name,checksum) VALUES(5,'future','unknown')")
         with self.assertRaises(SchemaConflict):
             migrate_path(self.path)
         with closing(sqlite3.connect(self.path)) as db, db:

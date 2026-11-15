@@ -62,6 +62,29 @@ MIGRATIONS = (
         *immutable('provider_connection_operations'),
         *immutable('provider_selections'),
     )),
+
+    ('foreground-inference-ledger', (
+        """CREATE TABLE inference_ledger (
+            run_id TEXT NOT NULL, position INTEGER NOT NULL,
+            actor_id TEXT NOT NULL, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+            workspace_id TEXT NOT NULL, installation_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
+            connection_id TEXT NOT NULL, selection_id TEXT NOT NULL,
+            settings_hash TEXT NOT NULL, request_hash TEXT NOT NULL,
+            reserved_nanos INTEGER NOT NULL CHECK(reserved_nanos>=0), actual_nanos TEXT,
+            actual_cost TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL, utc_day TEXT NOT NULL,
+            state TEXT NOT NULL, in_flight INTEGER NOT NULL, generation_id TEXT, receipt TEXT,
+            anomaly INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(run_id,position))""",
+        'CREATE INDEX inference_actor ON inference_ledger(installation_id,actor_id,created_at)',
+        'CREATE INDEX inference_tenant ON inference_ledger(installation_id,client_id,utc_day)',
+        'CREATE INDEX inference_run ON inference_ledger(installation_id,run_id)',
+        'CREATE INDEX inference_actor_day ON inference_ledger(installation_id,actor_id,utc_day)',
+        "CREATE INDEX inference_unresolved_actor ON inference_ledger(installation_id,actor_id,utc_day) WHERE actual_nanos IS NULL AND state!='released_unsent'",
+        "CREATE INDEX inference_unresolved_tenant ON inference_ledger(installation_id,client_id,utc_day) WHERE actual_nanos IS NULL AND state!='released_unsent'",
+        'CREATE INDEX inference_inflight ON inference_ledger(installation_id,actor_id,client_id) WHERE in_flight=1',
+        'CREATE INDEX inference_anomaly ON inference_ledger(installation_id,actor_id,client_id) WHERE anomaly=1',
+    )),
+
 )
 
 

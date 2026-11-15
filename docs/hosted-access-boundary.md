@@ -139,3 +139,16 @@ privacy/audit administration, operations and composed pilot release remain
 enterprise readiness claim follows from the offline fixture results. The
 cross-service revocation race remains bounded by the accepted decision-use
 window; it is not an atomic transaction with Gateplane.
+
+### Foreground inference permit sets
+
+The A2b foreground command wrapper collects original-expiry command permits before
+entering writer transactions for read/run and the nested draft/review/setup/export
+capabilities actually used by agent commands and factual capability projection.
+Optional denials remain denied. Nested `require` calls consume local matching
+permits; no authority/provider callback runs under a writer lock. Before a later
+domain commit, the runtime renews outside-lock current decisions and locally
+rechecks the original session, native snapshot and connection revocation. Scoped
+cost receipts survive a late denial without conferring permission to save a draft.
+Real identity, bounded authority I/O, ingress capture suppression and provider
+transport/charge qualification remain separate activation requirements.

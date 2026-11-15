@@ -5,6 +5,7 @@ import re
 import sqlite3
 
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.ports.inference import ProviderError
 from campaign_agent.delivery import delivery_message
 from campaign_agent.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
@@ -91,7 +92,11 @@ class PlacementAgent:
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
 
-    def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none'):
+    def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none', provider_selection_id=None):
+        if self.owner.foreground:
+            self.owner.foreground.guard_data({'request':request,'model':model,'session_id':session_id,'run_id':run_id,
+                'catalog_id':catalog_id,'after_message':after_message,'draft_permission':draft_permission,
+                'provider_selection_id':provider_selection_id})
         self.owner.require("youtube:agent.run")
         self.owner.require("youtube:campaign.read")
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
@@ -101,7 +106,11 @@ class PlacementAgent:
             raise ValueError('Supply a valid conversation message reference.')
         if not isinstance(draft_permission, str) or draft_permission not in DRAFT_PERMISSIONS:
             raise ValueError('Choose a valid draft permission for this request.')
-        settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
+        if provider_selection_id is not None:
+            if model in SIMULATED or self.owner.foreground is None: raise ValueError('Use a provider selection only for OpenRouter.')
+            settings=self.owner.foreground.settings(provider_selection_id,model,'planner',self.remote.prompt_version)
+        else:
+            settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             existing = db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
@@ -234,14 +243,14 @@ class PlacementAgent:
                 position = len(history)
                 row = db.execute('SELECT state,receipt,error FROM planner_turns WHERE run_id=? AND position=?',
                                  (run_id, position)).fetchone()
-                if row and row[0] != 'received':
+                if row and row[0] != 'received' and not source['settings'].get('foreground'):
                     raise ReviewInferenceError(row[2] or 'This model request is in progress or its outcome is unknown. Start a new run.')
-                receipt = json.loads(row[1]) if row else None
+                receipt = json.loads(row[1]) if row and row[1] else None
                 if not row:
                     if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
                         self.remote.require_available(source['settings'])
                         self.remote.prepare_turn(source, history, source['settings'])
-                    db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL)", (run_id, position))
+                    db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL) ON CONFLICT DO NOTHING", (run_id, position))
             if receipt is None:
                 try:
                     if source.get('delivery_request'):
@@ -251,15 +260,19 @@ class PlacementAgent:
                     else:
                         model = self.remote if source['settings']['mode'] == 'openrouter' else self.simulator
                         receipt = model.next_turn(source, history, source['settings'])
+                    if source['settings'].get('foreground'):
+                        self.owner.foreground.guard_receipt(receipt)
                     if (not isinstance(receipt, dict) or not isinstance(receipt.get('call_id'), str)
                             or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', receipt['call_id'])
                             or not isinstance(receipt.get('tool'), str) or len(receipt['tool']) > 64
                             or not isinstance(receipt.get('arguments'), dict)):
                         raise ValueError('Invalid tool request')
                     usage = receipt.get('inference', {}).get('usage') or {}
-                    if (usage.get('cost_usd') is not None and usage['cost_usd'] > 0
+                    if (not source['settings'].get('foreground') and usage.get('cost_usd') is not None and usage['cost_usd'] > 0
                             or usage.get('output_tokens') is not None and usage['output_tokens'] > 512):
                         raise ValueError('Exceeded inference limit')
+                except ProviderError:
+                    raise
                 except Exception:
                     with closing(sqlite3.connect(self.path)) as db, db:
                         db.execute("UPDATE planner_turns SET state='failed',error=? WHERE run_id=? AND position=?",
@@ -268,6 +281,7 @@ class PlacementAgent:
                 with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute("UPDATE planner_turns SET state='received',receipt=? WHERE run_id=? AND position=?",
                                (json.dumps(receipt), run_id, position))
+            if self.owner.foreground: self.owner.foreground.before_commit(source['settings'])
             self.owner.require("youtube:agent.run")
             classified = None
             if receipt['tool'] == 'classify_catalog' and not receipt['arguments']:
@@ -319,6 +333,7 @@ class PlacementAgent:
                                       'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
                 if status != 'running':
                     self._finish(db, run_id, result, status)
+        if self.owner.foreground: self.owner.foreground.policy.refresh()
         return self.read(run_id)
 
     def _finish(self, db, run_id, result, status):

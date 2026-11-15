@@ -144,3 +144,19 @@ A fresh two-client CLI status/migrate/backup/verify/restore drill recovered 15
 scoped blobs, unchanged domain rows/approvals/fingerprints, fresh authority and
 private media access. Client B retained revision 1 and no client A conversation.
 The source store was unchanged. All effects were local simulations.
+
+### Foreground inference accounting
+
+Migration 4 appends `inference_ledger` without rewriting previous domain, approval
+or semantic-receipt histories. It retains the original scoped selection and exact
+request/settings hashes, committed reservation/dispatch state and sanitized cost
+receipt. Actual nanodollars use decimal text so an anomalous provider value is
+retained without SQLite integer overflow; application calculations use integers.
+Run/day budget aggregates and unresolved concurrency include retained old rows.
+
+Whole-store backup and restore copy this ledger unchanged. Authority invalidation
+still revokes staff sessions and provider connections; it must not erase, release
+or rebind uncertain spend. A pre-ledger requested operation is never inferred to
+be unsent. A restored or reconnected session cannot reset aggregate accounting.
+Received semantic receipts can recover through the original application checks;
+possibly dispatched completions are not retried to recover missing content.

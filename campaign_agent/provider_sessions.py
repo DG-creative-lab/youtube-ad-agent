@@ -134,16 +134,34 @@ class ProviderSessions:
         return row
 
     def _safe(self,value,credential):
-        def contains(v):
-            if isinstance(v,str):
-                return credential.key in v
-            if isinstance(v,dict):
-                return any(contains(k) or contains(item) for k,item in v.items())
-            if isinstance(v,(list,tuple)):
-                return any(contains(item) for item in v)
-            return False
-        if contains(value):
-            raise ProviderError('catalogue_unavailable')
+        """Check bounded structured data and JSON embedded in strings before sinks.
+
+        Structural nesting and embedded JSON decoding have separate bounds. A
+        tool-arguments string sits deep in a completion, but still needs its own
+        decoding checks. Reaching either bound fails closed rather than declaring
+        the unexamined content safe.
+        """
+        pending=[(value,0,0)];nodes=0;characters=0
+        while pending:
+            current,depth,decodings=pending.pop();nodes+=1
+            if depth>64 or nodes>100_000:
+                raise ProviderError('catalogue_unavailable')
+            if isinstance(current,str):
+                characters+=len(current)
+                if characters>8_000_000 or credential.key in current:
+                    raise ProviderError('catalogue_unavailable')
+                if current.lstrip().startswith(('{','[','"')):
+                    try: decoded=json.loads(current)
+                    except (ValueError,TypeError): continue
+                    except RecursionError:
+                        raise ProviderError('catalogue_unavailable') from None
+                    if decoded!=current:
+                        if decodings>=8: raise ProviderError('catalogue_unavailable')
+                        pending.append((decoded,depth+1,decodings+1))
+            elif isinstance(current,dict):
+                pending.extend((item,depth+1,decodings) for pair in current.items() for item in pair)
+            elif isinstance(current,(list,tuple)):
+                pending.extend((item,depth+1,decodings) for item in current)
         return value
 
     def command(self,action,data,key_values,context,access):
@@ -154,9 +172,12 @@ class ProviderSessions:
         try:
             if action=='disconnect':
                 return self.disconnect(data,context)
-            permits=self._authorize(context,access)
             if action=='reconcile':
-                raise ProviderError('route_unqualified')
+                from .foreground_inference import ForegroundInference
+                foreground=ForegroundInference(self,context,access,key_values)
+                try: return foreground.reconcile(data)
+                finally: foreground.close()
+            permits=self._authorize(context,access)
             if self.metadata is None:
                 raise ProviderError('catalogue_unavailable')
             return getattr(self,action)(data,credential,context,access,permits)

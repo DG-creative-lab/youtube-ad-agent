@@ -16,7 +16,7 @@ class OpenRouterMetadata:
         self.transport = transport or send_request
         self.monotonic, self.clock = monotonic_clock, clock
 
-    def _get(self, path, credential):
+    def _get(self, path, credential, *, exact=False):
         started=self.monotonic()
         request=Request('https://openrouter.ai'+path,headers={'Authorization':'Bearer '+credential.key,'Accept':'application/json'})
         try:
@@ -24,7 +24,7 @@ class OpenRouterMetadata:
                 raw=response.read(MAX_BYTES+1)
             if len(raw)>MAX_BYTES or self.monotonic()-started>=5:
                 raise ValueError()
-            data=parse_json(raw)
+            data=parse_json(raw,exact=exact)
             if not isinstance(data,dict) or data.get('error') or 'data' not in data:
                 raise ValueError()
             return data['data']
@@ -74,3 +74,11 @@ class OpenRouterMetadata:
         if not isinstance(data,dict) or not isinstance(data.get('endpoints'),list) or len(data['endpoints'])>100:
             raise ProviderError('catalogue_unavailable')
         return data['endpoints']
+
+    def generation(self, credential, generation_id):
+        import re
+        if not isinstance(generation_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}',generation_id):
+            raise ProviderError('invalid_request')
+        data=self._get('/api/v1/generation?id='+quote(generation_id,safe=''),credential,exact=True)
+        if not isinstance(data,dict): raise ProviderError('catalogue_unavailable')
+        return {key:data.get(key) for key in ('id','total_cost')}

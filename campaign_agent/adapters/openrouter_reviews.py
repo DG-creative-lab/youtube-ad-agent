@@ -1,6 +1,7 @@
 """Bounded OpenRouter transport and instruction-test assessments."""
 
 import json
+from decimal import Decimal
 import math
 import os
 import re
@@ -48,10 +49,10 @@ def unique_object(pairs):
     return result
 
 
-def parse_json(text):
+def parse_json(text, *, exact=False):
     def invalid_constant(_value):
         raise ValueError("Invalid JSON number")
-    return json.loads(text, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    return json.loads(text, object_pairs_hook=unique_object, parse_constant=invalid_constant, **({"parse_float":Decimal} if exact else {}))
 
 
 class OpenRouterInference:
@@ -63,6 +64,7 @@ class OpenRouterInference:
         self.models = tuple(dict.fromkeys(models))
         self.transport = transport or send_request
         self.web_disabled = False
+        self.foreground = None
 
     def settings(self, model):
         if model not in self.models:
@@ -71,6 +73,9 @@ class OpenRouterInference:
                 "max_calls": 1, "max_output_tokens": MAX_OUTPUT_TOKENS, "max_cost_usd": 0}
 
     def require_available(self, settings, credential=None):
+        if settings.get('foreground'):
+            if self.foreground is None: raise ReviewInferenceError('Foreground provider context is unavailable.')
+            return
         if self.web_disabled:
             raise ReviewInferenceError('Browser inference awaits scoped admission and recovery. Use offline mode.')
         if settings != self.settings(settings["model"]):
@@ -99,10 +104,14 @@ class OpenRouterInference:
         return {output_key: output, **receipt}
 
     def encode_request(self, settings, body):
-        body = {**body, "model": settings["model"], "stream": False,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-                "provider": {"require_parameters": True, "allow_fallbacks": False,
-                             "max_price": {"prompt": 0, "completion": 0, "request": 0}}}
+        if settings.get('foreground'):
+            body = {**body, 'model': settings['model'], 'stream': False,
+                    settings['output_cap_parameter']:settings['max_output_tokens'], 'provider':settings['routing']}
+        else:
+            body = {**body, "model": settings["model"], "stream": False,
+                    "max_tokens": MAX_OUTPUT_TOKENS,
+                    "provider": {"require_parameters": True, "allow_fallbacks": False,
+                                 "max_price": {"prompt": 0, "completion": 0, "request": 0}}}
         encoded = json.dumps(body).encode()
         if len(encoded) > MAX_REQUEST_BYTES:
             raise ReviewInferenceError("The inference input exceeds the configured request limit.")
@@ -110,7 +119,12 @@ class OpenRouterInference:
 
     def chat(self, context, settings, body, *, credential=None):
         self.require_available(settings, credential)
+        if settings.get('foreground'):
+            return self.foreground.chat(self,context,settings,body)
         encoded = self.encode_request(settings, body)
+        return self._chat_wire(context,settings,encoded,credential)
+
+    def _chat_wire(self,context,settings,encoded,credential):
         request = Request(ENDPOINT, data=encoded, headers={
             "Authorization": "Bearer " + (credential.key if credential is not None else os.environ["OPENROUTER_API_KEY"]), "Content-Type": "application/json",
         })
@@ -119,32 +133,23 @@ class OpenRouterInference:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
             if len(raw) > MAX_RESPONSE_BYTES:
                 raise ValueError("Response too large")
-            data = parse_json(raw)
-            if not isinstance(data, dict) or data.get("error"):
+            data = parse_json(raw,exact=settings.get("foreground",False))
+            if not isinstance(data, dict) or data.get("error") and not settings.get('foreground'):
                 raise ValueError("Invalid completion")
-            usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-            tokens = {}
-            for label, field in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
-                value = usage.get(field)
-                tokens[label] = value if type(value) is int and value >= 0 else None
-            cost = usage.get("cost")
-            cost = cost if type(cost) in (float, int) and math.isfinite(cost) and cost >= 0 else None
-            metadata = {
-                **settings, "evidence_id": package_fingerprint(context),
-                "request_id": self._identifier(data.get("id")),
-                "response_model": self._identifier(data.get("model")),
-                "usage": {**tokens, "cost_usd": cost},
-            }
-            message, finish_reason = None, None
-            choices = data.get("choices")
-            if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict):
-                choice = choices[0]
-                if choice.get("finish_reason") in {"stop", "tool_calls"}:
-                    message = choice.get("message")
-                    finish_reason = choice.get("finish_reason")
-            return {"message": message, "finish_reason": finish_reason, "inference": metadata}
+            return self._receipt(context,settings,data)
         except HTTPError as exc:
-            exc.close()
+            if settings.get('foreground'):
+                try:
+                    raw=exc.read(MAX_RESPONSE_BYTES+1)
+                    if len(raw)>MAX_RESPONSE_BYTES: raise ValueError()
+                    data=parse_json(raw,exact=True)
+                    if not isinstance(data,dict): raise ValueError()
+                    # A complete HTTP error can still report charge/generation.
+                    return self._receipt(context,settings,{**data,'choices':None})
+                except (ValueError,TypeError,RecursionError,OSError,OverflowError):
+                    pass
+                finally: exc.close()
+            else: exc.close()
             raise ReviewInferenceError(f"OpenRouter returned HTTP {exc.code}. Start a new operation to retry.") from None
         except (URLError, OSError, TimeoutError):
             raise ReviewInferenceError(
@@ -152,6 +157,38 @@ class OpenRouterInference:
             ) from None
         except (ValueError, TypeError, RecursionError, OverflowError):
             raise ReviewInferenceError("OpenRouter returned an invalid response. Start a new operation to retry.") from None
+
+    def _receipt(self,context,settings,data):
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        tokens = {}
+        for label, field in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
+            value = usage.get(field)
+            tokens[label] = value if type(value) is int and value >= 0 else None
+        cost = usage.get("cost")
+        if settings.get('foreground'):
+            if isinstance(cost,Decimal):
+                _,digits,exponent=cost.as_tuple()
+                cost=(format(cost,'f') if cost.is_finite() and cost>=0 and len(digits)<=30 and exponent>=-18 and cost.adjusted()<=11 else None)
+            else: cost=str(cost) if type(cost) is int and 0<=cost<10**12 else None
+        else:
+            cost = cost if type(cost) in (float, int) and math.isfinite(cost) and cost >= 0 else None
+        metadata = {
+            **({k:v for k,v in settings.items() if k in ('mode','model','prompt_version','max_calls','max_output_tokens')} if settings.get('foreground') else settings), "evidence_id": package_fingerprint(context),
+            "request_id": self._identifier(data.get("id")),
+            "response_model": self._identifier(data.get("model")),
+            "usage": {**tokens, "cost_usd": cost},
+        }
+        message, finish_reason = None, None
+        choices = None if data.get("error") else data.get("choices")
+        if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict):
+            choice = choices[0]
+            if choice.get("finish_reason") in {"stop", "tool_calls"}:
+                message = choice.get("message")
+                finish_reason = choice.get("finish_reason")
+        result={"message": message, "finish_reason": finish_reason, "inference": metadata}
+        if settings.get('foreground'):
+            result=json.loads(json.dumps(result,default=lambda v:str(v) if isinstance(v,Decimal) else None))
+        return result
 
     @staticmethod
     def _identifier(value):
