@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState, useSyncExternalStore} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
@@ -13,6 +13,9 @@ import {InstructionTest} from "./InstructionTest";
 import type {InstructionTestLimits, ReviewSelection} from "./InstructionTest";
 import {BriefLearning} from "./BriefLearning";
 import type {InstructionReuse} from "./BriefLearning";
+import {openrouter, request, RequestError, forgetFailedOfflineRun} from "./openrouter-session";
+import type {Selection, RunAttempt} from "./openrouter-session";
+import {OpenRouterAccount} from "./OpenRouterAccount";
 import "../../brand/tokens.css";
 import "./planner.css";
 
@@ -69,12 +72,12 @@ type Run = {
   status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
   result?: RunResult | null;
   planner?: {
-    session_id: string; settings: {mode: string; model: string}; draft_permission?: DraftPermission;
+    session_id: string; settings: {mode: string; model: string} & Partial<Selection>; draft_permission?: DraftPermission;
     max_turns: number; turns: unknown[]; routing: {classifier: string};
     execution: "application" | "model"; delivery_demo_scenario: string | null;
   };
   steps: {tool: string; result: unknown}[];
-  inference?: {settings: {mode: string; model?: string}};
+  inference?: {settings: {mode: string; model?: string} & Partial<Selection>};
 };
 
 const stepLabels = {
@@ -112,35 +115,14 @@ if (token) {
   history.replaceState(null, "", location.pathname + location.search);
 }
 
-class RequestError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-  }
-}
-
-let csrfToken = "";
-async function request<T>(path: string, body?: Record<string, unknown>): Promise<T> {
-  const response = await fetch(path, {
-    method: body ? "POST" : "GET",
-    headers: {
-      "X-Local-Operator": sessionStorage.getItem(operatorKey) ?? "",
-      "X-Placement-Review": "campaign",
-      ...(csrfToken && {"X-CSRF-Token": csrfToken}),
-      ...(body && {"Content-Type": "application/json"}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  csrfToken = response.headers.get("X-CSRF-Token") ?? csrfToken;
-  const result = await response.json();
-  if (!response.ok) throw new RequestError(result.error, response.status);
-  return result;
-}
-
 function review(run: Run | null): RunResult | null {
   return run && run.status !== "running" ? run.result ?? run.steps.at(-1)?.result as RunResult : null;
 }
 
 function App() {
+  const account = useSyncExternalStore(openrouter.subscribe, openrouter.snapshot);
+  const viewEpoch = useRef(0);
+  const pendingProviderStart = useRef<{path: string; body: Record<string, unknown>; uncertain: boolean} | null>(null);
   const [page, setPage] = useState(currentPage);
   const [mode, setMode] = useState<Mode>();
   const [mainModel, setMainModel] = useState("");
@@ -184,10 +166,15 @@ function App() {
           request<Mode>("/api/mode"),
           request<Draft>("/api/campaign"),
         ]);
+        const nativeBinding = workspace.workspace ? {actor_id: workspace.workspace.actor, client_id: workspace.workspace.client_id,
+          brand_id: workspace.workspace.brand_id, workspace_id: workspace.workspace.id, campaign_id: currentDraft.campaign_id} : null;
+        openrouter.bindScope(JSON.stringify([workspace.workspace ?? "local", currentDraft.campaign_id]), nativeBinding);
         if (workspace.workspace) {
           const scope = JSON.stringify([workspace.workspace.actor, workspace.workspace.client_id,
             workspace.workspace.brand_id, workspace.workspace.id, currentDraft.campaign_id]);
           if (sessionStorage.getItem("staff-workspace-scope") !== scope) {
+            openrouter.logout();
+            openrouter.bindScope(JSON.stringify([workspace.workspace, currentDraft.campaign_id]), nativeBinding);
             for (const key of Object.keys(sessionStorage)) {
               if (key.startsWith("campaign-planner:")) sessionStorage.removeItem(key);
             }
@@ -204,7 +191,7 @@ function App() {
         const savedModel = sessionStorage.getItem("campaign-planner:model");
         const selectedModel = workspace.agentPlanner?.models.some(item => item.id === savedModel)
           ? savedModel! : workspace.agentPlanner?.default ?? "simulated";
-        if (savedModel && selectedModel !== savedModel) {
+        if (savedModel && selectedModel !== savedModel && ["simulated", "simulated-inspect"].includes(savedModel)) {
           const nextConversation = crypto.randomUUID().replaceAll("-", "");
           setConversationId(nextConversation);
           sessionStorage.setItem("campaign-planner:conversation", nextConversation);
@@ -226,6 +213,14 @@ function App() {
           }
           const savedConversation = sessionStorage.getItem("campaign-planner:conversation");
           const pendingStart = sessionStorage.getItem(pendingStartKey);
+          if (pendingStart) {
+            const marker = JSON.parse(pendingStart);
+            if (marker.provider && !marker.run_id) {
+              setRun(null); setPendingId(null); sessionStorage.removeItem(runKey);
+              setError(`The original start receipt is unavailable. Operation ${marker.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`);
+              setMode(workspace); return;
+            }
+          }
           const restore = chats.find(item => item.id === savedConversation)
             ?? (currentPage() === "/campaign" && !savedConversation && !pendingStart ? chats[0] : undefined);
           if (!workspace.live && restore) {
@@ -238,6 +233,7 @@ function App() {
           if (workspace.live || !savedId) return;
           const previous = await request<Run>("/api/agent/run?id=" + encodeURIComponent(savedId));
           setRun(previous);
+          openrouter.hydrate(previous.planner?.settings ?? previous.inference?.settings);
         } catch (failure) {
           if (!(failure instanceof RequestError && failure.status === 404)) throw failure;
         } finally {
@@ -328,107 +324,122 @@ function App() {
   async function prepare(source?: Preparation) {
     if (!mode || mode.live || busy || packageAction) return false;
     if (source && source.kind !== "placement_request" && (!activePackage || needsLatest)) return false;
-    const id = !source && !stale && run?.status !== "ready_for_review" && pendingId
-      ? pendingId
-      : crypto.randomUUID().replaceAll("-", "");
-    setPendingId(id);
-    sessionStorage.setItem(runKey, id);
-    setBusy(true);
-    setError("");
-    setStale(false);
-    if (id !== run?.run_id) setRun(null);
-    let starting = false;
+    const epoch = viewEpoch.current;
+    const providerEpoch = openrouter.snapshot().epoch;
+    const guard = () => {openrouter.assertCurrent(providerEpoch); if (epoch !== viewEpoch.current) throw new RequestError("The conversation changed. Open its saved history to continue.", 409, "client_context_changed");};
+    const id = !source && pendingId ? pendingId : crypto.randomUUID().replaceAll("-", "");
+    setBusy(true); setError(""); setStale(false);
+    const originalSettings = run?.planner?.settings ?? run?.inference?.settings;
+    const attempt: RunAttempt = {kind: originalSettings?.mode === "openrouter" ? "provider" : originalSettings ? "offline" : "unknown",
+      phase: "read", acknowledged: run?.run_id === id};
     let chatId = source?.kind === "placement_request" ? source.sessionId : run?.planner?.session_id;
     try {
       let current: Run;
-      let start: {path: string; body: Record<string, string | number>} | null = null;
+      let start: {path: string; body: Record<string, unknown>} | null = null;
       if (source?.kind === "placement_request") {
+        const remote = !["simulated", "simulated-inspect"].includes(source.model);
+        const chosen = openrouter.snapshot().selection;
+        if (remote && (!chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
+          throw new RequestError("Reconnect and select an eligible planner model before sending. Your typed text is retained.", 409, "waiting_for_credentials");
+        }
         start = {path: "/api/agent/placements", body: {
           request: source.request, model: source.model, session_id: source.sessionId,
           run_id: id, catalog_id: source.catalogId, after_message: source.afterMessage,
-          draft_permission: source.draftPermission,
+          draft_permission: source.draftPermission, ...(remote && {provider_selection_id: chosen!.selection_id}),
         }};
-      } else if (source?.kind === "experiment_next_test") {
-        start = {path: "/api/agent/experiment-next-test", body: {
-          test_id: source.testId, review_id: source.reviewId, ...source.selection,
-        }};
-      } else if (source?.kind === "instruction_review") {
-        start = {path: "/api/agent/instruction-review", body: {
-          test_id: source.testId,
-          ...source.selection,
-        }};
-      } else if (source?.kind === "next_test" && activePackage) {
-        start = {path: "/api/agent/next-test", body: {
-          campaign_id: activePackage.package.campaign_id, revision: activePackage.package.revision,
-          fingerprint: activePackage.fingerprint, review_id: source.reviewId,
-          ...source.selection,
-        }};
-      } else if (!stale) {
-        const savedStart = sessionStorage.getItem(pendingStartKey);
-        if (savedStart) start = JSON.parse(savedStart);
+      } else if (source) {
+        const selection = source.selection.mode === "openrouter"
+          ? {mode: "openrouter", operation_id: source.selection.operation_id,
+             provider_selection_id: (await openrouter.structured(source.selection.model)).selection_id}
+          : source.selection;
+        guard();
+        if (source.kind === "experiment_next_test") start = {path: "/api/agent/experiment-next-test", body: {test_id: source.testId, review_id: source.reviewId, ...selection}};
+        else if (source.kind === "instruction_review") start = {path: "/api/agent/instruction-review", body: {test_id: source.testId, ...selection}};
+        else if (activePackage) start = {path: "/api/agent/next-test", body: {campaign_id: activePackage.package.campaign_id,
+          revision: activePackage.package.revision, fingerprint: activePackage.fingerprint, review_id: source.reviewId, ...selection}};
+      } else {
+        const saved = sessionStorage.getItem(pendingStartKey);
+        if (saved) {
+          const pending = JSON.parse(saved);
+          attempt.kind = pending.provider ? "provider" : "offline";
+          if (pending.provider) {
+            // Only a known run can recover a lost start receipt. Never reconstruct a provider payload from browser storage.
+            if (!pending.run_id) throw new RequestError("The original start receipt is unavailable. Operation " + pending.operation_id + " is retained; no replacement request was sent.", 409, "inference_outcome_unknown");
+          } else start = pending;
+        }
       }
       if (start) {
+        const remote = !!start.body.provider_selection_id;
+        attempt.kind = remote ? "provider" : "offline"; attempt.phase = "start"; attempt.acknowledged = false;
         if (start.path === "/api/agent/placements") chatId = String(start.body.session_id);
-        sessionStorage.setItem(pendingStartKey, JSON.stringify(start));
-        starting = true;
-        current = await request<Run>(start.path, start.body);
-        starting = false;
-        sessionStorage.removeItem(pendingStartKey);
-      } else if (id === pendingId && !stale) {
-        current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(id));
+        sessionStorage.setItem(pendingStartKey, openrouter.serializeStart(start));
+        if (remote) {
+          pendingProviderStart.current = {...start, uncertain: true};
+          if (!start.body.run_id) {setPendingId(null); setRun(null); sessionStorage.removeItem(runKey);}
+        }
+        if (start.body.run_id) {setPendingId(String(start.body.run_id)); sessionStorage.setItem(runKey, String(start.body.run_id)); if (run?.run_id !== start.body.run_id) setRun(null);}
+        current = await request<Run>(start.path, start.body, remote); guard();
+        sessionStorage.removeItem(pendingStartKey); pendingProviderStart.current = null;
+      } else if (pendingId) {
+        current = await request<Run>("/api/agent/run?id=" + encodeURIComponent(pendingId)); guard();
+        sessionStorage.removeItem(pendingStartKey); pendingProviderStart.current = null;
       } else {
+        attempt.kind = "offline"; attempt.phase = "start"; attempt.acknowledged = false;
         const demoStart = {path: "/api/agent/run", body: {run_id: id, request: mode.demoRequest}};
         sessionStorage.setItem(pendingStartKey, JSON.stringify(demoStart));
-        starting = true;
-        current = await request<Run>(demoStart.path, demoStart.body);
-        starting = false;
-        sessionStorage.removeItem(pendingStartKey);
+        current = await request<Run>(demoStart.path, demoStart.body); guard(); sessionStorage.removeItem(pendingStartKey);
       }
-      setPendingId(current.run_id);
+      attempt.acknowledged = true; attempt.phase = "advance";
+      setPendingId(current.run_id); sessionStorage.setItem(runKey, current.run_id);
       if (current.planner) chatId = current.planner.session_id;
-      sessionStorage.setItem(runKey, current.run_id);
-      for (let step = current.steps.length; current.status === "running" && step < 12; step++) {
-        setRun(current);
-        current = await request<Run>("/api/agent/run", {run_id: current.run_id});
-      }
-      const result = review(current);
-      if (result) setDraft(await request<Draft>("/api/campaign"));
       setRun(current);
-      return true;
-    } catch (failure) {
-      if (failure instanceof RequestError && [400, 403, 404, 409].includes(failure.status)) {
-        sessionStorage.removeItem(pendingStartKey);
-        if (starting || failure.status === 404) {
-          sessionStorage.removeItem(runKey);
-          setPendingId(null);
-          setRun(null);
+      for (let step = 0; current.status === "running" && step < 12; step++) {
+        const settings = current.planner?.settings ?? current.inference?.settings;
+        try {
+          // Receipt and non-inference recovery is always tried without a key first.
+          current = await request<Run>("/api/agent/run", {run_id: current.run_id});
+        } catch (failure) {
+          guard();
+          if (!(failure instanceof RequestError && failure.code === "waiting_for_credentials") || !openrouter.canUse(settings)) throw failure;
+          current = await request<Run>("/api/agent/run", {run_id: current.run_id}, true);
         }
+        guard(); setRun(current);
       }
-      setStale(failure instanceof RequestError && failure.status === 409);
-      setError(failure instanceof Error ? failure.message : "Could not prepare the campaign.");
+      if (review(current)) {const latest = await request<Draft>("/api/campaign"); guard(); setDraft(latest);}
+      setRun(current); return true;
+    } catch (failure) {
+      if (epoch !== viewEpoch.current || failure instanceof RequestError && failure.code === "client_context_changed") return false;
+      // A definitive denied offline start has no saved run to resume. Saved/provider/uncertain operations keep their original identity.
+      if (forgetFailedOfflineRun(failure, attempt)) {
+        sessionStorage.removeItem(pendingStartKey); sessionStorage.removeItem(runKey);
+        setPendingId(null); setRun(null); setStale(false);
+      }
+      const lostStructuredStart = pendingProviderStart.current;
+      setError(lostStructuredStart && !lostStructuredStart.body.run_id
+        ? `The original start receipt is unavailable. Operation ${lostStructuredStart.body.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`
+        : failure instanceof Error ? failure.message : "The request outcome is unavailable. Open saved history before continuing.");
       return false;
     } finally {
-      if (chatId) {
-        try {await refreshConversation(chatId);} catch (failure) {
-          if (!(failure instanceof RequestError && failure.status === 404)) {
-            setError(previous => previous || "Could not refresh saved messages. Reload before sending another message.");
-          }
-        }
-      }
-      setBusy(false);
+      if (epoch === viewEpoch.current) {
+        if (chatId) {try {await refreshConversation(chatId, epoch);} catch { /* The original operation remains available through explicit history reads. */ }}
+        setBusy(false);
+      } else setBusy(false);
     }
   }
 
-  async function refreshConversation(id: string) {
+  async function refreshConversation(id: string, epoch = viewEpoch.current) {
     const [chat, chats] = await Promise.all([
       request<Conversation>("/api/agent/conversation?id=" + encodeURIComponent(id)),
       request<ConversationSummary[]>("/api/agent/conversations"),
     ]);
+    if (epoch !== viewEpoch.current) return;
     setConversation(chat);
     setConversations(chats);
   }
 
   function newConversation(model = mainModel, preserveText = false) {
+    viewEpoch.current++;
+    pendingProviderStart.current = null;
     setMainModel(model);
     sessionStorage.setItem("campaign-planner:model", model);
     const id = crypto.randomUUID().replaceAll("-", "");
@@ -448,6 +459,7 @@ function App() {
 
   async function openConversation(id: string, navigateToWorkspace = true) {
     if (busy || packageAction) return;
+    const epoch = ++viewEpoch.current;
     setBusy(true);
     setError("");
     try {
@@ -455,15 +467,19 @@ function App() {
         request<Conversation>("/api/agent/conversation?id=" + encodeURIComponent(id)),
         request<Draft>("/api/campaign"),
       ]);
-      const latest = chat.latest_run_id
-        ? await request<Run>("/api/agent/run?id=" + encodeURIComponent(chat.latest_run_id)) : null;
+      const restoreRunId = !navigateToWorkspace ? sessionStorage.getItem(runKey) ?? chat.latest_run_id : chat.latest_run_id;
+      const latest = restoreRunId
+        ? await request<Run>("/api/agent/run?id=" + encodeURIComponent(restoreRunId)) : null;
+      if (epoch !== viewEpoch.current) return;
       setConversation(chat);
       setDraftPermission("none");
       setDraft(currentDraft);
       setConversationId(id);
-      setMainModel(chat.settings.model);
+      setMainModel(latest?.inference?.settings.model ?? chat.settings.model);
+      openrouter.hydrate(chat.settings);
       setRun(latest);
-      setPendingId(chat.latest_run_id);
+      openrouter.hydrate(latest?.planner?.settings ?? latest?.inference?.settings);
+      setPendingId(latest?.run_id ?? chat.latest_run_id);
       setMessageText("");
       setStale(false);
       const catalog = chat.messages.at(-1)?.catalog_id;
@@ -473,10 +489,13 @@ function App() {
       }
       sessionStorage.setItem("campaign-planner:conversation", id);
       sessionStorage.setItem("campaign-planner:model", chat.settings.model);
-      if (chat.latest_run_id) sessionStorage.setItem(runKey, chat.latest_run_id);
+      if (latest?.run_id) sessionStorage.setItem(runKey, latest.run_id);
       // A failed start's original payload must remain available when restoring that same run.
       const pendingStart = sessionStorage.getItem(pendingStartKey);
-      if (pendingStart && JSON.parse(pendingStart).body?.run_id !== chat.latest_run_id) sessionStorage.removeItem(pendingStartKey);
+      if (navigateToWorkspace && pendingStart) {
+        const pending = JSON.parse(pendingStart);
+        if ((pending.run_id ?? pending.body?.run_id) !== latest?.run_id) sessionStorage.removeItem(pendingStartKey);
+      }
       if (navigateToWorkspace) navigate("/campaign");
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Could not open the conversation.");
@@ -486,6 +505,7 @@ function App() {
   }
 
   function chooseModel(value: string) {
+    openrouter.resetSelection();
     newConversation(value, true);
   }
   async function startPlacement(request: string, catalogId: string, permission: DraftPermission) {
@@ -494,6 +514,7 @@ function App() {
     const pending = sessionStorage.getItem(pendingStartKey);
     if (pending) {
       const saved = JSON.parse(pending);
+      if (saved.provider) return prepare();
       if (saved.path === "/api/agent/placements" && saved.body.session_id === conversationId
           && saved.body.request === request && saved.body.catalog_id === catalogId && saved.body.model === mainModel
           && (saved.body.draft_permission ?? "none") === permission) {
@@ -503,11 +524,15 @@ function App() {
     return prepare({kind: "placement_request", request, model: mainModel, sessionId: conversationId, catalogId,
                     afterMessage: conversation?.latest_message ?? 0, draftPermission: permission});
   }
-  const inheritedModel = mode?.agentPlanner?.models.find(item => item.id === mainModel)?.mode === "openrouter"
-    ? {mode: "openrouter" as const, model: mainModel} : {mode: "offline" as const};
+  const remoteModel = !["simulated", "simulated-inspect", ""].includes(mainModel);
+  const inheritedModel = remoteModel
+    ? {mode: "openrouter" as const, model: mainModel, budget: account.selection?.max_run_cost_usd} : {mode: "offline" as const};
   const capabilityScope = JSON.stringify([mode?.workspace?.actor, mode?.workspace?.client_id,
     mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
   const composer = mode?.agentPlanner && draft && <AgentComposer capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
+    providerSelection={account.selection} providerConnected={account.state === "connected"}
+    onProviderSettings={() => newConversation(mainModel, true)}
+    onProviderSelect={selection => {newConversation(selection.model, true);}}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
     followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
     draftPermission={draftPermission} onDraftPermission={setDraftPermission}
@@ -587,6 +612,7 @@ function App() {
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
               : mode?.live ? "Check source labels when reviewing evidence." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
+          <OpenRouterAccount ready={Boolean(mode && draft)} onChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />
           <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">{mode?.workspace ? "SF" : "LO"}</span><span>{mode?.workspace?.actor ?? "Local operator"}<small>{mode?.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : "Trusted local workspace"}</small></span></div>
         </div>
       </aside>

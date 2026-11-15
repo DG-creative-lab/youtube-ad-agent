@@ -1,3 +1,4 @@
+import type {Selection} from "./openrouter-session";
 import {useEffect, useRef} from "react";
 
 type ReviewEvidence = {
@@ -23,7 +24,7 @@ type ExperimentReview = {
 export type Conversation = {
   id: string;
   campaign_id: string;
-  settings: {model: string; mode: string};
+  settings: {model: string; mode: string} & Partial<Selection>;
   latest_message: number;
   latest_run_id: string | null;
   messages: {

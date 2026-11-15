@@ -219,3 +219,19 @@ at two attempts for the same contract before returning to specification. The
 coordinator integrates serially and refreshes affected review and verification
 on the resulting commit. Issue closure follows accepted evidence and merged work;
 issuing a handoff or opening a PR is not completion.
+
+
+### A2c #54 frontend checkpoint · 15 November 2026
+
+The frozen A2c v1 slice builds account connection controls, private tab-memory
+credential handling, searchable priced model/budget selection and existing planner /
+three structured-command integration on accepted A2a/A2b base
+`6daa75e92ab1acc7f4143497e1499dcbc04ac640`. The frontend owns no backend authority,
+provider activation or migration changes. The existing planner CI job now enforces
+dependency-free client boundary tests before its locked build. Original operations,
+receipt-first recovery and independent per-request draft grants remain explicit.
+
+Implementation checks use authored transports and disposable data only. Live route
+qualification, real provider spend and deployment remain separate gates. Exact
+commit independent source/browser verification and human merge remain required;
+this checkpoint does not close umbrella #54.

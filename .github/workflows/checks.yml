@@ -39,5 +39,7 @@ jobs:
           run_install: false
       - name: Install planner dependencies
         run: pnpm --dir web/planner install --frozen-lockfile
+      - name: Check foreground client invariants
+        run: pnpm --dir web/planner test
       - name: Type-check and build planner
         run: pnpm --dir web/planner build
