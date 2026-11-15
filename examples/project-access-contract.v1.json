@@ -1,0 +1,1203 @@
+{
+  "profile": "youtube-project-vectors-v1",
+  "version": 1,
+  "status": "authored_synthetic_no_runtime_authority",
+  "positives": [
+    {
+      "id": "create-unicode",
+      "verified_context": {
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "brand_id": "brand_demo",
+        "workspace_id": "workspace_demo",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "session_id": "session_demo",
+        "external_identity": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "command": {
+        "action": "create",
+        "operation_id": "operation_create-unicode",
+        "name": "Café 東京",
+        "initial_intents": [
+          "manager"
+        ]
+      },
+      "reservation": {
+        "reservation_id": "reservation_demo",
+        "proposed_project_id": "project_new",
+        "initial_manager_subject": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "native_state": {
+        "owner": {
+          "client_id": "client_demo",
+          "brand_id": "brand_demo",
+          "workspace_id": "workspace_demo",
+          "installation_id": "installation_demo"
+        },
+        "store_incarnation": "incarnation_fresh",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "action": "create",
+        "workspace_revision": "7",
+        "project_id": null,
+        "campaign_id": null,
+        "link_generation": null,
+        "resource_ref": null,
+        "reservation_id": "reservation_demo",
+        "project_revision": null,
+        "security_epoch": null,
+        "intent_revision": null,
+        "campaign_revision": null,
+        "resource_revision": null,
+        "projection_version": null,
+        "disclosure_revision": null,
+        "actor_intent_digest": null,
+        "campaign_snapshot_hash": null,
+        "package_fingerprint": null,
+        "media_manifest_hash": null,
+        "recipient_proof_hash": null,
+        "project_state": null,
+        "recovery_state": "normal"
+      },
+      "request": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_create-unicode",
+        "correlation_id": "correlation_create-unicode",
+        "idempotency_key": "ca02b074677342b65ed6108ad2d4b70961ba966b145fb6abb05124c690501092",
+        "actor_evidence": {
+          "kind": "human",
+          "subject_token": "synthetic-subject-evidence-not-a-credential"
+        },
+        "capability": "youtube:project.create.v1",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "facts": {
+          "attester_id": "youtube_demo",
+          "source": "youtube-project-sqlite-v1",
+          "resource_version": "yp1:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+          "observed_at": "2026-11-15T12:00:00Z",
+          "owner_tenant_id": "client_demo",
+          "workspace_id": "workspace_demo",
+          "attributes": {
+            "youtube:profile": "youtube-project-v1",
+            "youtube:brand_id": "brand_demo",
+            "youtube:store_incarnation": "incarnation_fresh",
+            "youtube:project_id": null,
+            "youtube:project_revision": null,
+            "youtube:security_epoch": null,
+            "youtube:project_state": null,
+            "youtube:actor_intent_digest": null,
+            "youtube:intent_revision": null,
+            "youtube:campaign_id": null,
+            "youtube:campaign_revision": null,
+            "youtube:campaign_snapshot_hash": null,
+            "youtube:link_generation": null,
+            "youtube:resource_ref": null,
+            "youtube:resource_revision": null,
+            "youtube:package_fingerprint": null,
+            "youtube:projection_version": null,
+            "youtube:media_manifest_hash": null,
+            "youtube:disclosure_revision": null,
+            "youtube:recipient_proof_hash": null,
+            "youtube:reservation_id": "reservation_demo",
+            "youtube:recovery_state": "normal",
+            "youtube:native_state_hash": "sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+            "youtube:workspace_revision": "7"
+          }
+        },
+        "input_hash": "sha256:d47e195886fde497766daedfe908f2ee4010066cbc3d7d3b5e237e733650e337",
+        "subject_hash": "sha256:ca02b074677342b65ed6108ad2d4b70961ba966b145fb6abb05124c690501092",
+        "effect": "write",
+        "run_id": null
+      },
+      "result": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_create-unicode",
+        "correlation_id": "correlation_create-unicode",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "input_hash": "sha256:d47e195886fde497766daedfe908f2ee4010066cbc3d7d3b5e237e733650e337",
+        "subject_hash": "sha256:ca02b074677342b65ed6108ad2d4b70961ba966b145fb6abb05124c690501092",
+        "decision_id": "decision_create-unicode",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "allow",
+        "reason": "allowed",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 5000,
+        "obligations": [
+          "product.verify_current_resource.v1"
+        ]
+      },
+      "verification": {
+        "wall_now": "2026-11-15T12:00:01Z",
+        "credential_expires_at": "2026-11-15T12:10:00Z",
+        "session_expires_at": "2026-11-15T12:10:00Z",
+        "monotonic_start_ms": 1000,
+        "monotonic_now_ms": 2000
+      },
+      "golden": {
+        "input_text": "{\"command\":{\"action\":\"create\",\"initial_intents\":[\"manager\"],\"name\":\"Café 東京\",\"operation_id\":\"operation_create-unicode\"},\"profile\":\"youtube-project-input-v1\",\"reservation\":{\"initial_manager_subject\":{\"issuer\":\"https://issuer.example.invalid\",\"principal_id\":\"human_demo\",\"subject\":\"subject_demo\"},\"proposed_project_id\":\"project_new\",\"reservation_id\":\"reservation_demo\"}}",
+        "input_hash": "sha256:d47e195886fde497766daedfe908f2ee4010066cbc3d7d3b5e237e733650e337",
+        "native_state_text": "{\"action\":\"create\",\"actor_intent_digest\":null,\"campaign_id\":null,\"campaign_revision\":null,\"campaign_snapshot_hash\":null,\"disclosure_revision\":null,\"intent_revision\":null,\"link_generation\":null,\"media_manifest_hash\":null,\"owner\":{\"brand_id\":\"brand_demo\",\"client_id\":\"client_demo\",\"installation_id\":\"installation_demo\",\"workspace_id\":\"workspace_demo\"},\"package_fingerprint\":null,\"project_id\":null,\"project_revision\":null,\"project_state\":null,\"projection_version\":null,\"recipient_proof_hash\":null,\"recovery_state\":\"normal\",\"reservation_id\":\"reservation_demo\",\"resource_ref\":null,\"resource_revision\":null,\"security_epoch\":null,\"store_incarnation\":\"incarnation_fresh\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"workspace_revision\":\"7\"}",
+        "native_state_hash": "sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+        "subject_text": "{\"actor\":{\"delegator_id\":null,\"grant_id\":null,\"kind\":\"human\",\"principal_id\":\"human_demo\"},\"application_id\":\"youtube_demo\",\"brand_id\":\"brand_demo\",\"capability\":\"youtube:project.create.v1\",\"effect\":\"write\",\"input_hash\":\"sha256:d47e195886fde497766daedfe908f2ee4010066cbc3d7d3b5e237e733650e337\",\"installation_id\":\"installation_demo\",\"native_state_hash\":\"sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e\",\"profile\":\"youtube-project-subject-v1\",\"resource_version\":\"yp1:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e\",\"session_id\":\"session_demo\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"tenant_id\":\"client_demo\",\"workspace_id\":\"workspace_demo\"}",
+        "subject_hash": "sha256:ca02b074677342b65ed6108ad2d4b70961ba966b145fb6abb05124c690501092"
+      }
+    },
+    {
+      "id": "create-decomposed",
+      "verified_context": {
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "brand_id": "brand_demo",
+        "workspace_id": "workspace_demo",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "session_id": "session_demo",
+        "external_identity": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "command": {
+        "action": "create",
+        "operation_id": "operation_create-unicode",
+        "name": "Café 東京",
+        "initial_intents": [
+          "manager"
+        ]
+      },
+      "reservation": {
+        "reservation_id": "reservation_demo",
+        "proposed_project_id": "project_new",
+        "initial_manager_subject": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "native_state": {
+        "owner": {
+          "client_id": "client_demo",
+          "brand_id": "brand_demo",
+          "workspace_id": "workspace_demo",
+          "installation_id": "installation_demo"
+        },
+        "store_incarnation": "incarnation_fresh",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "action": "create",
+        "workspace_revision": "7",
+        "project_id": null,
+        "campaign_id": null,
+        "link_generation": null,
+        "resource_ref": null,
+        "reservation_id": "reservation_demo",
+        "project_revision": null,
+        "security_epoch": null,
+        "intent_revision": null,
+        "campaign_revision": null,
+        "resource_revision": null,
+        "projection_version": null,
+        "disclosure_revision": null,
+        "actor_intent_digest": null,
+        "campaign_snapshot_hash": null,
+        "package_fingerprint": null,
+        "media_manifest_hash": null,
+        "recipient_proof_hash": null,
+        "project_state": null,
+        "recovery_state": "normal"
+      },
+      "request": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_create-decomposed",
+        "correlation_id": "correlation_create-decomposed",
+        "idempotency_key": "a49f95d9de75a4a19e432698f7153d52c526f7c29ee230ab62d4d9ffbd0b0f23",
+        "actor_evidence": {
+          "kind": "human",
+          "subject_token": "synthetic-subject-evidence-not-a-credential"
+        },
+        "capability": "youtube:project.create.v1",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "facts": {
+          "attester_id": "youtube_demo",
+          "source": "youtube-project-sqlite-v1",
+          "resource_version": "yp1:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+          "observed_at": "2026-11-15T12:00:00Z",
+          "owner_tenant_id": "client_demo",
+          "workspace_id": "workspace_demo",
+          "attributes": {
+            "youtube:profile": "youtube-project-v1",
+            "youtube:brand_id": "brand_demo",
+            "youtube:store_incarnation": "incarnation_fresh",
+            "youtube:project_id": null,
+            "youtube:project_revision": null,
+            "youtube:security_epoch": null,
+            "youtube:project_state": null,
+            "youtube:actor_intent_digest": null,
+            "youtube:intent_revision": null,
+            "youtube:campaign_id": null,
+            "youtube:campaign_revision": null,
+            "youtube:campaign_snapshot_hash": null,
+            "youtube:link_generation": null,
+            "youtube:resource_ref": null,
+            "youtube:resource_revision": null,
+            "youtube:package_fingerprint": null,
+            "youtube:projection_version": null,
+            "youtube:media_manifest_hash": null,
+            "youtube:disclosure_revision": null,
+            "youtube:recipient_proof_hash": null,
+            "youtube:reservation_id": "reservation_demo",
+            "youtube:recovery_state": "normal",
+            "youtube:native_state_hash": "sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+            "youtube:workspace_revision": "7"
+          }
+        },
+        "input_hash": "sha256:a58432e07a7b0c8d7e0637cddcaee03df214dde25ebe5a61be629f47e2f540c1",
+        "subject_hash": "sha256:a49f95d9de75a4a19e432698f7153d52c526f7c29ee230ab62d4d9ffbd0b0f23",
+        "effect": "write",
+        "run_id": null
+      },
+      "result": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_create-decomposed",
+        "correlation_id": "correlation_create-decomposed",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "input_hash": "sha256:a58432e07a7b0c8d7e0637cddcaee03df214dde25ebe5a61be629f47e2f540c1",
+        "subject_hash": "sha256:a49f95d9de75a4a19e432698f7153d52c526f7c29ee230ab62d4d9ffbd0b0f23",
+        "decision_id": "decision_create-decomposed",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "allow",
+        "reason": "allowed",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 5000,
+        "obligations": [
+          "product.verify_current_resource.v1"
+        ]
+      },
+      "verification": {
+        "wall_now": "2026-11-15T12:00:01Z",
+        "credential_expires_at": "2026-11-15T12:10:00Z",
+        "session_expires_at": "2026-11-15T12:10:00Z",
+        "monotonic_start_ms": 1000,
+        "monotonic_now_ms": 2000
+      },
+      "golden": {
+        "input_text": "{\"command\":{\"action\":\"create\",\"initial_intents\":[\"manager\"],\"name\":\"Café 東京\",\"operation_id\":\"operation_create-unicode\"},\"profile\":\"youtube-project-input-v1\",\"reservation\":{\"initial_manager_subject\":{\"issuer\":\"https://issuer.example.invalid\",\"principal_id\":\"human_demo\",\"subject\":\"subject_demo\"},\"proposed_project_id\":\"project_new\",\"reservation_id\":\"reservation_demo\"}}",
+        "input_hash": "sha256:a58432e07a7b0c8d7e0637cddcaee03df214dde25ebe5a61be629f47e2f540c1",
+        "native_state_text": "{\"action\":\"create\",\"actor_intent_digest\":null,\"campaign_id\":null,\"campaign_revision\":null,\"campaign_snapshot_hash\":null,\"disclosure_revision\":null,\"intent_revision\":null,\"link_generation\":null,\"media_manifest_hash\":null,\"owner\":{\"brand_id\":\"brand_demo\",\"client_id\":\"client_demo\",\"installation_id\":\"installation_demo\",\"workspace_id\":\"workspace_demo\"},\"package_fingerprint\":null,\"project_id\":null,\"project_revision\":null,\"project_state\":null,\"projection_version\":null,\"recipient_proof_hash\":null,\"recovery_state\":\"normal\",\"reservation_id\":\"reservation_demo\",\"resource_ref\":null,\"resource_revision\":null,\"security_epoch\":null,\"store_incarnation\":\"incarnation_fresh\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"workspace_revision\":\"7\"}",
+        "native_state_hash": "sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e",
+        "subject_text": "{\"actor\":{\"delegator_id\":null,\"grant_id\":null,\"kind\":\"human\",\"principal_id\":\"human_demo\"},\"application_id\":\"youtube_demo\",\"brand_id\":\"brand_demo\",\"capability\":\"youtube:project.create.v1\",\"effect\":\"write\",\"input_hash\":\"sha256:a58432e07a7b0c8d7e0637cddcaee03df214dde25ebe5a61be629f47e2f540c1\",\"installation_id\":\"installation_demo\",\"native_state_hash\":\"sha256:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e\",\"profile\":\"youtube-project-subject-v1\",\"resource_version\":\"yp1:d7d4d4dfda44ce7aecdeee4468e0ef2f95a54d90a51f1c22a096e9d357189e4e\",\"session_id\":\"session_demo\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"tenant_id\":\"client_demo\",\"workspace_id\":\"workspace_demo\"}",
+        "subject_hash": "sha256:a49f95d9de75a4a19e432698f7153d52c526f7c29ee230ab62d4d9ffbd0b0f23"
+      }
+    },
+    {
+      "id": "list",
+      "verified_context": {
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "brand_id": "brand_demo",
+        "workspace_id": "workspace_demo",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "session_id": "session_demo",
+        "external_identity": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "command": {
+        "action": "list",
+        "operation_id": "operation_list",
+        "page_size": 20,
+        "cursor_digest": null
+      },
+      "reservation": null,
+      "native_state": {
+        "owner": {
+          "client_id": "client_demo",
+          "brand_id": "brand_demo",
+          "workspace_id": "workspace_demo",
+          "installation_id": "installation_demo"
+        },
+        "store_incarnation": "incarnation_fresh",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "action": "list",
+        "workspace_revision": "7",
+        "project_id": null,
+        "campaign_id": null,
+        "link_generation": null,
+        "resource_ref": null,
+        "reservation_id": null,
+        "project_revision": null,
+        "security_epoch": null,
+        "intent_revision": null,
+        "campaign_revision": null,
+        "resource_revision": null,
+        "projection_version": null,
+        "disclosure_revision": null,
+        "actor_intent_digest": null,
+        "campaign_snapshot_hash": null,
+        "package_fingerprint": null,
+        "media_manifest_hash": null,
+        "recipient_proof_hash": null,
+        "project_state": null,
+        "recovery_state": "normal"
+      },
+      "request": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_list",
+        "correlation_id": "correlation_list",
+        "idempotency_key": "c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd",
+        "actor_evidence": {
+          "kind": "human",
+          "subject_token": "synthetic-subject-evidence-not-a-credential"
+        },
+        "capability": "youtube:project.list.v1",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "facts": {
+          "attester_id": "youtube_demo",
+          "source": "youtube-project-sqlite-v1",
+          "resource_version": "yp1:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf",
+          "observed_at": "2026-11-15T12:00:00Z",
+          "owner_tenant_id": "client_demo",
+          "workspace_id": "workspace_demo",
+          "attributes": {
+            "youtube:profile": "youtube-project-v1",
+            "youtube:brand_id": "brand_demo",
+            "youtube:store_incarnation": "incarnation_fresh",
+            "youtube:project_id": null,
+            "youtube:project_revision": null,
+            "youtube:security_epoch": null,
+            "youtube:project_state": null,
+            "youtube:actor_intent_digest": null,
+            "youtube:intent_revision": null,
+            "youtube:campaign_id": null,
+            "youtube:campaign_revision": null,
+            "youtube:campaign_snapshot_hash": null,
+            "youtube:link_generation": null,
+            "youtube:resource_ref": null,
+            "youtube:resource_revision": null,
+            "youtube:package_fingerprint": null,
+            "youtube:projection_version": null,
+            "youtube:media_manifest_hash": null,
+            "youtube:disclosure_revision": null,
+            "youtube:recipient_proof_hash": null,
+            "youtube:reservation_id": null,
+            "youtube:recovery_state": "normal",
+            "youtube:native_state_hash": "sha256:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf",
+            "youtube:workspace_revision": "7"
+          }
+        },
+        "input_hash": "sha256:593ca34307c89dd9373ab783fbb37834295b06c08c1fc67b9cd00050e2a4693a",
+        "subject_hash": "sha256:c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd",
+        "effect": "read",
+        "run_id": null
+      },
+      "result": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_list",
+        "correlation_id": "correlation_list",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "input_hash": "sha256:593ca34307c89dd9373ab783fbb37834295b06c08c1fc67b9cd00050e2a4693a",
+        "subject_hash": "sha256:c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd",
+        "decision_id": "decision_list",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "allow",
+        "reason": "allowed",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 5000,
+        "obligations": [
+          "product.verify_current_resource.v1"
+        ]
+      },
+      "verification": {
+        "wall_now": "2026-11-15T12:00:01Z",
+        "credential_expires_at": "2026-11-15T12:10:00Z",
+        "session_expires_at": "2026-11-15T12:10:00Z",
+        "monotonic_start_ms": 1000,
+        "monotonic_now_ms": 2000
+      },
+      "golden": {
+        "input_text": "{\"command\":{\"action\":\"list\",\"cursor_digest\":null,\"operation_id\":\"operation_list\",\"page_size\":20},\"profile\":\"youtube-project-input-v1\",\"reservation\":null}",
+        "input_hash": "sha256:593ca34307c89dd9373ab783fbb37834295b06c08c1fc67b9cd00050e2a4693a",
+        "native_state_text": "{\"action\":\"list\",\"actor_intent_digest\":null,\"campaign_id\":null,\"campaign_revision\":null,\"campaign_snapshot_hash\":null,\"disclosure_revision\":null,\"intent_revision\":null,\"link_generation\":null,\"media_manifest_hash\":null,\"owner\":{\"brand_id\":\"brand_demo\",\"client_id\":\"client_demo\",\"installation_id\":\"installation_demo\",\"workspace_id\":\"workspace_demo\"},\"package_fingerprint\":null,\"project_id\":null,\"project_revision\":null,\"project_state\":null,\"projection_version\":null,\"recipient_proof_hash\":null,\"recovery_state\":\"normal\",\"reservation_id\":null,\"resource_ref\":null,\"resource_revision\":null,\"security_epoch\":null,\"store_incarnation\":\"incarnation_fresh\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"workspace_revision\":\"7\"}",
+        "native_state_hash": "sha256:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf",
+        "subject_text": "{\"actor\":{\"delegator_id\":null,\"grant_id\":null,\"kind\":\"human\",\"principal_id\":\"human_demo\"},\"application_id\":\"youtube_demo\",\"brand_id\":\"brand_demo\",\"capability\":\"youtube:project.list.v1\",\"effect\":\"read\",\"input_hash\":\"sha256:593ca34307c89dd9373ab783fbb37834295b06c08c1fc67b9cd00050e2a4693a\",\"installation_id\":\"installation_demo\",\"native_state_hash\":\"sha256:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf\",\"profile\":\"youtube-project-subject-v1\",\"resource_version\":\"yp1:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf\",\"session_id\":\"session_demo\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"tenant_id\":\"client_demo\",\"workspace_id\":\"workspace_demo\"}",
+        "subject_hash": "sha256:c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd"
+      }
+    },
+    {
+      "id": "shared-resource-read",
+      "verified_context": {
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "brand_id": "brand_demo",
+        "workspace_id": "workspace_demo",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "session_id": "session_demo",
+        "external_identity": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "command": {
+        "action": "resource.read",
+        "operation_id": "operation_shared-resource-read",
+        "project_id": "project_demo",
+        "resource_ref": "resource_demo"
+      },
+      "reservation": null,
+      "native_state": {
+        "owner": {
+          "client_id": "client_demo",
+          "brand_id": "brand_demo",
+          "workspace_id": "workspace_demo",
+          "installation_id": "installation_demo"
+        },
+        "store_incarnation": "incarnation_fresh",
+        "target": {
+          "namespace": "youtube",
+          "type": "project_resource",
+          "id": "resource_demo"
+        },
+        "action": "resource.read",
+        "workspace_revision": "7",
+        "project_id": "project_demo",
+        "campaign_id": "campaign_demo",
+        "link_generation": "link_generation_new",
+        "resource_ref": "resource_demo",
+        "reservation_id": null,
+        "project_revision": "3",
+        "security_epoch": "2",
+        "intent_revision": "2",
+        "campaign_revision": "5",
+        "resource_revision": "1",
+        "projection_version": "1",
+        "disclosure_revision": "2",
+        "actor_intent_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "campaign_snapshot_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "package_fingerprint": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "media_manifest_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "recipient_proof_hash": null,
+        "project_state": "active",
+        "recovery_state": "normal"
+      },
+      "request": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_shared-resource-read",
+        "correlation_id": "correlation_shared-resource-read",
+        "idempotency_key": "e0999122550db17ab72ccd634f1eac4b8d006fae1f4334c2568c6cc97187e16b",
+        "actor_evidence": {
+          "kind": "human",
+          "subject_token": "synthetic-subject-evidence-not-a-credential"
+        },
+        "capability": "youtube:project.resource.read.v1",
+        "target": {
+          "namespace": "youtube",
+          "type": "project_resource",
+          "id": "resource_demo"
+        },
+        "facts": {
+          "attester_id": "youtube_demo",
+          "source": "youtube-project-sqlite-v1",
+          "resource_version": "yp1:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c",
+          "observed_at": "2026-11-15T12:00:00Z",
+          "owner_tenant_id": "client_demo",
+          "workspace_id": "workspace_demo",
+          "attributes": {
+            "youtube:profile": "youtube-project-v1",
+            "youtube:brand_id": "brand_demo",
+            "youtube:store_incarnation": "incarnation_fresh",
+            "youtube:project_id": "project_demo",
+            "youtube:project_revision": "3",
+            "youtube:security_epoch": "2",
+            "youtube:project_state": "active",
+            "youtube:actor_intent_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "youtube:intent_revision": "2",
+            "youtube:campaign_id": "campaign_demo",
+            "youtube:campaign_revision": "5",
+            "youtube:campaign_snapshot_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "youtube:link_generation": "link_generation_new",
+            "youtube:resource_ref": "resource_demo",
+            "youtube:resource_revision": "1",
+            "youtube:package_fingerprint": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "youtube:projection_version": "1",
+            "youtube:media_manifest_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "youtube:disclosure_revision": "2",
+            "youtube:recipient_proof_hash": null,
+            "youtube:reservation_id": null,
+            "youtube:recovery_state": "normal",
+            "youtube:native_state_hash": "sha256:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c",
+            "youtube:workspace_revision": "7"
+          }
+        },
+        "input_hash": "sha256:e7e06b71a9f26ce29498e434e8c9b8b0531561363ceee914a6165677f9722ed5",
+        "subject_hash": "sha256:e0999122550db17ab72ccd634f1eac4b8d006fae1f4334c2568c6cc97187e16b",
+        "effect": "read",
+        "run_id": null
+      },
+      "result": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_shared-resource-read",
+        "correlation_id": "correlation_shared-resource-read",
+        "target": {
+          "namespace": "youtube",
+          "type": "project_resource",
+          "id": "resource_demo"
+        },
+        "input_hash": "sha256:e7e06b71a9f26ce29498e434e8c9b8b0531561363ceee914a6165677f9722ed5",
+        "subject_hash": "sha256:e0999122550db17ab72ccd634f1eac4b8d006fae1f4334c2568c6cc97187e16b",
+        "decision_id": "decision_shared-resource-read",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "allow",
+        "reason": "allowed",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 5000,
+        "obligations": [
+          "product.verify_current_resource.v1"
+        ]
+      },
+      "verification": {
+        "wall_now": "2026-11-15T12:00:01Z",
+        "credential_expires_at": "2026-11-15T12:10:00Z",
+        "session_expires_at": "2026-11-15T12:10:00Z",
+        "monotonic_start_ms": 1000,
+        "monotonic_now_ms": 2000
+      },
+      "golden": {
+        "input_text": "{\"command\":{\"action\":\"resource.read\",\"operation_id\":\"operation_shared-resource-read\",\"project_id\":\"project_demo\",\"resource_ref\":\"resource_demo\"},\"profile\":\"youtube-project-input-v1\",\"reservation\":null}",
+        "input_hash": "sha256:e7e06b71a9f26ce29498e434e8c9b8b0531561363ceee914a6165677f9722ed5",
+        "native_state_text": "{\"action\":\"resource.read\",\"actor_intent_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"campaign_id\":\"campaign_demo\",\"campaign_revision\":\"5\",\"campaign_snapshot_hash\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"disclosure_revision\":\"2\",\"intent_revision\":\"2\",\"link_generation\":\"link_generation_new\",\"media_manifest_hash\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"owner\":{\"brand_id\":\"brand_demo\",\"client_id\":\"client_demo\",\"installation_id\":\"installation_demo\",\"workspace_id\":\"workspace_demo\"},\"package_fingerprint\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"project_id\":\"project_demo\",\"project_revision\":\"3\",\"project_state\":\"active\",\"projection_version\":\"1\",\"recipient_proof_hash\":null,\"recovery_state\":\"normal\",\"reservation_id\":null,\"resource_ref\":\"resource_demo\",\"resource_revision\":\"1\",\"security_epoch\":\"2\",\"store_incarnation\":\"incarnation_fresh\",\"target\":{\"id\":\"resource_demo\",\"namespace\":\"youtube\",\"type\":\"project_resource\"},\"workspace_revision\":\"7\"}",
+        "native_state_hash": "sha256:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c",
+        "subject_text": "{\"actor\":{\"delegator_id\":null,\"grant_id\":null,\"kind\":\"human\",\"principal_id\":\"human_demo\"},\"application_id\":\"youtube_demo\",\"brand_id\":\"brand_demo\",\"capability\":\"youtube:project.resource.read.v1\",\"effect\":\"read\",\"input_hash\":\"sha256:e7e06b71a9f26ce29498e434e8c9b8b0531561363ceee914a6165677f9722ed5\",\"installation_id\":\"installation_demo\",\"native_state_hash\":\"sha256:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c\",\"profile\":\"youtube-project-subject-v1\",\"resource_version\":\"yp1:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c\",\"session_id\":\"session_demo\",\"target\":{\"id\":\"resource_demo\",\"namespace\":\"youtube\",\"type\":\"project_resource\"},\"tenant_id\":\"client_demo\",\"workspace_id\":\"workspace_demo\"}",
+        "subject_hash": "sha256:e0999122550db17ab72ccd634f1eac4b8d006fae1f4334c2568c6cc97187e16b"
+      }
+    },
+    {
+      "id": "recover-campaign",
+      "verified_context": {
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "brand_id": "brand_demo",
+        "workspace_id": "workspace_demo",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "session_id": "session_demo",
+        "external_identity": {
+          "issuer": "https://issuer.example.invalid",
+          "subject": "subject_demo",
+          "principal_id": "human_demo"
+        }
+      },
+      "command": {
+        "action": "recover-campaign",
+        "operation_id": "operation_recover-campaign",
+        "campaign_id": "campaign_restored",
+        "expected_campaign_revision": "5",
+        "expected_store_incarnation": "incarnation_fresh",
+        "plan": {
+          "classification": "standalone",
+          "project_id": null,
+          "link_generation": null,
+          "resource_refs": [],
+          "recipient_proof_hash": null
+        }
+      },
+      "reservation": null,
+      "native_state": {
+        "owner": {
+          "client_id": "client_demo",
+          "brand_id": "brand_demo",
+          "workspace_id": "workspace_demo",
+          "installation_id": "installation_demo"
+        },
+        "store_incarnation": "incarnation_fresh",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "action": "recover-campaign",
+        "workspace_revision": "7",
+        "project_id": null,
+        "campaign_id": "campaign_restored",
+        "link_generation": null,
+        "resource_ref": null,
+        "reservation_id": null,
+        "project_revision": null,
+        "security_epoch": null,
+        "intent_revision": null,
+        "campaign_revision": "5",
+        "resource_revision": null,
+        "projection_version": null,
+        "disclosure_revision": null,
+        "actor_intent_digest": null,
+        "campaign_snapshot_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "package_fingerprint": null,
+        "media_manifest_hash": null,
+        "recipient_proof_hash": null,
+        "project_state": null,
+        "recovery_state": "quarantined"
+      },
+      "request": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_recover-campaign",
+        "correlation_id": "correlation_recover-campaign",
+        "idempotency_key": "cd0518264e0f4e371f48a24063e1f03b4c0761cb0e9a8d3d14fa3ff764010fb4",
+        "actor_evidence": {
+          "kind": "human",
+          "subject_token": "synthetic-subject-evidence-not-a-credential"
+        },
+        "capability": "youtube:project.recover.v1",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "facts": {
+          "attester_id": "youtube_demo",
+          "source": "youtube-project-sqlite-v1",
+          "resource_version": "yp1:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f",
+          "observed_at": "2026-11-15T12:00:00Z",
+          "owner_tenant_id": "client_demo",
+          "workspace_id": "workspace_demo",
+          "attributes": {
+            "youtube:profile": "youtube-project-v1",
+            "youtube:brand_id": "brand_demo",
+            "youtube:store_incarnation": "incarnation_fresh",
+            "youtube:project_id": null,
+            "youtube:project_revision": null,
+            "youtube:security_epoch": null,
+            "youtube:project_state": null,
+            "youtube:actor_intent_digest": null,
+            "youtube:intent_revision": null,
+            "youtube:campaign_id": "campaign_restored",
+            "youtube:campaign_revision": "5",
+            "youtube:campaign_snapshot_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "youtube:link_generation": null,
+            "youtube:resource_ref": null,
+            "youtube:resource_revision": null,
+            "youtube:package_fingerprint": null,
+            "youtube:projection_version": null,
+            "youtube:media_manifest_hash": null,
+            "youtube:disclosure_revision": null,
+            "youtube:recipient_proof_hash": null,
+            "youtube:reservation_id": null,
+            "youtube:recovery_state": "quarantined",
+            "youtube:native_state_hash": "sha256:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f",
+            "youtube:workspace_revision": "7"
+          }
+        },
+        "input_hash": "sha256:03f20aa9af51834a4675171a0b9e23cf81f58cb505c84a5af589259b6eb24d60",
+        "subject_hash": "sha256:cd0518264e0f4e371f48a24063e1f03b4c0761cb0e9a8d3d14fa3ff764010fb4",
+        "effect": "write",
+        "run_id": null
+      },
+      "result": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_recover-campaign",
+        "correlation_id": "correlation_recover-campaign",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "input_hash": "sha256:03f20aa9af51834a4675171a0b9e23cf81f58cb505c84a5af589259b6eb24d60",
+        "subject_hash": "sha256:cd0518264e0f4e371f48a24063e1f03b4c0761cb0e9a8d3d14fa3ff764010fb4",
+        "decision_id": "decision_recover-campaign",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "allow",
+        "reason": "allowed",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 5000,
+        "obligations": [
+          "product.verify_current_resource.v1"
+        ]
+      },
+      "verification": {
+        "wall_now": "2026-11-15T12:00:01Z",
+        "credential_expires_at": "2026-11-15T12:10:00Z",
+        "session_expires_at": "2026-11-15T12:10:00Z",
+        "monotonic_start_ms": 1000,
+        "monotonic_now_ms": 2000
+      },
+      "golden": {
+        "input_text": "{\"command\":{\"action\":\"recover-campaign\",\"campaign_id\":\"campaign_restored\",\"expected_campaign_revision\":\"5\",\"expected_store_incarnation\":\"incarnation_fresh\",\"operation_id\":\"operation_recover-campaign\",\"plan\":{\"classification\":\"standalone\",\"link_generation\":null,\"project_id\":null,\"recipient_proof_hash\":null,\"resource_refs\":[]}},\"profile\":\"youtube-project-input-v1\",\"reservation\":null}",
+        "input_hash": "sha256:03f20aa9af51834a4675171a0b9e23cf81f58cb505c84a5af589259b6eb24d60",
+        "native_state_text": "{\"action\":\"recover-campaign\",\"actor_intent_digest\":null,\"campaign_id\":\"campaign_restored\",\"campaign_revision\":\"5\",\"campaign_snapshot_hash\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"disclosure_revision\":null,\"intent_revision\":null,\"link_generation\":null,\"media_manifest_hash\":null,\"owner\":{\"brand_id\":\"brand_demo\",\"client_id\":\"client_demo\",\"installation_id\":\"installation_demo\",\"workspace_id\":\"workspace_demo\"},\"package_fingerprint\":null,\"project_id\":null,\"project_revision\":null,\"project_state\":null,\"projection_version\":null,\"recipient_proof_hash\":null,\"recovery_state\":\"quarantined\",\"reservation_id\":null,\"resource_ref\":null,\"resource_revision\":null,\"security_epoch\":null,\"store_incarnation\":\"incarnation_fresh\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"workspace_revision\":\"7\"}",
+        "native_state_hash": "sha256:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f",
+        "subject_text": "{\"actor\":{\"delegator_id\":null,\"grant_id\":null,\"kind\":\"human\",\"principal_id\":\"human_demo\"},\"application_id\":\"youtube_demo\",\"brand_id\":\"brand_demo\",\"capability\":\"youtube:project.recover.v1\",\"effect\":\"write\",\"input_hash\":\"sha256:03f20aa9af51834a4675171a0b9e23cf81f58cb505c84a5af589259b6eb24d60\",\"installation_id\":\"installation_demo\",\"native_state_hash\":\"sha256:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f\",\"profile\":\"youtube-project-subject-v1\",\"resource_version\":\"yp1:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f\",\"session_id\":\"session_demo\",\"target\":{\"id\":\"workspace_demo\",\"namespace\":\"youtube\",\"type\":\"workspace\"},\"tenant_id\":\"client_demo\",\"workspace_id\":\"workspace_demo\"}",
+        "subject_hash": "sha256:cd0518264e0f4e371f48a24063e1f03b4c0761cb0e9a8d3d14fa3ff764010fb4"
+      }
+    }
+  ],
+  "negatives": [
+    {
+      "id": "wrong-owner",
+      "base": "shared-resource-read",
+      "replace_path": [
+        "native_state",
+        "owner",
+        "brand_id"
+      ],
+      "value": "brand_other",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "workspace-target-substitution",
+      "base": "create-unicode",
+      "replace_path": [
+        "request",
+        "target",
+        "type"
+      ],
+      "value": "campaign",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "changed-input-hash",
+      "base": "create-unicode",
+      "replace_path": [
+        "request",
+        "input_hash"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "changed-subject-hash",
+      "base": "list",
+      "replace_path": [
+        "result",
+        "subject_hash"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "changed-native-hash",
+      "base": "shared-resource-read",
+      "replace_path": [
+        "request",
+        "facts",
+        "attributes",
+        "youtube:native_state_hash"
+      ],
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "wrong-incarnation",
+      "base": "shared-resource-read",
+      "replace_path": [
+        "native_state",
+        "store_incarnation"
+      ],
+      "value": "incarnation_old",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "expired-wall",
+      "base": "list",
+      "replace_path": [
+        "verification",
+        "wall_now"
+      ],
+      "value": "2026-11-15T12:00:05Z",
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "expired-monotonic",
+      "base": "list",
+      "replace_path": [
+        "verification",
+        "monotonic_now_ms"
+      ],
+      "value": 6000,
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "unsupported-obligation",
+      "base": "shared-resource-read",
+      "replace_path": [
+        "result",
+        "obligations"
+      ],
+      "value": [
+        "product.reserve_budget.v1"
+      ],
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "nonallow-no-authority",
+      "base": "list",
+      "replace_path": [
+        "result"
+      ],
+      "value": {
+        "schema_version": 1,
+        "application_id": "youtube_demo",
+        "installation_id": "installation_demo",
+        "tenant_id": "client_demo",
+        "workspace_id": "workspace_demo",
+        "request_id": "request_list",
+        "correlation_id": "correlation_list",
+        "target": {
+          "namespace": "youtube",
+          "type": "workspace",
+          "id": "workspace_demo"
+        },
+        "input_hash": "sha256:593ca34307c89dd9373ab783fbb37834295b06c08c1fc67b9cd00050e2a4693a",
+        "subject_hash": "sha256:c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd",
+        "decision_id": "decision_list",
+        "actor": {
+          "kind": "human",
+          "principal_id": "human_demo",
+          "delegator_id": null,
+          "grant_id": null
+        },
+        "outcome": "deny",
+        "reason": "access_denied",
+        "authority_versions": {
+          "principal": "1",
+          "tenant_membership": "2",
+          "installation": "3",
+          "workspace_membership": "4",
+          "policy": "5",
+          "configuration": "6",
+          "grant": null,
+          "parent_grants": {}
+        },
+        "checked_at": "2026-11-15T12:00:00Z",
+        "valid_until": "2026-11-15T12:00:05Z",
+        "valid_for_ms": 0,
+        "obligations": []
+      },
+      "expected": "binding_rejected"
+    },
+    {
+      "id": "unknown-action",
+      "base": "list",
+      "replace_path": [
+        "command",
+        "action"
+      ],
+      "value": "invented",
+      "expected": "schema_rejected"
+    },
+    {
+      "id": "unknown-attribute",
+      "base": "list",
+      "replace_path": [
+        "request",
+        "facts",
+        "attributes"
+      ],
+      "value": {
+        "youtube:profile": "youtube-project-v1",
+        "youtube:brand_id": "brand_demo",
+        "youtube:store_incarnation": "incarnation_fresh",
+        "youtube:project_id": null,
+        "youtube:project_revision": null,
+        "youtube:security_epoch": null,
+        "youtube:project_state": null,
+        "youtube:actor_intent_digest": null,
+        "youtube:intent_revision": null,
+        "youtube:campaign_id": null,
+        "youtube:campaign_revision": null,
+        "youtube:campaign_snapshot_hash": null,
+        "youtube:link_generation": null,
+        "youtube:resource_ref": null,
+        "youtube:resource_revision": null,
+        "youtube:package_fingerprint": null,
+        "youtube:projection_version": null,
+        "youtube:media_manifest_hash": null,
+        "youtube:disclosure_revision": null,
+        "youtube:recipient_proof_hash": null,
+        "youtube:reservation_id": null,
+        "youtube:recovery_state": "normal",
+        "youtube:native_state_hash": "sha256:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf",
+        "youtube:workspace_revision": "7",
+        "youtube:unknown": null
+      },
+      "expected": "schema_rejected"
+    },
+    {
+      "id": "counter-overflow",
+      "base": "shared-resource-read",
+      "replace_path": [
+        "native_state",
+        "project_revision"
+      ],
+      "value": "9007199254740992",
+      "expected": "schema_rejected"
+    }
+  ],
+  "parser_negatives": [
+    {
+      "id": "malformed-json",
+      "text": "{\"a\":",
+      "expected": "schema_rejected"
+    },
+    {
+      "id": "duplicate-key",
+      "text": "{\"outer\":{\"x\":1,\"x\":2}}",
+      "expected": "schema_rejected"
+    },
+    {
+      "id": "unknown-profile",
+      "text": "{\"profile\":\"unknown\"}",
+      "expected": "schema_rejected"
+    }
+  ],
+  "recovery_reference": {
+    "current_incarnation": "incarnation_fresh",
+    "campaign_id": "campaign_restored",
+    "classification": "standalone",
+    "overlays": [
+      {
+        "store_incarnation": "incarnation_fresh",
+        "campaign_id": "campaign_restored",
+        "classification": "standalone",
+        "status": "reconciled"
+      }
+    ]
+  },
+  "reference_negatives": [
+    {
+      "id": "missing-link-is-not-standalone",
+      "reference": {
+        "current_incarnation": "incarnation_fresh",
+        "campaign_id": "campaign_restored",
+        "classification": "standalone",
+        "overlays": []
+      },
+      "expected": "reference_fence_rejected"
+    },
+    {
+      "id": "old-incarnation-overlay",
+      "reference": {
+        "current_incarnation": "incarnation_fresh",
+        "campaign_id": "campaign_restored",
+        "classification": "standalone",
+        "overlays": [
+          {
+            "store_incarnation": "incarnation_old",
+            "campaign_id": "campaign_restored",
+            "classification": "standalone",
+            "status": "reconciled"
+          }
+        ]
+      },
+      "expected": "reference_fence_rejected"
+    },
+    {
+      "id": "partial-recovery-other-campaign",
+      "reference": {
+        "current_incarnation": "incarnation_fresh",
+        "campaign_id": "campaign_other",
+        "classification": "standalone",
+        "overlays": [
+          {
+            "store_incarnation": "incarnation_fresh",
+            "campaign_id": "campaign_restored",
+            "classification": "standalone",
+            "status": "reconciled"
+          }
+        ]
+      },
+      "expected": "reference_fence_rejected"
+    }
+  ]
+}

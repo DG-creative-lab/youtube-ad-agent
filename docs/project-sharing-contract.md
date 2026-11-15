@@ -4,11 +4,18 @@
 
 ## Status and first outcome
 
-This is a **proposed product/consumer contract**, not implemented project access, producer registration or permission to dispatch runtime work. Source baseline: merged PR #68, **23b0bc0f5afc6b016b46b646423272a8bf7e203b**. Human document acceptance does not complete #55. The portable demo and release packaging retain priority.
+This is a **proposed product/consumer contract**, not implemented project access, producer registration or permission to dispatch runtime work. Product rules were human-accepted in merged PR #69, **0e6e1e2f9847d18c789bd3f1d4a771973877b5e7**. The artifact-only A3a agreement uses source baseline **d409d7b96c3e2313f961af7fd78f0523ed1b4418** (merged PR #71). Human document acceptance does not complete #55. The portable demo and release packaging retain priority.
 
 A team member will open a brand-owned project, see permitted campaign links and explicitly shared package versions, and perform only currently authorized actions. Editors use the existing campaign commands. Reviewers can inspect a shared version without acquiring the author's conversation, model credential or execution authority.
 
 Projects are logical collections, not filesystem paths or agent sandboxes. Versioned briefs/guidance (#56), new creative artifacts (#57), learning promotion (#58), cross-brand projects, invitations/groups and conversation sharing are later work. Real issuer/Gateplane, hosting, provider qualification and customer-data activation retain their existing gates.
+
+The [project access integration agreement v1](project-access-integration.md) and
+[closed native profile](../campaign_agent/contracts/youtube-project-v1.json) freeze
+the proposed action/fact/hash/storage handoff and synthetic conformance vectors.
+They are artifact preparation for separate #36/Gateplane and #37 acceptance; no
+producer registration, storage acceptance or runtime capability is inferred.
+Recipient revoke semantics remain explicitly pending those owners.
 
 ## Current implementation and owned gaps
 
@@ -163,7 +170,7 @@ Runtime evidence uses real application/ASGI commands and temporary SQLite with i
 | Slice | Gate/owner | Reviewable result |
 | --- | --- | --- |
 | A3-contract (this PR) | Coordinator authors four docs; independent source review/document verification; human document merge. | Proposed product/native access/storage contract only. |
-| A3a access/persistence agreement | #36/Gateplane accepts registration, pre-campaign/list/recipient resolution, trusted facts/permit/revocation and request budget; #37 accepts migration/constraints. | Versioned accepted adapter/storage agreement and labelled conformance fixtures. Producer changes stay with its owner. |
+| A3a access/persistence agreement | [Proposed artifact v1](project-access-integration.md) prepares closed native profile and literal offline fixtures. #36/Gateplane must separately accept registration, pre-campaign/list/recipient/revoke/deadlines/budget; #37 must accept migration/constraints/admission/recovery. | Artifact/reference checks do not establish accepted adapter/storage agreement. No migration slot reserved; producer changes stay with its owner. |
 | A3b native commands | Accepted A3a; one owner for projects/next migration/access permits and legacy direct-entrypoint guards. | Atomic native commands/recovery with no linked-campaign bypass. Public project routes remain unavailable until enforcement composes. |
 | A3c staff/media/foreground | Accepted A3b; retain source owners and #38/#39 actor/receipt/provider semantics. | Bounded HTTP projections, private-byte joins and original relationship-bound runs. |
 | A3d UI | Accepted APIs/#52 projection; one frontend owner. | Navigation/explicit version sharing, personal account/chat context and composed browser evidence. |

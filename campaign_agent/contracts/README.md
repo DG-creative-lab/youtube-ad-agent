@@ -27,3 +27,17 @@ Runtime transport is an injected `context` / `decide` client facade, not a new
 public Gateplane protocol. Replace it with the accepted private client when #81
 is available, with a separately registered control credential and real verified
 subject evidence. No network transport or custom token verifier is bundled here.
+
+## Proposed project profile v1 (artifact only)
+
+`youtube-project-v1.json` is closed product profile data for workspace/project/
+resource targets, not a replacement wire schema or an enabled capability set.
+It retains the producer pin above. The [integration agreement](../../docs/project-access-integration.md)
+freezes the native action/fact/hash/storage handoff and pending #36/Gateplane/#37
+acceptance. [Literal synthetic vectors](../../examples/project-access-contract.v1.json)
+are checked by `python scripts/check_project_access_contract.py` and unittest
+discovery. The checker pins the profile and golden hashes, rejects incomplete
+sets/ambiguous input/remote schemas and reports only offline artifact/reference
+consistency. Neither a copied allow nor passing vectors grant runtime authority
+or prove real service/recipient/storage conformance. Profile/vector changes need a
+reviewed version and updated pins; do not silently regenerate golden expectations.
