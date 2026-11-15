@@ -1,6 +1,24 @@
 # Campaign agent build plan
 
-Updated 14 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
+Updated 15 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
+
+## Current factory decision checkpoint · 15 November 2026
+
+#52 capability catalogue/API and #53 capability UI are delivered; #54 foreground
+BYOK implementation is delivered with real activation retained by #70. PR #69
+accepted project product rules and PR #72 merged the A3a #55 artifact agreement;
+#55 runtime remains blocked on producer #79 registration, #81 native client,
+#83 composed service/recipient/revoke evidence and separate #36/#37 agreement.
+No project migration, endpoint or new authority follows from artifact acceptance.
+
+#59 now supplies the [proposed hosted topology and bounded migration contract](hosted-topology-decision.md):
+two Frankfurt Vercel Python ASGI origins, Neon Postgres and private Vercel Blob.
+Human acceptance selects this reference; it deploys nothing. Preserve local
+SQLite/private files and the zero-cost demo. #37's first native placement unit of
+work, complete reader/writer port, all-campaign restore fence and DB/blob drills
+precede composition. #40/#41/#42 own privacy, eligible plan/budget, ingress and
+measured deployed acceptance; #38 unattended execution remains deferred. The
+historical checkpoints below retain their original dates and evidence.
 
 ## Application deliverable
 
@@ -131,7 +149,7 @@ Build this slice in Python and SQLite with the existing browser screen. React an
 
 Start the viewer path as soon as the creative and destination IDs exist. Use original recordings if suitable ElevenLabs output is unavailable within the zero-cost and rights constraints. Label the source of the audio shown in the application.
 
-Before recording viewer events, bind the comparison example to the seeded client and brand on the backend. Use an opaque local visit ID and a stable event ID. Count one completion per visit and example version after two distinct takes finish and the viewer chooses one. Attribute activity to the example actually played and retain the original CTA version separately if the viewer switches contexts. [POC access checks](tenancy.md#when-to-build-each-layer)
+Before recording viewer events, bind the comparison example to the seeded client and brand on the backend. Use an opaque local visit ID and a stable event ID. Count one completion per visit and example version after two distinct takes finish and the viewer chooses one. Attribute activity to the example actually played and retain the original CTA version separately if the viewer switches contexts. [POC access checks](tenancy.md#compatibility-and-verification)
 
 ## First tool contracts
 

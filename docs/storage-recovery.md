@@ -21,6 +21,16 @@ Multiple replicas, network-mounted SQLite, object storage/CDN, large-file
 streaming and production workload/SLO sizing remain outside this verified
 topology. #37 stays open for the chosen hosted composition and its acceptance.
 
+15 November: [hosted topology decision v1](hosted-topology-decision.md) proposes
+Frankfurt Vercel Python ASGI + Neon Postgres + private Vercel Blob. The bounded
+first port uses `PlacementAgent.resume` and `CampaignDrafts.save(connection=...)`
+to preserve draft/step/reply atomicity with all related reads on the same store.
+It retains separate durable inference reservation/dispatch/receipt phases and
+uncertain accounting. Changing `DATABASE_URL` is insufficient; partial ports
+cannot become the hosted composition. Private media must be fully hash/size
+verified before bytes leave, then freshly authorized and streamed from bounded
+request scratch. The proposal adds no adapter, migration slot or runtime switch.
+
 ## Migration boundary
 
 `product_schema_migrations` records ordered names and checksums. Ownership schema
@@ -114,6 +124,18 @@ use the existing new-revision/export conflict.
 
 Before real activation, reconcile provider operations that may have occurred
 after backup. Restoring local receipts cannot roll back an external provider.
+
+The current recovery command does not implement the future project store
+incarnation/reconciliation overlay. [PR #69/#72 product and integration rules](project-access-integration.md#restore-admission-quarantine-and-run-fences)
+require a fresh incarnation and positive independent reconciliation for every
+restored private campaign **before** choosing standalone/project policy, even
+when the restored backup has no link/project rows or predates project schema.
+Fresh staff membership/source permission and absent links cannot reopen access.
+#37 must implement that admission fence before project runtime or the proposed
+hosted import/cutover; old pending work and uncertain receipts remain historical,
+never reactivation authority. The [future checkpoint/cutover/rollback contract](hosted-topology-decision.md#db-plus-blob-checkpoint-cutover-and-rollback)
+also binds one database snapshot to its exact immutable object inventory and
+requires compatible releases, quarantine and measured recovery drills.
 
 ## Offline evidence
 
