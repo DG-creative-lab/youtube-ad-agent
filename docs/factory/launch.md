@@ -21,7 +21,7 @@ the coordinator records dispatch and acceptance evidence against exact commits.
 | --- | --- | --- | --- |
 | F1 | [#49 Coordinator/verifier playbooks and contracts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/49) | Queued; publish and review this launch baseline first | First implementation builder, then independent reviewer/verifier. |
 | F2 | [#50 Locked planner build in offline CI](https://github.com/DG-creative-lab/youtube-ad-agent/issues/50) | Blocked on #49 | First complete factory delivery pilot. |
-| F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Blocked on #49/#50 | Define observable outcomes independently; reuse native tests. |
+| F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Frozen v1 corpus and offline implementation prepared; independent exact-commit acceptance and final CI required | [Portfolio command/report](../agent-behavior-evals.md); human merge remains required. |
 | A1a | [#52 Scoped capability catalogue/API](https://github.com/DG-creative-lab/youtube-ad-agent/issues/52) | Blocked on #49/#50 | Freeze metadata/API contract; preserve existing dispatch. |
 | A1b | [#53 Capability UI and factual replies](https://github.com/DG-creative-lab/youtube-ad-agent/issues/53) | Blocked on #52 | Consume accepted catalogue contract and integration commit. |
 | A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Contract #65 and implementation #66/#67/#68 merged; live adapters/qualification remain gated | [Foreground contract/checkpoints](../openrouter-session-contract.md); acceptance is offline/synthetic, not activation. |
@@ -219,6 +219,20 @@ at two attempts for the same contract before returning to specification. The
 coordinator integrates serially and refreshes affected review and verification
 on the resulting commit. Issue closure follows accepted evidence and merged work;
 issuing a handoff or opening a PR is not completion.
+
+### F3 #51 offline portfolio checkpoint · 15 November 2026
+
+F3-51 v1 starts from accepted dependency base
+`0e6e1e2f9847d18c789bd3f1d4a771973877b5e7`. An independent specification froze
+11 authored cases before implementation, with version/digest retained in the
+[portfolio guide](../agent-behavior-evals.md). The evaluator uses the actual typed
+dispatcher and temporary native SQLite, observes source-bound saves and denials,
+and reports exact authored-adapter counters and restart/supersession evidence.
+The existing unittest job discovers the portfolio and fail-closed reporting checks;
+application code, dependencies and CI remain unchanged. Synthetic execution makes
+no live-model, customer-guidance, external-billing or hosted-readiness claim.
+Independent review/verification must name the exact candidate commit and final CI;
+issue #51 closes only after accepted implementation is human-merged.
 
 
 ### A2c #54 frontend checkpoint · 15 November 2026
