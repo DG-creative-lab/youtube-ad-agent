@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE_PATH = ROOT / 'campaign_agent/contracts/youtube-project-v1.json'
 FIXTURE_PATH = ROOT / 'examples/project-access-contract.v1.json'
 WIRE_PATH = ROOT / 'campaign_agent/contracts/gateplane-v1.json'
-PROFILE_SHA256 = 'b2499b5c374aeea26c9c077478aaf0077701bea6d1e98f9126386070bb017360'
+PROFILE_SHA256 = '6662515e3ba653d113c4caf888277ba478150a5f15cf6f7cefdfb15dc20a9bb5'
 WIRE_BLOB = '9bfc7650019f5fe9cb852cbcba088557e01366fd'
 MAX_BYTES, MAX_INTEGER = 262144, 9007199254740991
 POSITIVES = {'create-unicode': 'create', 'create-decomposed': 'create', 'list': 'list',
@@ -50,11 +50,12 @@ GOLDEN_HASHES = {'create-unicode': {'input_hash': 'sha256:d47e195886fde497766dae
           'native_state_hash': 'sha256:2b661653d26ca9dd7360757caac6589651c513508c0d8427ada2203f3f547baf',
           'subject_hash': 'sha256:c7bb18c15e87748e07b9717dec42966d7502def105c00a067c34fd99332fb4bd'},
  'shared-resource-read': {'input_hash': 'sha256:e7e06b71a9f26ce29498e434e8c9b8b0531561363ceee914a6165677f9722ed5',
-                          'native_state_hash': 'sha256:b413fc3d3da137d5772fa69ae034b56201bd6c1f89d8f5df6e3c566473e7170c',
-                          'subject_hash': 'sha256:e0999122550db17ab72ccd634f1eac4b8d006fae1f4334c2568c6cc97187e16b'},
+                          'native_state_hash': 'sha256:394bb98a6b34a315a4be74ef8fd383aefe72f304eb8497d0d364832ee9ed0ea7',
+                          'subject_hash': 'sha256:92f5d23ea504455f8bc314cb6e2148d259bd360b0dcc4ee6dd72cfbe1cf66c4a'},
  'recover-campaign': {'input_hash': 'sha256:03f20aa9af51834a4675171a0b9e23cf81f58cb505c84a5af589259b6eb24d60',
                       'native_state_hash': 'sha256:ce50e181ad570af12a4057ce792bb7f349cd84d32770e1423656cbf7d7ffe42f',
                       'subject_hash': 'sha256:cd0518264e0f4e371f48a24063e1f03b4c0761cb0e9a8d3d14fa3ff764010fb4'}}
+NATIVE_PACKAGE_FINGERPRINT = 'd6f7083aa51b545378bd240346de14e30cb09e5c691505d9148c1ee6aa6ea5dc'
 COUNTERS = {'workspace_revision', 'project_revision', 'security_epoch', 'intent_revision',
             'campaign_revision', 'resource_revision', 'projection_version', 'disclosure_revision',
             'expected_revision', 'expected_campaign_revision'}
@@ -312,14 +313,28 @@ def rejected(call, expected):
 def check(profile_path=PROFILE_PATH, fixture_path=FIXTURE_PATH):
     profile, wire = profile_and_wire(profile_path)
     fixtures = load(fixture_path)
-    closed(fixtures, ['profile', 'version', 'status', 'positives', 'negatives', 'parser_negatives', 'recovery_reference', 'reference_negatives'])
+    closed(fixtures, ['profile', 'version', 'status', 'positives', 'negatives', 'parser_negatives', 'recovery_reference', 'reference_negatives', 'native_package_example'])
     require(type(fixtures['version']) is int and (fixtures['profile'], fixtures['version'], fixtures['status']) == ('youtube-project-vectors-v1', 1, 'authored_synthetic_no_runtime_authority'), 'unknown fixture profile', 'schema_rejected')
+    example = fixtures['native_package_example']
+    closed(example, ['package', 'native_text', 'fingerprint'])
+    require(example['package'] == {'campaign_id': 'campaign_demo', 'revision': 5, 'label': 'Café 東京'}
+            and isinstance(example['native_text'], str), 'fixed native package example differs', 'schema_rejected')
+    # Preserve the native historical identity, which predates this profile's
+    # literal-Unicode hash recipe. Never recanonicalize a native fingerprint.
+    from campaign_agent.handoff import package_fingerprint
+    native_bytes = example['native_text'].encode('utf-8')
+    require(json.dumps(example['package'], sort_keys=True, separators=(',', ':')).encode() == native_bytes
+            and hashlib.sha256(native_bytes).hexdigest() == example['fingerprint'] == NATIVE_PACKAGE_FINGERPRINT
+            and package_fingerprint(example['package']) == NATIVE_PACKAGE_FINGERPRINT,
+            'native package fingerprint algorithm/identity differs')
     positives = fixtures['positives']
     require(isinstance(positives, list) and len(positives) == len(POSITIVES)
             and {v['id'] for v in positives} == set(POSITIVES), 'complete positive set required', 'schema_rejected')
     vectors = {v['id']: v for v in positives}
     for v in positives:
         check_vector(v, profile, wire)
+    require(vectors['shared-resource-read']['native_state']['package_fingerprint'] == NATIVE_PACKAGE_FINGERPRINT,
+            'shared vector must retain exact native package fingerprint')
     require(vectors['create-unicode']['command']['name'] == 'Café 東京'
             and vectors['create-decomposed']['command']['name'] == 'Cafe\u0301 東京'
             and vectors['create-unicode']['golden']['input_hash'] != vectors['create-decomposed']['golden']['input_hash'], 'literal Unicode distinction lost')

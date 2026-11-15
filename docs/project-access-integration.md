@@ -71,8 +71,17 @@ resource versions to different actions over otherwise identical records.
 | Names | Original Unicode, 1..120 code points and <=480 UTF-8 bytes; Unicode category Cc controls rejected. No trim, case fold or NFC normalization. |
 | Canonical bytes | UTF-8 JSON, sorted keys, compact comma/colon separators, literal Unicode, finite values, no trailing newline; floats, duplicate keys, lone surrogates and out-of-range integers rejected. |
 | Large sets/manifests/proofs | Canonical digest references; no JSON serialized into scalar attributes and no private context or credentials. Intent/reference arrays are sorted and unique. |
+| package_fingerprint | Exact native bare 64-character lowercase hex from the unchanged `handoff.package_fingerprint` / stored approval/source identity. No prefix conversion, recomputation, normalization or project-profile canonicalizer. |
 | native_state_hash | `sha256:` followed by the lowercase SHA-256 of the closed canonical native state. |
 | resource_version | `yp1:` followed by that same 64-character digest (68 ASCII characters; wire bound 128). |
+
+Native package fingerprints retain their original algorithm: the existing helper
+hashes sorted compact JSON with ASCII-escaped Unicode (`ensure_ascii=True`).
+Forward the persisted exact bare fingerprint directly to project state, share/
+unshare commands, scalar facts and native source comparisons. Do not recalculate
+it with this profile's literal-Unicode canonicalizer or rewrite historical
+approvals/source bytes. New input/native-state/subject hashes canonically include
+that existing fingerprint string; they do not redefine the package identity.
 
 The fixed 24 scalar attribute names/types are derived from the native state and
 listed in the profile. `youtube:profile`, brand, incarnation, workspace revision,
@@ -267,7 +276,10 @@ python scripts/evaluate_agent_behavior.py
 
 The [authored fixtures](../examples/project-access-contract.v1.json) contain five
 positive vectors across create, list, shared resource read and recovery families.
-The two create commands differ only in composed/decomposed `Café 東京` spelling;
+An authored non-ASCII native package example fixes the existing helper's bare
+fingerprint against independently known ASCII-escaped bytes and digest; the shared
+resource vector carries that exact native identity. The two create commands differ
+only in composed/decomposed `Café 東京` spelling;
 canonicalization preserves their distinct bytes/digests. Literal canonical text
 and SHA-256 triplets are fixed in the fixture and pinned independently in the
 checker. Thirteen field-replacement negatives cover full owner, target, hashes,

@@ -1,5 +1,6 @@
 """Artifact boundaries only; these checks do not activate project permissions."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -89,6 +90,25 @@ class ProjectAccessArtifactTests(unittest.TestCase):
         for name in ['bad\nname', 'x' * 121]:
             with self.subTest(name=name), self.assertRaises(contract.ContractError):
                 contract.encoded_fields({'name': name})
+
+    def test_native_package_fingerprint_preserves_historical_non_ascii_identity(self):
+        from campaign_agent.handoff import package_fingerprint
+        example = contract.load(contract.FIXTURE_PATH)['native_package_example']
+        expected = 'd6f7083aa51b545378bd240346de14e30cb09e5c691505d9148c1ee6aa6ea5dc'
+        self.assertEqual(package_fingerprint(example['package']), expected)
+        self.assertEqual(example['fingerprint'], expected)
+        # The new profile canonicalizer must not replace the native helper's
+        # historical ASCII-escaped package fingerprint algorithm.
+        profile_digest = hashlib.sha256(contract.canonical(example['package'])).hexdigest()
+        self.assertEqual(profile_digest, '9d42a3cbab1968c9c2588ee560ca65f0c78f569d255683e0d467195a9125b6e7')
+        self.assertNotEqual(expected, profile_digest)
+        profile = contract.load(contract.PROFILE_PATH)
+        contract.validate(profile['native_state_schema']['properties']['package_fingerprint'], expected)
+        for action in ['resource.share', 'resource.unshare']:
+            schema = profile['command_schemas'][action]['properties']['package_fingerprint']
+            contract.validate(schema, expected)
+            with self.assertRaises(contract.ContractError):
+                contract.validate(schema, 'sha256:' + expected)
 
     def test_recovery_reference_is_positive_current_incarnation_before_policy_choice(self):
         ref = contract.load(contract.FIXTURE_PATH)['recovery_reference']

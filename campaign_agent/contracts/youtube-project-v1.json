@@ -439,7 +439,7 @@
         "anyOf": [
           {
             "type": "string",
-            "pattern": "^sha256:[0-9a-f]{64}$"
+            "pattern": "^[0-9a-f]{64}$"
           },
           {
             "type": "null"
@@ -1203,7 +1203,7 @@
         },
         "package_fingerprint": {
           "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "pattern": "^[0-9a-f]{64}$"
         },
         "projection_version": {
           "type": "string",
@@ -1287,7 +1287,7 @@
         },
         "package_fingerprint": {
           "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "pattern": "^[0-9a-f]{64}$"
         },
         "projection_version": {
           "type": "string",
@@ -1531,7 +1531,8 @@
     "native_state_hash": "sha256:<same native-state digest>",
     "input_hash": "sha256(canonical({profile:youtube-project-input-v1,command:<closed native command>,reservation:<explicit null or reservation>}))",
     "subject_hash": "sha256(canonical({profile:youtube-project-subject-v1,application_id,installation_id,tenant_id,brand_id,workspace_id,actor,session_id,target,capability,effect,input_hash,resource_version,native_state_hash}))",
-    "idempotency_key": "subject_hash without sha256:; operation_id remains native durable retry identity"
+    "idempotency_key": "subject_hash without sha256:; operation_id remains native durable retry identity",
+    "package_fingerprint": "Exact unchanged handoff.package_fingerprint native bare 64 lowercase hex; forward stored approval/source identity without prefix, recomputation, Unicode normalization or the project-profile canonicalizer. Existing helper uses sorted compact JSON with ensure_ascii=True."
   },
   "supported_obligations": [
     "product.verify_current_resource.v1"

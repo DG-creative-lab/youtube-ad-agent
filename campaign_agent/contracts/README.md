@@ -41,3 +41,9 @@ sets/ambiguous input/remote schemas and reports only offline artifact/reference
 consistency. Neither a copied allow nor passing vectors grant runtime authority
 or prove real service/recipient/storage conformance. Profile/vector changes need a
 reviewed version and updated pins; do not silently regenerate golden expectations.
+
+The project profile carries the exact native bare package fingerprint from
+`handoff.package_fingerprint` and historical approval/source records. Its existing
+ASCII-escaped Unicode algorithm is preserved; the new profile canonicalizer must
+not recompute or prefix that identity. A fixed non-ASCII native example checks
+this boundary offline.
