@@ -52,6 +52,15 @@ browser behavior or live model quality.
 
 Exercise affected UI behavior in the browser. Use the [design direction](design-direction.md) for visual and accessibility checks. Keep live model, provider and human usability evidence separate from the offline suite.
 
+The [offline agent behavior portfolio](agent-behavior-evals.md) executes the frozen
+authored corpus through native commands and temporary SQLite during normal
+unittest discovery. Run its reproducible JSON report separately with
+`.venv/bin/python scripts/evaluate_agent_behavior.py`; only a complete canonical
+pass exits zero. Subsets and invalid or changed corpora cannot report full
+portfolio acceptance. This checks command containment, not live model quality.
+Runner/tests/documentation-only changes use the unchanged planner CI job for the
+client invariant checks and build; they do not require browser verification.
+
 The hosted access checks use Starlette’s in-process ASGI client with synthetic identity/access dependencies and temporary SQLite. Dependency installation may need registry access; the tests make no external provider calls. The original portable-demo runtime still uses the standard library.
 
 Storage changes also run `tests/test_product_storage.py` against temporary native
