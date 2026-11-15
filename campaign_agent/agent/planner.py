@@ -6,6 +6,7 @@ import sqlite3
 
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
+from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.delivery import delivery_message
 from campaign_agent.delivery_next_test import recommendation_message
@@ -158,8 +159,7 @@ class PlacementAgent:
                     report = self.owner.delivery.saved_report(db, binding) if binding else None
                     context.update(delivery_next_test=True, delivery_report_id=report['id'] if report else None)
             SQLitePlannerStore(db).upsert_default(*expected[:3], model)
-            db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?,?)',
-                       (run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id))
+            SQLiteRunStore(db).create_run(run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id)
             SQLitePlannerStore(db).create_job(run_id, session_id, json.dumps(context))
         return run_id
 
@@ -307,7 +307,7 @@ class PlacementAgent:
             if status != 'running':
                 return False
             source = self._context(db, run_id)
-            if db.execute('SELECT 1 FROM agent_steps WHERE run_id=? AND position=?', (run_id, position)).fetchone():
+            if SQLiteRunStore(db).step_exists_row(run_id, position):
                 return True
             history = self._history(db, run_id)
             self.owner.require("youtube:agent.run")
@@ -324,8 +324,7 @@ class PlacementAgent:
                 db.execute('ROLLBACK TO planner_tool')
                 result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
             db.execute('RELEASE planner_tool')
-            db.execute('INSERT INTO agent_steps VALUES(?,?,?,?)',
-                       (run_id, position, receipt['tool'], json.dumps(result)))
+            SQLiteRunStore(db).append_step(run_id, position, receipt['tool'], json.dumps(result))
             if status == 'running' and position + 1 >= source['max_turns']:
                 result, status = {'revision': source['revision'], 'ambiguous': [],
                                   'message': 'The turn allowance is exhausted. Start a new request with more context.',
@@ -335,7 +334,7 @@ class PlacementAgent:
         return True
 
     def _finish(self, db, run_id, result, status):
-        db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
+        SQLiteRunStore(db).update_status(run_id, status)
         SQLitePlannerStore(db).update_outcome(run_id, json.dumps(result))
         self.conversations.finish(db, run_id, result, status)
 

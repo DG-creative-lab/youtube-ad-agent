@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore
+from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from scripts.campaign_drafts import PackageConflict
 from .replies import verified_result
 
@@ -108,7 +109,7 @@ class CampaignConversations:
         for previous, in db.execute('''SELECT j.run_id FROM planner_jobs j JOIN agent_runs r ON r.id=j.run_id
                                       WHERE j.session_id=? AND r.status='running' ''', (session_id,)).fetchall():
             outcome = {'revision': revision, 'ambiguous': [], 'message': 'This unfinished request was superseded by your follow-up.'}
-            db.execute("UPDATE agent_runs SET status='superseded' WHERE id=?", (previous,))
+            SQLiteRunStore(db).update_status(previous, 'superseded')
             db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(outcome), previous))
             self.finish(db, previous, outcome, 'superseded')
         memory = bounded_context(self.messages(db, session_id, limit=MAX_CONTEXT_MESSAGES))
