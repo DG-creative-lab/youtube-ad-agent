@@ -1,5 +1,19 @@
 # Source-code map
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+For exhaustive source classification and migration ownership use the
+[hexagonal module map](hexagonal-module-map.json), with the
+[boundary ADR](hexagonal-architecture.md) defining import/construction rules,
+phase-safe UOWs, compatibility and acceptance. It covers 60 Python + 17 web
+sources plus the retained legacy placement client and explicit support/resource
+exclusions. Proposed target paths supersede the illustrative growth tree below;
+they are not shipped modules. #83 is documentation only, #84 initial ratchet next
+after acceptance. #85–#88 and #37 native adoption remain pending; four borrowed
+SQLite stores do not establish full inversion. #80/PR #81 is already merged.
+
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
 ## Current checkout

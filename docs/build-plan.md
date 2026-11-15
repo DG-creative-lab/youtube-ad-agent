@@ -1,5 +1,24 @@
 # Campaign agent build plan
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+## Current architecture milestone · #83
+
+The [boundary ADR](hexagonal-architecture.md) and
+[machine-readable module map](hexagonal-module-map.json) are the current #83
+specification deliverable from merged #80 base
+`b885b732fda9cce6894e8b48fb4c8b7e86be9aab`. They add no runtime/checker.
+After exact-head independent acceptance and human merge, dispatch #84 initial
+ratchet before #85 core relocation; serialize #86 first complete UOW adoption,
+#87 external ports and #88 composition where files overlap. Finish all named
+#37 native graphs, reach #84 zero-debt strict mode, then independently accept
+#89. #37's later PostgreSQL/cloud/recovery implementation remains a separate
+milestone, avoiding circular closure dependencies. Existing native seams and
+historical evidence below retain their original attribution. Product/pilot,
+project/producer and foreground activation gates remain unchanged.
+
 Updated 15 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
 
 ## Current factory decision checkpoint · 15 November 2026
