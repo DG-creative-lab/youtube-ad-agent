@@ -328,9 +328,29 @@ lookups. Application code retains DDL/legacy recovery, catalog registration,
 authorization, revision policy, JSON serialization and approvals. The adapter
 passes raw text through and owns no connection or transaction lifecycle.
 
-Independent exact-head review/verification and unchanged CI remain required
-before human merge. Initializers, planner start/read and remaining records,
-conversations, access/permit reads, media and foreground sessions/ledger/receipts
-remain to be ported as their full same-store graph. Actual PostgreSQL, DB/blob
+PR #75 merged this seam at `c960bba9e609b6262c1615f54fa900f9fb39554a`
+(merge tree `d69f727c795820f7fd808dfe3d1f866fd6909a03`). Initializers, planner
+start/read and remaining records, conversations, access/permit reads, media and
+foreground sessions/ledger/receipts remain to be ported as their full same-store graph. Actual PostgreSQL, DB/blob
 recovery and all-campaign restore admission acceptance remain pending. #37 is
 open; this slice enables no hosted composition or new project authority.
+
+
+### E37a.3 native SQLite conversation store · 15 November 2026
+
+[#76](https://github.com/DG-creative-lab/youtube-ad-agent/issues/76) is the current
+bounded child of open #37, based on merged PR #75. `SQLiteConversationStore` now
+supplies `CampaignConversations` with fixed raw session/message/job-context reads,
+message appends, latest ID/count, session/settings writes and four-scope lists on
+the caller's exact connection. The application retains JSON, authority/private
+ownership, reply/context/model/title policy, DDL/legacy adoption and running-run
+supersession selection/status/outcome writes. Native tests exercise raw rows,
+limits/conflicts, borrowed transactions and failed follow-up insertion rollback
+with received evidence retained and explicit retry.
+
+Independent exact-head review/verification and current unchanged CI remain
+required before human merge. Planner/default/job/turn records, remaining constructor/
+legacy/supersession SQL, access/permit reads, media and foreground sessions/ledger/
+semantic receipts still need their complete same-store port before any PostgreSQL
+selection. PostgreSQL conformance, coherent DB/blob recovery and all-campaign
+restore admission remain separate acceptance; #37 stays open.

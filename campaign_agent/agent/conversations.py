@@ -3,6 +3,7 @@ from contextlib import closing
 import json
 import sqlite3
 
+from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore
 from scripts.campaign_drafts import PackageConflict
 from .replies import verified_result
 
@@ -56,8 +57,7 @@ class CampaignConversations:
 
     def session(self, db, session_id):
         self.planner.drafts.require("youtube:campaign.read")
-        row = db.execute('SELECT client_id,brand_id,actor_id,settings,campaign_id FROM planner_sessions WHERE id=?',
-                         (session_id,)).fetchone()
+        row = SQLiteConversationStore(db).session_row(session_id)
         if row is None:
             return None
         if row[:3] != (self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id) or row[4] != self.planner.drafts.campaign_id:
@@ -65,10 +65,7 @@ class CampaignConversations:
         return json.loads(row[3])
 
     def messages(self, db, session_id, limit=None):
-        rows = db.execute('''SELECT m.id,m.role,m.content,m.run_id,m.revision,m.catalog_id,m.kind,m.created_at,j.outcome
-                             FROM planner_messages m JOIN planner_jobs j ON j.run_id=m.run_id
-                             WHERE m.session_id=? ORDER BY m.id DESC LIMIT ?''',
-                          (session_id, limit or -1)).fetchall()
+        rows = SQLiteConversationStore(db).message_rows(session_id, limit or -1)
         keys = ('id', 'role', 'content', 'run_id', 'revision', 'catalog_id', 'kind', 'created_at')
         messages = []
         for row in reversed(rows):
@@ -90,12 +87,10 @@ class CampaignConversations:
         return messages
 
     def append(self, db, session_id, run_id, role, content, revision, catalog_id, kind):
-        db.execute('''INSERT INTO planner_messages(session_id,run_id,role,content,revision,catalog_id,kind)
-                      VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id,role) DO NOTHING''',
-                   (session_id, run_id, role, content, revision, catalog_id, kind))
+        SQLiteConversationStore(db).append_message(session_id, run_id, role, content, revision, catalog_id, kind)
 
     def finish(self, db, run_id, result, kind):
-        session_id, snapshot = db.execute('SELECT session_id,snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+        session_id, snapshot = SQLiteConversationStore(db).job_context_row(run_id)
         source = json.loads(snapshot)
         self.append(db, session_id, run_id, 'assistant', result.get('message') or 'Request completed.',
                     result.get('revision', source['revision']), source['catalog_id'], kind)
@@ -106,7 +101,7 @@ class CampaignConversations:
                 {key: value for key, value in saved_settings.items() if key != 'prompt_version'} !=
                 {key: value for key, value in settings.items() if key != 'prompt_version'}):
             raise PermissionError('Start a new conversation to change its model.')
-        latest = db.execute('SELECT COALESCE(MAX(id),0) FROM planner_messages WHERE session_id=?', (session_id,)).fetchone()[0]
+        latest = SQLiteConversationStore(db).latest_message_id(session_id)
         if after_message is not None and after_message != latest:
             raise PackageConflict('The conversation changed. Read the latest messages before sending your follow-up.')
         # A deliberate follow-up supersedes unfinished work. Late receipts cannot commit a tool result.
@@ -117,12 +112,11 @@ class CampaignConversations:
             db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(outcome), previous))
             self.finish(db, previous, outcome, 'superseded')
         memory = bounded_context(self.messages(db, session_id, limit=MAX_CONTEXT_MESSAGES))
-        count = db.execute('SELECT COUNT(*) FROM planner_messages WHERE session_id=?', (session_id,)).fetchone()[0]
-        db.execute('''INSERT INTO planner_sessions(id,client_id,brand_id,actor_id,settings,campaign_id)
-                      VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
-                   (session_id, self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id,
-                    json.dumps(settings), self.planner.drafts.campaign_id))
-        db.execute('UPDATE planner_sessions SET settings=? WHERE id=?', (json.dumps(settings), session_id))
+        store = SQLiteConversationStore(db)
+        count = store.message_count(session_id)
+        store.create_session(session_id, self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id,
+                             self.operator.id, json.dumps(settings), self.planner.drafts.campaign_id)
+        store.update_settings(session_id, json.dumps(settings))
         self.append(db, session_id, run_id, 'user', request, revision, catalog_id, 'request')
         return memory, count > len(memory)
 
@@ -141,9 +135,7 @@ class CampaignConversations:
         self.planner.drafts.require("youtube:campaign.read")
         with closing(sqlite3.connect(self.path)) as db:
             return [{'id': key, 'model': json.loads(settings)['model'], 'title': title[:80]}
-                    for key, settings, title in db.execute('''
-                        SELECT s.id,s.settings,(SELECT content FROM planner_messages WHERE session_id=s.id ORDER BY id LIMIT 1)
-                        FROM planner_sessions s WHERE client_id=? AND brand_id=? AND actor_id=? AND campaign_id=?
-                        ORDER BY (SELECT MAX(id) FROM planner_messages WHERE session_id=s.id) DESC''',
-                        (self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id, self.operator.id, self.planner.drafts.campaign_id))
+                    for key, settings, title in SQLiteConversationStore(db).list_rows(
+                        self.planner.drafts.scope.client_id, self.planner.drafts.scope.brand_id,
+                        self.operator.id, self.planner.drafts.campaign_id)
                     if title]

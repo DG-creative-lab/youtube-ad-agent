@@ -18,7 +18,8 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, schema/legacy recovery, catalog registration, draft validation, revision checks, JSON serialization, approval snapshots and immutable instruction versions. Native SQLite `write_unit()` owns standalone save and planner final-commit transactions; borrowed saves retain caller ownership. |
 | [campaign_agent/adapters/sqlite_drafts.py](../campaign_agent/adapters/sqlite_drafts.py) | Concrete native SQLite revision existence/latest/exact raw reads, raw appends and two fixed scoped catalog fact lookups, used by `CampaignDrafts` seed/read/placement/fresh-brief/instruction paths. Borrows the supplied connection without owning its lifecycle or authority. |
 | [campaign_agent/agent/planner.py](../campaign_agent/agent/planner.py) and [planning_models.py](../campaign_agent/agent/planning_models.py) | Main-model port, tool schemas, simulated profiles, OpenRouter tool calling, pinned conversations, request receipts and the bounded placement loop. `_commit_turn()` uses the native draft write unit for draft/step/outcome/reply atomicity; inference and receipt phases remain separate. |
-| [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Campaign-scoped persisted messages, transcript migration, history reads, follow-up ordering and supersession of unfinished conversation requests. |
+| [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Application-owned private scope/model checks, JSON, verified replies, context/limit/title policy, constructor transcript migration and follow-up supersession. Uses the borrowed conversation store for fixed record operations. |
+| [campaign_agent/adapters/sqlite_conversations.py](../campaign_agent/adapters/sqlite_conversations.py) | Concrete native SQLite raw session/message/job-context rows, message appends, latest ID/count, session/settings writes and four-scope lists for `CampaignConversations`. Preserves tuples/text and borrows the exact connection without lifecycle, JSON or authority. |
 | [campaign_agent/agent/replies.py](../campaign_agent/agent/replies.py) | Application-owned reply topics, clarification wording and safe projection of legacy unverified replies. |
 | [campaign_agent/agent/capabilities.py](../campaign_agent/agent/capabilities.py) | Immutable advisory capability metadata and current-access/configuration projection; the runtime and local/hosted staff GET route share its read command. [Version 1 API contract](agent-capabilities.md). It supplies no dispatch authority. |
 | [campaign_agent/provider_sessions.py](../campaign_agent/provider_sessions.py) and [ports/inference.py](../campaign_agent/ports/inference.py) | Foreground connection, reconnect, catalogue, qualified-selection and disconnect commands. Durable records contain scoped salted verifiers and immutable selections, never raw keys. Hosted/local HTTP share these commands. |
@@ -48,10 +49,11 @@ This map translates the [application architecture](architecture-plan.md) into co
 
 The browser calls the loopback API, which delegates to the owning application commands. Agent tools use those same commands. SQLite retains campaign revisions, approvals, reviews, corrections, viewer activity and agent progress. Live YouTube search results stay in the browser session.
 
-PR #74's write unit and the SQLite draft store are bounded #37 seams. Eager
-initializers, planner start/read and remaining records, conversations, access,
-media, foreground sessions/ledger/semantic receipts and permit reads still need
-their complete same-store port. Actual Postgres repositories and conformance,
+PR #74's write unit, PR #75's draft store and #76's conversation store are bounded
+#37 seams. Eager initializers, planner/default/job/turn records, conversation legacy
+backfill and running-run supersession SQL, access, media, foreground sessions/ledger/
+semantic receipts and permit reads still need their complete same-store port.
+Actual Postgres repositories and conformance,
 DB/blob recovery and all-campaign restore admission remain pending; no hosted
 composition or new project authority is enabled.
 
