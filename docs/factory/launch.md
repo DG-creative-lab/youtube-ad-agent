@@ -22,19 +22,19 @@ the coordinator records dispatch and acceptance evidence against exact commits.
 | F1 | [#49 Coordinator/verifier playbooks and contracts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/49) | Merged complete | Accepted development playbooks/contracts. |
 | F2 | [#50 Locked planner build in offline CI](https://github.com/DG-creative-lab/youtube-ad-agent/issues/50) | Merged complete | Unchanged locked planner CI remains required on each candidate. |
 | F3 | [#51 Offline agent behavior/attack portfolio](https://github.com/DG-creative-lab/youtube-ad-agent/issues/51) | Merged complete in PR #71, base d409d7b | [Accepted 11-case portfolio](../agent-behavior-evals.md); historical 298-test checkpoint is not current candidate evidence. |
-| A1a | [#52 Scoped capability catalogue/API](https://github.com/DG-creative-lab/youtube-ad-agent/issues/52) | Blocked on #49/#50 | Freeze metadata/API contract; preserve existing dispatch. |
-| A1b | [#53 Capability UI and factual replies](https://github.com/DG-creative-lab/youtube-ad-agent/issues/53) | Blocked on #52 | Consume accepted catalogue contract and integration commit. |
+| A1a | [#52 Scoped capability catalogue/API](https://github.com/DG-creative-lab/youtube-ad-agent/issues/52) | Delivered/merged | Accepted catalogue contract; advisory metadata grants no dispatch authority. |
+| A1b | [#53 Capability UI and factual replies](https://github.com/DG-creative-lab/youtube-ad-agent/issues/53) | Delivered/merged | Existing capability UI and factual application replies remain native. |
 | A2 | [#54 OpenRouter BYOK/model selection](https://github.com/DG-creative-lab/youtube-ad-agent/issues/54) | Implementation delivered/merged; activation tracked by #70 | [Foreground checkpoints](../openrouter-session-contract.md); #70 owns foreground transport/route/charging qualification; real identity remains #36 and deployment stays gated. |
-| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Open: PR #69 product rules accepted; current A3a artifact agreement proposed; runtime blocked | [Integration v1](../project-access-integration.md); #36/Gateplane and #37 separately own acceptance; no migration slot reserved. |
+| A3 | [#55 Projects and governed sharing](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55) | Open: PR #69 product rules and PR #72 A3a artifacts merged; runtime blocked | [Integration v1](../project-access-integration.md); producer #79/#81/#83 and #36/#37 acceptance remain; no migration slot reserved. |
 | A4 | [#56 Conversational briefs/versioned guidance](https://github.com/DG-creative-lab/youtube-ad-agent/issues/56) | Blocked on #52/#55 | Separate runtime skills/guidance from development-agent skills. |
 | A5 | [#57 Reviewed voice artifacts](https://github.com/DG-creative-lab/youtube-ad-agent/issues/57) | Blocked on provider/guidance/assets/budget contracts | Offline first; later live trial ceiling is £4 total. |
 | A6 | [#58 Reviewed project-learning proposals](https://github.com/DG-creative-lab/youtube-ad-agent/issues/58) | Blocked on #55/#56 | Preserve native evidence eligibility and uncertainty. |
-| E41a | [#59 Hosted topology/migration decision](https://github.com/DG-creative-lab/youtube-ad-agent/issues/59) | Queued for read-only design after accessible handoff | Child tracker of #41; no deployment or schema implementation. |
+| E41a | [#59 Hosted topology/migration decision](https://github.com/DG-creative-lab/youtube-ad-agent/issues/59) | Concrete proposed v1 decision for independent review/human acceptance | [Selected topology and first port](../hosted-topology-decision.md); child of #41; no deployment or schema implementation. |
 
-Do not dispatch all backlog issues as simultaneous builders. After the launch
-baseline, run #49 and the read-only #59 decision independently. Run #50 after #49;
-then #52, with #53 following its accepted contract. Research on later dependencies
-can run as read-only bounded work without authorizing implementation.
+Do not dispatch all backlog issues as simultaneous builders. Earlier #49/#50 and
+#52/#53 delivery order is historical. The current #59 documentation contract is
+dependency-ready; #55 runtime is blocked. Research on later dependencies can run
+as bounded read-only work without authorizing implementation.
 
 ## Baseline and dispatch gate
 
@@ -260,7 +260,7 @@ Task A3-contract-55 v2 owns four documentation files on `feature/project-sharing
 The coordinator authors; independent roles return separate exact-head evidence. Human document merge does not dispatch project capabilities, schemas, APIs, UI, providers or hosting. #36/producer and #37 must accept the concrete access/migration agreement before A3b runtime dispatch. Preserve portable demo release priority and keep #55 open through implementation acceptance.
 
 
-### Current accepted baseline and A3a artifact gate · 15 November 2026
+### Historical A3a artifact preparation · 15 November 2026
 
 Factory #47 and portfolio #51 are merged complete; PR #71 provides source base
 `d409d7b96c3e2313f961af7fd78f0523ed1b4418`. #54 implementation is delivered;
@@ -284,3 +284,22 @@ native adapter, recipient/revoke, deadline and request-budget agreement and #37
 storage/all-campaign restore/admission agreement. No producer/storage acceptance
 or runtime dispatch follows from human product-document acceptance. Refresh main,
 next migration ownership and a complete new task contract before A3b.
+
+### Current #59 decision and retained implementation gates · 15 November 2026
+
+PR #72 merged at `51e4b6dfd9a90794230572ae96f0eff27656cdb0`, tree
+`39eaa19fd823840b2f212371154604fff5046d05`, accepting the A3a artifacts only.
+#55 remains open for producer #79 registration, #81 native client, #83 composed
+service/recipient/revoke evidence and separate #36/#37 acceptance. The accepted
+all-campaign missing-link restore fence remains mandatory. #52/#53 and #54
+implementation are delivered; #70 retains real foreground qualification.
+
+E41a-59 v1 owns exactly five documentation paths on
+`feature/hosted-topology-decision` from that accepted base. The
+[proposed decision](../hosted-topology-decision.md) selects Frankfurt Vercel Python
+ASGI staff/viewer projects, Neon Postgres and private Vercel Blob, names the first
+native transaction caller and defines integrity-before-bytes, coherent recovery,
+preview isolation and measurable owner gates. Earlier #59 research is not accepted
+runtime. Human merge accepts the design proposal only, with independent exact-head
+review/document verification and unchanged CI; no service/account/cost/deploy,
+database/browser/performance or provider acceptance is claimed.

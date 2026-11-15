@@ -1,5 +1,13 @@
 # Campaign agent architecture
 
+15 November hosted decision: [proposed topology and first migration contract](hosted-topology-decision.md)
+selects separate Vercel Python ASGI staff/viewer origins in Frankfurt, Neon
+Postgres and private Vercel Blob as the future reference. This is a design
+handoff, not an activated composition. One-worker SQLite/private files and
+zero-cost offline inference remain supported. #37 owns the native transaction
+port and DB/blob recovery; #36/#55 current-authority and all-campaign restore
+gates, #40–#42 pilot acceptance and #70 real foreground qualification remain.
+
 14 November provider preparation: [OpenRouter foreground session contract v1](openrouter-session-contract.md)
 specifies browser-memory credentials, scoped selection, admission and recovery for
 issue #54. It is a proposed implementation handoff; current runtime behavior is
