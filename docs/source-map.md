@@ -4,15 +4,19 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-For exhaustive source classification and migration ownership use the
-[hexagonal module map](hexagonal-module-map.json), with the
-[boundary ADR](hexagonal-architecture.md) defining import/construction rules,
-phase-safe UOWs, compatibility and acceptance. It covers 60 Python + 17 web
-sources plus the retained legacy placement client and explicit support/resource
-exclusions. Proposed target paths supersede the illustrative growth tree below;
-they are not shipped modules. #83 is documentation only, #84 initial ratchet next
-after acceptance. #85–#88 and #37 native adoption remain pending; four borrowed
-SQLite stores do not establish full inversion. #80/PR #81 is already merged.
+Use the accepted [boundary ADR](hexagonal-architecture.md) for semantic rules
+and historical [module map](hexagonal-module-map.json) for the #83 source/target
+snapshot (60Python/17web plus retained legacy client). Proposed targets remain
+plans until implemented. PR #90 accepted #83 at
+`7c139e19bfbf0d829b31f8d09320e912e5561f6b`.
+
+Initial #84's [live policy](architecture-policy.json) classifies 61 Python files.
+The [baseline](architecture-baseline.json) contains 88 reviewed module-edge
+exceptions with owner and whole-import retirement milestone. The user-approved
+smaller checker handles static import directions/cycles; indirect runtime effects
+remain responsibilities of behavior tests and review. Web inventory stays in the
+historical map. After human merge, #85 relocation is next; inversion and strict
+import-debt zero remain pending.
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
@@ -20,6 +24,9 @@ This map translates the [application architecture](architecture-plan.md) into co
 
 | Path | What it owns today |
 | --- | --- |
+| [scripts/check_architecture.py](../scripts/check_architecture.py) | Small stdlib Python import/role/cycle checker with selected-base shrink guard and strict mode; never executes scanned code. |
+| [tests/test_architecture_boundaries.py](../tests/test_architecture_boundaries.py) | Authored temporary CLI/Git fixtures for import boundaries, cycle failures and baseline shrinking; developer/test support only. |
+| [architecture-policy.json](architecture-policy.json), [architecture-baseline.json](architecture-baseline.json) | Schema-1 exact Python classifications and readable module-edge exceptions; detailed ownership/line diagnostics, no baseline updater. |
 | [placement-review/index.html](../placement-review/index.html) | Placement search and review UI, unsaved selections, draft conflict reconciliation and per-context export. |
 | [scripts/placement_review.py](../scripts/placement_review.py) | The local server and developer CLI. It also contains YouTube search, sample search, catalog classification and the optional Jev call. |
 | [campaign_agent/hosted.py](../campaign_agent/hosted.py), [staff.py](../campaign_agent/staff.py) and [adapters/gateplane.py](../campaign_agent/adapters/gateplane.py) | ASGI staff/public entrypoints, server-side session binding and current request-bound wire decisions over existing commands. |
