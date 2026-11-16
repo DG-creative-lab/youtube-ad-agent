@@ -1,5 +1,29 @@
 # Engineering workflow
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+## Architecture migration gates
+
+The [boundary ADR](hexagonal-architecture.md) and
+[module map](hexagonal-module-map.json) are authoritative for #83's proposed
+classification, import/construction, typed UOW/error, authority/receipt and
+compatibility rules. No checker or inversion ships in this documentation slice.
+After acceptance, land #84 initial owner-linked shrinking baseline before #85;
+shared #86/#87/#88 and #37 native migrations integrate serially. #84 strict mode
+must reach zero violations before #89, independently of later #37 PG/cloud work.
+
+For each migration, re-inventory new/moved sources and shrink exact exemptions;
+compare the ADR's reproducible scratch-native timing/connection/query baseline,
+retain current permit/preimage and receipt phase semantics, and run affected
+commands plus the existing offline/canonical checks. #84 owns seeded checker
+tests and CI wiring in its future task. #83 validates JSON/inventory/import data,
+DAG/links/whitespace/protected blobs, native baseline and canonical 11-case CLI;
+independent verifier runs fresh exact-head full offline suite. Current unchanged
+Python/planner CI and separate architecture/security review remain required.
+Documentation/data-only #83 needs no browser; changed future UI paths do.
+
 Keep repo-wide rules in [AGENTS.md](../AGENTS.md) and load the relevant skill for the task. The repo skills carry the project-specific procedure. General design, testing and review skills can supplement them when the work calls for deeper analysis.
 
 | Task | Playbook |

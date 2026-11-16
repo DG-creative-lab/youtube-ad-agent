@@ -1,5 +1,20 @@
 # Campaign agent architecture
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+15 November architecture boundary: [ADR](hexagonal-architecture.md) and
+[complete module map](hexagonal-module-map.json) define the proposed core, typed
+ports, UOW/receipt/authority semantics and exact migration ownership. #83 delivers
+this specification, not runtime inversion or a checker. #84 initial enforcement
+is next after acceptance; #85 → #86 → #87 → #88 integrate shared files serially,
+then #37's complete native graph → #84 strict zero → #89 conformance. The later
+#37 PG/cloud milestone does not block #89. Existing four native record stores
+remain concrete seams; all residual graphs in the ADR still need adoption.
+Earlier status/evidence below is historical at its stated date; current source
+base is merged #80/PR #81 at `b885b732fda9cce6894e8b48fb4c8b7e86be9aab`.
+
 15 November hosted decision: [proposed topology and first migration contract](hosted-topology-decision.md)
 selects separate Vercel Python ASGI staff/viewer origins in Frankfurt, Neon
 Postgres and private Vercel Blob as the future reference. This is a design

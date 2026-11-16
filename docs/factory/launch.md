@@ -1,5 +1,31 @@
 # Factory launch board and worker handoffs
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+## H83 boundary specification · current architecture stage
+
+From human-merged #80/PR #81 base
+`b885b732fda9cce6894e8b48fb4c8b7e86be9aab`, H83-boundary-v1 owns exactly
+eight documentation/instruction/data paths. The [ADR](../hexagonal-architecture.md)
+and [complete source map](../hexagonal-module-map.json) specify the target and
+77-source inventory; no runtime/checker/port adoption is implemented here.
+Independent exact-head architecture/security review and native/data verification,
+current unchanged Python/planner CI and human merge gate acceptance. Prior test
+counts and launch narratives below remain historical evidence.
+
+Next dispatch is #84 initial ratchet after #83 acceptance. Then #85 relocation,
+#86 first whole UOW graph, #87 external inversion and #88 explicit composition
+integrate serially over shared owners. #37 alone finishes the listed residual
+native graph and owns migration allocation. #84 zero-debt strict → #89 final
+conformance waits for that native milestone, never all of #37's PG/cloud scope.
+Freeze a fresh bounded contract/exclusive files for each; do not continue
+concrete-only extraction or dispatch overlapping constructors/migrations.
+The authored scratch baseline and explicit receipt/authority rules are review
+gates, not live-provider/hosted performance acceptance. #36/#37/#40–#42/#55/#70
+retain their separate agreements and activation gates. Only a human merges.
+
 15 November 2026 · Coordinator: the originating factory-planning conversation.
 
 [Architecture and implementation map](../agent-platform-factory-plan.md) ·
