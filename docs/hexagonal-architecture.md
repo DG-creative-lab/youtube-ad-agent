@@ -1,8 +1,14 @@
 # ADR: core boundaries and staged inversion
 
-15 November 2026 · H83-boundary-v1 · [#83](https://github.com/DG-creative-lab/youtube-ad-agent/issues/83), first child of [#82](https://github.com/DG-creative-lab/youtube-ad-agent/issues/82).
+16 November 2026 · H83-boundary-v2 · [#83](https://github.com/DG-creative-lab/youtube-ad-agent/issues/83), first child of [#82](https://github.com/DG-creative-lab/youtube-ad-agent/issues/82).
 
-Status: proposed specification for exact-head independent review and human merge.
+Status: one proposed v2 initial candidate for exact-head independent review and
+human merge, with zero repairs. The v1 candidate at
+`89096e69811b46e7be8db70d3ca5d101d66ff059` is rejected working material, not
+accepted architecture. V1 executions retain their original attribution. The
+independently assessed v2 contract changes the scope/default use model below;
+any material finding returns to the coordinator without another repair or
+automatic contract reset.
 This change delivers documentation and inventory data only. It implements no
 architecture checker, port adoption, runtime relocation, backend selection or
 provider activation. #84 initial ratchet is next after acceptance; #82, #84–#89
@@ -58,6 +64,43 @@ Protocol/tool definitions, simulation and OpenRouter. `hosted.py` and
 `scripts/placement_review.py` mix inbound transport with composition and native
 reads; the latter also owns YouTube/Jev/search/report glue. Existing behavior
 checks do not establish dependency inversion.
+
+## Scope values and their use obligations
+
+The finite `scope_use_contract` in the [module map](hexagonal-module-map.json)
+separates immutable value **definitions** from what a caller does with them.
+It covers every import/use of `LOCAL_BRAND`, `LOCAL_OPERATOR` and `LOCAL_CONTEXT`
+across all 60 Python sources: nine import rows, eleven bindings, 25 Name loads
+and three definition stores. Its 24 grouped records retain every occurrence's
+column and multiplicity, including two member loads on the same source line.
+Each record links the actual import/definition and source line to its behavior,
+kind, targets, owner, milestone and disposition. The five native `test_id`
+callers are recorded separately as use evidence. No runtime checker is shipped.
+
+| Actual use | Disposition and obligation |
+| --- | --- |
+| `access.py` definitions at24/25/41 | Immutable authored values/type composition can relocate to `domain/scope.py` at85. A seeded operator value is not authenticated hosted identity or evidence of a current external grant. Its definition does not retire defaults or native adoption elsewhere. |
+| `adapters/local_access.py`14/24 | Exact scope/actor comparisons remain in the explicit local-only adapter. Importing the relocated immutable value is an inward85 dependency, not an implicit identity choice in application construction. Keep this existing adapter role and first86 actor/native/permit fences; its separately planned87 path relocation supplies no hosted fallback or excuse to delay those checks. |
+| `agent/run.py`66/69 and98 | Omitted operator/context selects local identity at66/69: bootstrap `local_defaults`/`services` owns final88 retirement. The guarded legacy `agent_runs` campaign backfill at98 is a real native write owned by first86 `sqlite_planner_startup`/workspace admission. The entire import row therefore ends at88, with definition85 and mandatory startup86 recorded separately. The first86 factory passes explicit operator/context now; it does not wait for88. |
+| `scripts/campaign_drafts.py`84/89/90/98/101/112 | Catalogue backfill84 and guarded native admission112 stay86. Constructor operator/context defaults89/90, implicit local campaign guard98 and authored-example fallback101 belong to explicit bootstrap88. Preserve that existing split and the complete-row88 deadline. |
+| `measurement.py`56/59 | `LOCAL_BRAND` binds the sibling-owner ambiguity SELECT and conditional legacy visit UPDATE in constructor schema adoption. Both are mandatory first86 viewer startup participants, not pure constant imports. Preserve the exact local owner filter, ambiguity guard and quarantine of other unbound visits. Ordinary event/completion/aggregation records remain separate37 work; later record adoption cannot defer this initializer. |
+| `instruction_tests.py`82 | The compatibility default belongs to deterministic scope-inclusive ID hashing, not identity admission, access or a core constructor default. Retain exact hash/default compatibility as a pure85 calculation. All current native callers at88/116/240/462 and `learning.py`73 explicitly pass `self.drafts.scope`; their native checks resolve owner/current authority separately. A computed ID grants no read/write/permission. Future84 must reject a new native caller relying on omitted scope, while retaining exact historical IDs and standalone calculation compatibility. |
+| `creatives.py`47/55 | Static authored Example tags are deterministic data using the declared brand value. The scope/type reference can move85; separate EXAMPLES fixture/default composition stays88. This does not select a caller's identity, grant access or replace the server's brand/catalog checks. |
+| `workspaces.py`20/54 | Explicit reserved-demo native binding20 stays86 admission. Comparing an explicitly supplied context against reserved demo IDs54 is deterministic validation, not choosing a default or granting membership. The shared import also has `require_access`'s existing87 contract obligation; its complete-row deadline remains87 without deferring native admission86. |
+| `scripts/evaluate_agent_behavior.py`254 | The foreign-authored actor/brand fixture remains support-only, checked at89. It confers no production identity/default; core cannot import the evaluator. |
+
+For #84, definition/import spelling and use-obligation identities are distinct.
+Moving a value to a pure package, changing its import alias, or splitting a file
+cannot discharge its original constructor-default, admission or backfill debt.
+Preserve the register's obligation identity and actual semantic role when a
+migration moves source witnesses. Re-enumerate the entire finite closure,
+including stores, defaults and same-line member occurrences; new/aliased/member
+uses require explicit review, not an automatic pure-symbol exemption. Complete
+row retirement is the maximum of recorded use and existing non-scope obligations.
+No original86 pilot participant may be postponed merely because that row also
+contains a later88 default. Current supported runtime behavior, scope checks,
+native adoption criteria, hashes and public compatibility remain unchanged by
+this specification.
 
 ## Decision and directions
 
