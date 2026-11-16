@@ -41,7 +41,13 @@ operations still require checking. It is not a module exemption. Both literal
 `__import__('json')` in local access
 and `__import__('math')` in OpenRouter metadata are included. Web imports are
 source-observed specifiers/resources; API literals are observations, not a complete
-JavaScript execution graph. No runtime checker is provided by this table.
+JavaScript execution graph. No runtime checker is provided by this table. A mixed import retires only when
+its last actual symbol obligation is complete: use the latest whole-row milestone
+and the union of real callee/port/adapter/factory destinations. Earlier pure
+members can move at #85, and mandatory pilot members at #86, without retiring
+later file/default/cache/native obligations. Imported classes and namespace
+members must be traced through construction and calls; renaming a caller does
+not discharge those obligations.
 
 Current concrete seams are useful but incomplete. `SQLiteDraftStore`,
 `SQLiteConversationStore`, `SQLitePlannerStore` and `SQLiteRunStore` borrow native
@@ -320,7 +326,16 @@ removal applies only to nonpilot code. Neither moving an import nor splitting a
 file resets the original debt identity. For example assets' filesystem imports
 retire under #37, hosted transport/Path/CSRF helpers under #88, and catalogue
 cache/lock mechanics under #87; deterministic `urllib.parse` stays allowed at
-its business-validation caller without being labelled network debt. CI may shrink
+its business-validation caller without being labelled network debt. The complete-row
+rule covers `PlacementDiscovery` plus `SimulatedClassifier` (service/native and
+injection #86, simulated adapter already #87-foundation); `CatalogueCache` with
+pure catalogue helpers (#87-external cache port/memory adapter); and recorded
+runtime `CampaignDrafts`/error/default-path and file-loader/rule imports (latest
+#88 defaults/composition, with #85 pure and #86 campaign work earlier). Media
+helpers such as `example_content`/`sample_package` and `read_blob` retain their
+transitive file obligations. Advisory capabilities' connection cleanup and
+`verify` use the typed ownership/read-UOW and native SQLite boundaries; placing
+those effects in application/domain folders alone is not retirement. CI may shrink
 it, never silently grow/regenerate
 it; new violations fail. This ADR's observed import rows do not approve violations
 or implement that checker. Strict mode requires **zero** remaining violations.
