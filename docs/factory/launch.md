@@ -4,27 +4,27 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## H83 boundary specification · current architecture stage
+## Initial #84 ratchet · current architecture stage
 
-From human-merged #80/PR #81 base
-`b885b732fda9cce6894e8b48fb4c8b7e86be9aab`, H83-boundary-v1 owns exactly
-eight documentation/instruction/data paths. The [ADR](../hexagonal-architecture.md)
-and [complete source map](../hexagonal-module-map.json) specify the target and
-77-source inventory; no runtime/checker/port adoption is implemented here.
-Independent exact-head architecture/security review and native/data verification,
-current unchanged Python/planner CI and human merge gate acceptance. Prior test
-counts and launch narratives below remain historical evidence.
+#83 H83-boundary-v2 was human-merged in PR #90 at
+`7c139e19bfbf0d829b31f8d09320e912e5561f6b`; its [ADR](../hexagonal-architecture.md)
+and [module map](../hexagonal-module-map.json) are accepted. Initial #84 owns
+exactly12 checker/test/policy/baseline/workflow/status-document paths. It adds the
+offline shrinking gate, not runtime inversion. The user-approved H84-simple-v5 scope replaces the unpublished broad analyzer
+with static Python import directions/cycles and 88 reviewed module-edge exceptions.
+Runtime-effect inference, occurrence identities and compact origin profiles are
+out of scope; original migration/use obligations remain review/test criteria.
+Exact-head full/canonical/native verification, current Python/unchanged Planner
+CI, protected bytes and human merge remain acceptance gates.
 
-Next dispatch is #84 initial ratchet after #83 acceptance. Then #85 relocation,
-#86 first whole UOW graph, #87 external inversion and #88 explicit composition
-integrate serially over shared owners. #37 alone finishes the listed residual
-native graph and owns migration allocation. #84 zero-debt strict → #89 final
-conformance waits for that native milestone, never all of #37's PG/cloud scope.
-Freeze a fresh bounded contract/exclusive files for each; do not continue
-concrete-only extraction or dispatch overlapping constructors/migrations.
-The authored scratch baseline and explicit receipt/authority rules are review
-gates, not live-provider/hosted performance acceptance. #36/#37/#40–#42/#55/#70
-retain their separate agreements and activation gates. Only a human merges.
+After this initial delivery is human-merged, #85 relocation is next. #87 foundation
+contracts/offline injection precede #86 whole pilot-native UOW and minimal factory;
+#87 external adoption and #88 composition follow serially. The initial baseline
+is deliberately nonempty: #84 remains open until #37's named native graph is done
+and #84 strict mode reaches zero before #89. Later #37 PostgreSQL/cloud scope
+is separate. No overlapping constructor/migration dispatch or schema allocation
+follows from a checker PR. #36/#37/#40–#42/#55/#70 keep their separate agreements.
+Prior counts and launch narratives below remain historical evidence.
 
 15 November 2026 · Coordinator: the originating factory-planning conversation.
 

@@ -2,17 +2,15 @@
 
 16 November 2026 · H83-boundary-v2 · [#83](https://github.com/DG-creative-lab/youtube-ad-agent/issues/83), first child of [#82](https://github.com/DG-creative-lab/youtube-ad-agent/issues/82).
 
-Status: one proposed v2 initial candidate for exact-head independent review and
-human merge, with zero repairs. The v1 candidate at
-`89096e69811b46e7be8db70d3ca5d101d66ff059` is rejected working material, not
-accepted architecture. V1 executions retain their original attribution. The
-independently assessed v2 contract changes the scope/default use model below;
-any material finding returns to the coordinator without another repair or
-automatic contract reset.
-This change delivers documentation and inventory data only. It implements no
-architecture checker, port adoption, runtime relocation, backend selection or
-provider activation. #84 initial ratchet is next after acceptance; #82, #84–#89
-and #37 remain open for their implementation/conformance milestones.
+Status: H83-boundary-v2 accepted by human merge of PR #90 at
+`7c139e19bfbf0d829b31f8d09320e912e5561f6b`, tree
+`c8daca04e0dbbda84c8905ca4dd3940ae031974a`. The rejected v1 candidate remains
+historical working material, not architecture authority. Initial #84 now supplies
+an offline checker/live policy/finite shrinking baseline; it changes no runtime
+behavior or composition. Independent final-head source/seed/CLI/native/full-suite
+and current CI acceptance plus human merge apply. #84 remains open for strict
+zero debt after the named native graph; #82/#85–#89/#37 runtime milestones remain
+pending. Next after initial #84 human merge is #85 relocation.
 
 ## Observed base and inventory
 
@@ -84,12 +82,12 @@ callers are recorded separately as use evidence. No runtime checker is shipped.
 | `agent/run.py`66/69 and98 | Omitted operator/context selects local identity at66/69: bootstrap `local_defaults`/`services` owns final88 retirement. The guarded legacy `agent_runs` campaign backfill at98 is a real native write owned by first86 `sqlite_planner_startup`/workspace admission. The entire import row therefore ends at88, with definition85 and mandatory startup86 recorded separately. The first86 factory passes explicit operator/context now; it does not wait for88. |
 | `scripts/campaign_drafts.py`84/89/90/98/101/112 | Catalogue backfill84 and guarded native admission112 stay86. Constructor operator/context defaults89/90, implicit local campaign guard98 and authored-example fallback101 belong to explicit bootstrap88. Preserve that existing split and the complete-row88 deadline. |
 | `measurement.py`56/59 | `LOCAL_BRAND` binds the sibling-owner ambiguity SELECT and conditional legacy visit UPDATE in constructor schema adoption. Both are mandatory first86 viewer startup participants, not pure constant imports. Preserve the exact local owner filter, ambiguity guard and quarantine of other unbound visits. Ordinary event/completion/aggregation records remain separate37 work; later record adoption cannot defer this initializer. |
-| `instruction_tests.py`82 | The compatibility default belongs to deterministic scope-inclusive ID hashing, not identity admission, access or a core constructor default. Retain exact hash/default compatibility as a pure85 calculation. All current native callers at88/116/240/462 and `learning.py`73 explicitly pass `self.drafts.scope`; their native checks resolve owner/current authority separately. A computed ID grants no read/write/permission. Future84 must reject a new native caller relying on omitted scope, while retaining exact historical IDs and standalone calculation compatibility. |
+| `instruction_tests.py`82 | The compatibility default belongs to deterministic scope-inclusive ID hashing, not identity admission, access or a core constructor default. Retain exact hash/default compatibility as a pure85 calculation. All current native callers at88/116/240/462 and `learning.py`73 explicitly pass `self.drafts.scope`; their native checks resolve owner/current authority separately. A computed ID grants no read/write/permission. Migration tests and review must reject new native callers relying on omitted scope, while retaining exact historical IDs and standalone calculation compatibility. The simplified import checker does not analyze those calls. |
 | `creatives.py`47/55 | Static authored Example tags are deterministic data using the declared brand value. The scope/type reference can move85; separate EXAMPLES fixture/default composition stays88. This does not select a caller's identity, grant access or replace the server's brand/catalog checks. |
-| `workspaces.py`20/54 | Explicit reserved-demo native binding20 stays86 admission. Comparing an explicitly supplied context against reserved demo IDs54 is deterministic validation, not choosing a default or granting membership. The shared import also has `require_access`'s existing87 contract obligation; its complete-row deadline remains87 without deferring native admission86. |
+| `workspaces.py`20/54 | Explicit reserved-demo native binding20 stays86 admission. Comparing an explicitly supplied context against reserved demo IDs54 is deterministic validation, not choosing a default or granting membership. The shared import also has `require_access`'s existing87 contract obligation; its complete-row deadline remains88 without deferring native admission86. |
 | `scripts/evaluate_agent_behavior.py`254 | The foreign-authored actor/brand fixture remains support-only, checked at89. It confers no production identity/default; core cannot import the evaluator. |
 
-For #84, definition/import spelling and use-obligation identities are distinct.
+For migration review, definition/import spelling and use-obligation identities are distinct; the simplified #84 guard tracks module edges only.
 Moving a value to a pure package, changing its import alias, or splitting a file
 cannot discharge its original constructor-default, admission or backfill debt.
 Preserve the register's obligation identity and actual semantic role when a
@@ -131,7 +129,7 @@ URL nor require a parser port; they must not move business validation outward
 solely because their package is named urllib.
 Application/ports may use stdlib in the same effect-free way for their inputs and
 orchestration. No third-party pure dependency exception is currently approved;
-#84 requires an exact package/module/use justification before adding one.
+Adding one requires explicit package/module/use review; the import guard also needs a separately reviewed rule change.
 `sqlite3`, SQL, driver exceptions, Starlette/http.server/Uvicorn,
 `urllib.request`/`urllib.error`/requests network mechanics,
 Google SDKs, provider adapters, Path/file operations, environment key lookup and
@@ -152,8 +150,8 @@ Approved proposed construction roots are `bootstrap/services.py`, `planner.py`, 
 `demo_media.py`, `provider_profiles.py`. Roots may share assembly helpers but
 never import inbound modules that import them back; a thin launcher calls the
 factory then hands constructed services to the inbound adapter. No unrestricted
-`bootstrap/**` exemption: #84 checks this exact path inventory, construction and
-acyclic calls. Test composition is explicit and cannot become a production fallback.
+`bootstrap/**` exemption: #84 checks exact path roles and static import cycles;
+construction and call behavior remain migration test/review obligations. Test composition is explicit and cannot become a production fallback.
 
 Allowed calls follow imports: a client/inbound command invokes application policy;
 application calls a core-owned port; a supplied adapter implements that port;
@@ -279,7 +277,7 @@ The manifest's milestone graph is authoritative and acyclic:
 | 87-external | 86-first-uow | #87 serially inverts shared model/access/effect construction/errors and supplies the minimal services factory for real callers; #88 later consolidates the other roots. #36/#39/#70 retain activation. |
 | 88-composition | 87-external | #88 makes local/hosted/CLI/tool startup explicit and transport thin; all accepted initial graphs remain supported. |
 | 37-native-graph | 88-composition | #37 finishes every residual native graph listed below using accepted contracts. No PG required. |
-| 84-strict | 37-native-graph | #84 baseline empty; all classified core has zero outward violations. |
+| 84-strict | 37-native-graph | #84 import baseline empty; broader runtime conformance still requires #89. |
 | 89-conformance | 84-strict | Independent whole-application native/substitution/security/performance acceptance; #82 may then close after human merge. |
 | 37-pg-cloud | 37-native-graph | Separate #37 PostgreSQL/private media/DB+blob recovery acceptance; no edge from here back to #89. |
 
@@ -345,43 +343,22 @@ reusing the accepted minimal root. No backend switch is allowed for partial grap
 | Provider sessions/catalogue/ledger/foreground | Verifier/operation/immutable selection records, cache/bounded metadata, quota aggregate/dispatch/cost settlement and all semantic receipt writers/permit/step reads. #87 contracts/transport, #37 one native store graph, #88 wiring. Preserve original settings/request/actor identity, unresolved reserves across reconnect/day/restore and receipt-before-domain phases. |
 | HTTP/local/CLI/tools/UI | #88 extracts local/hosted parser, origin/session/CSRF/credential transport and dependency factories; every path delegates to same application commands. Scripts/evaluation drivers remain classified support consumers; client URLs/payloads/draft controls unchanged. |
 
-#84 must independently enumerate executable source, verify every new/moved module
-and exact approved roots, resolve absolute/relative/aliased imports, from-package
-submodules, reexports and imports in functions/TYPE_CHECKING. Follow import/symbol
-origins through compatibility modules; moving an edge cannot erase its debt.
-Literal dynamic imports are checked like static imports; computed imports, exec,
-reflection or plugin registration capable of escaping the graph must fail closed
-unless a finite reviewed resolution is explicitly classified. Test driver/data
-exclusions cannot hide application code or imported generated source. Check cycles
-at module and core component levels, native handles/SQL and concrete construction
-as well as names. Seed forbidden import/SQL/handle/alias/reexport/dynamic/cycle and
-unclassified-file tests. The initial baseline is a reviewed finite set of exact
-source/symbol/edge/rule identities with owner/removal milestone, not an auto-generated
-count or broad folder exemption. Import facts are now explicitly classified:
-retained deterministic operations and existing inward contracts are not debt;
-technology effects already in an outbound adapter or explicit support driver stay
-restricted to that role. Actual mixed-core effects have a concrete final owner,
-removal milestone and target paths. #85's reusable-code placement does not retire
-Path/file/OS/native lifecycle/clock/random/cache/network effects scheduled for
-#86, #87, #88 or #37. A target may exist before its last consumer adopts it.
-`partial_adoption` names #86's mandatory participants while later final import
-removal applies only to nonpilot code. Neither moving an import nor splitting a
-file resets the original debt identity. For example assets' filesystem imports
-retire under #37, hosted transport/Path/CSRF helpers under #88, and catalogue
-cache/lock mechanics under #87; deterministic `urllib.parse` stays allowed at
-its business-validation caller without being labelled network debt. The complete-row
-rule covers `PlacementDiscovery` plus `SimulatedClassifier` (service/native and
-injection #86, simulated adapter already #87-foundation); `CatalogueCache` with
-pure catalogue helpers (#87-external cache port/memory adapter); and recorded
-runtime `CampaignDrafts`/error/default-path and file-loader/rule imports (latest
-#88 defaults/composition, with #85 pure and #86 campaign work earlier). Media
-helpers such as `example_content`/`sample_package` and `read_blob` retain their
-transitive file obligations. Advisory capabilities' connection cleanup and
-`verify` use the typed ownership/read-UOW and native SQLite boundaries; placing
-those effects in application/domain folders alone is not retirement. CI may shrink
-it, never silently grow/regenerate
-it; new violations fail. This ADR's observed import rows do not approve violations
-or implement that checker. Strict mode requires **zero** remaining violations.
+On 16 November 2026 the user explicitly simplified initial #84 to a static Python
+module dependency guard. This supersedes the earlier requirement that #84 infer
+use-level/native/callback/effect behavior and preserve individual occurrence
+identities. The accepted application boundaries, first-pilot #86 adoption,
+whole-row migration owners and transaction/security requirements above remain.
+Their deeper obligations are verified through migration tests and source review,
+not claimed as properties established by the smaller checker.
+
+#84 inventories Python source, checks all-depth static imports, allowed layer
+directions and module cycles, and admits only a finite reviewed set of existing
+module-edge exceptions. CI compares exceptions against the current accepted
+integration base: new edges or altered surviving metadata fail; removed edges
+must remove their exceptions. Strict mode requires zero admitted import edges.
+Import aliases or repeated symbols on an admitted edge share that explicit waiver;
+there is no statement identity or runtime-effect proof. Web source remains in the
+historical inventory and existing Planner checks.
 
 #89 also substitutes a contract-conforming authored adapter solely via composition
 for representative real use cases without editing application source. That adapter
@@ -391,6 +368,41 @@ HTTP/browser journeys, full offline suite/canonical portfolio, exact-head review
 and unchanged Python/planner CI. No browser check is applicable to #83's data/docs.
 #37 PG/cloud, #36 identity/issuer, #38 jobs, #39 effects, #40 privacy, #41 operations,
 #42 pilot, #55 projects and #70 foreground qualification keep their existing gates.
+
+## Initial #84 enforcement and limits
+
+The user-approved H84-simple-v5 scope replaces the unpublished broad analyzer.
+The [live policy](architecture-policy.json) assigns exact roles to 61 Python files;
+[88 readable module-edge exceptions](architecture-baseline.json) record source,
+target, rule, owner and whole-import retirement milestone. No call-level finding
+catalogue or compact occurrence schema is needed. The historical module map,
+including its 60 Python/17 web/legacy-client snapshot, stays byte-identical.
+
+The stdlib tool parses source without importing or executing it. Static imports at
+all depths, relative/package-child imports, local package initializers, local
+stdlib-name shadows and cycles are checked. Import permissions and role directions
+are defined explicitly in the checker; support/developer tools are consumers,
+bootstrap permissions apply only to classified paths, and inert markers cannot
+hide executable code. Existing module-edge waivers intentionally cover repeated
+imports and additional symbols from the same module.
+
+This tool does not establish SQL/native-handle safety, indirect or dynamic effects,
+reflection safety, callback behavior, cache lifetime, scope/authority correctness,
+web dependency correctness or complete migration adoption. Existing behavior tests,
+review and later conformance checks retain those responsibilities. Passing strict
+means zero import exceptions, not proof of all architectural requirements.
+
+The first seed is bound to exact accepted #83 with protected source/modes unchanged,
+clean committed files and a single candidate commit parented directly to that base.
+CI may check its two-parent synthetic merge only when parents are exactly base and
+that candidate and its full tree is identical to the candidate. Other initial-seed
+histories are rejected. Later comparisons require an
+externally selected current accepted base. A stale historical base does not prove
+cumulative shrinkage. Candidate-controlled CI is subject to workflow/branch review;
+it cannot guarantee its own enforcement. Detailed commands, role directions,
+shrinking rules and limitations are in the [engineering workflow](engineering-workflow.md#architecture-migration-gates).
+No automatic baseline updater, application change or #84 closure is introduced.
+The original native comparison recipe below is unchanged.
 
 ## Authored native baseline and provisional comparison gate
 

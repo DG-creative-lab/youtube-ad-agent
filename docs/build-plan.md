@@ -4,20 +4,25 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #83
+## Current architecture milestone · initial #84
 
-The [boundary ADR](hexagonal-architecture.md) and
-[machine-readable module map](hexagonal-module-map.json) are the current #83
-specification deliverable from merged #80 base
-`b885b732fda9cce6894e8b48fb4c8b7e86be9aab`. They add no runtime/checker.
-After exact-head independent acceptance and human merge, dispatch #84 initial
-ratchet before #85 core relocation; serialize #86 first complete UOW adoption,
-#87 external ports and #88 composition where files overlap. Finish all named
-#37 native graphs, reach #84 zero-debt strict mode, then independently accept
-#89. #37's later PostgreSQL/cloud/recovery implementation remains a separate
-milestone, avoiding circular closure dependencies. Existing native seams and
-historical evidence below retain their original attribution. Product/pilot,
-project/producer and foreground activation gates remain unchanged.
+#83's [ADR](hexagonal-architecture.md) and immutable historical
+[module map](hexagonal-module-map.json) were accepted in PR #90 at
+`7c139e19bfbf0d829b31f8d09320e912e5561f6b`. Initial #84 supplies the tested offline
+ratchet, [live policy](architecture-policy.json) and owner-linked shrinking
+[baseline](architecture-baseline.json). This initial delivery keeps #84 open:
+normal mode admits 88 reviewed Python module-edge exceptions; strict rejects them all.
+The user simplified the unpublished analyzer on 16 November: use/SQL/callback/effect
+analysis and occurrence identities are outside this checker. Tests and review retain
+those responsibilities; import strict zero is only one conformance gate.
+
+After exact-head independent acceptance, current Python/Planner CI and human
+merge, #85 core relocation is next. #87 foundation contracts/offline injection
+precede #86's complete pilot-native graph and minimal factory; #87 external
+adoption and #88 composition follow serially. #37 completes the residual named
+native graph, then #84 strict zero and #89 conformance finish architecture
+acceptance. Later PostgreSQL/cloud/recovery remains separate. Existing authority,
+receipt, project/producer and foreground-activation gates are unchanged.
 
 Updated 15 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
 

@@ -4,16 +4,17 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-15 November architecture boundary: [ADR](hexagonal-architecture.md) and
-[complete module map](hexagonal-module-map.json) define the proposed core, typed
-ports, UOW/receipt/authority semantics and exact migration ownership. #83 delivers
-this specification, not runtime inversion or a checker. #84 initial enforcement
-is next after acceptance; #85 → #86 → #87 → #88 integrate shared files serially,
-then #37's complete native graph → #84 strict zero → #89 conformance. The later
-#37 PG/cloud milestone does not block #89. Existing four native record stores
-remain concrete seams; all residual graphs in the ADR still need adoption.
-Earlier status/evidence below is historical at its stated date; current source
-base is merged #80/PR #81 at `b885b732fda9cce6894e8b48fb4c8b7e86be9aab`.
+16 November architecture boundary: #83 is accepted in PR #90 at
+`7c139e19bfbf0d829b31f8d09320e912e5561f6b`. The [ADR](hexagonal-architecture.md)
+and historical [module map](hexagonal-module-map.json) retain the accepted
+semantics and migration owners. Initial #84 adds an offline Python import ratchet,
+[live policy](architecture-policy.json) and finite [baseline](architecture-baseline.json),
+under the user-approved smaller scope (module directions/cycles, no runtime-effect inference).
+Without runtime inversion, after human merge, #85 is next. #87 foundation → #86
+complete local pilot UOW → #87 external adoption → #88 composition integrate
+serially. Finish the named #37 native graph → #84 strict zero → #89 conformance;
+later #37 PostgreSQL/cloud work does not block #89. The historical map covers60
+Python/17web/legacy1; live policy adds the exact developer checker for61Python.
 
 15 November hosted decision: [proposed topology and first migration contract](hosted-topology-decision.md)
 selects separate Vercel Python ASGI staff/viewer origins in Frankfurt, Neon
