@@ -131,7 +131,7 @@ class PlacementPlannerTests(unittest.TestCase):
             def __bool__(self):
                 return False
 
-        with patch('campaign_agent.agent.planner.OpenRouterPlanner', side_effect=AssertionError('Default model constructed')), \
+        with patch('campaign_agent.agent.run.OpenRouterPlanner', side_effect=AssertionError('Default model constructed')), \
              patch('campaign_agent.agent.planner.SimulatedPlanner', side_effect=AssertionError('Default simulator constructed')), \
              patch('campaign_agent.agent.planner.SimulatedClassifier', side_effect=AssertionError('Default classifier constructed')):
             runtime = self.reopen(planner_model=AuthoredPlanner(), planner_simulator=OfflinePlanner(),

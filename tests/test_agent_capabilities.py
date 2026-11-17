@@ -206,7 +206,7 @@ class CapabilityHttpTests(unittest.TestCase):
 
     def test_hosted_catalogue_is_scoped_generic_and_has_no_domain_or_provider_effect(self):
         before = dump(self.path)
-        with patch('campaign_agent.agent.planning_models.OpenRouterPlanner.next_turn',
+        with patch('campaign_agent.adapters.openrouter_reviews.OpenRouterPlanner.next_turn',
                    side_effect=AssertionError('Unexpected inference')) as inference:
             response = self.buyer.get('/api/agent/capabilities')
             other = self.other.get('/api/agent/capabilities')

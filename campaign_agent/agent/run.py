@@ -21,13 +21,14 @@ from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
 from campaign_agent.learning import InstructionFindings
-from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews
+from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.delivery import CampaignDelivery
 from .planner import PlacementAgent
+from .planning_models import planner_request_body
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
@@ -106,7 +107,13 @@ class AgentRuntime:
             SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
                                         legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
 
-        self.planner = PlacementAgent(self, main_models, transport=main_transport, main_model=planner_model,
+        def make_main_model():
+            if planner_model is not None:
+                return planner_model
+            return OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body)
+
+        self.planner = PlacementAgent(self, make_main_model=make_main_model,
+                                      foreground_compatible=planner_model is None,
                                       simulator=planner_simulator, classifier=placement_classifier, initialize=initialize)
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.

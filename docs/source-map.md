@@ -23,6 +23,16 @@ application JSON/error/hash compatibility is preserved. CampaignDrafts now resid
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
+## OpenRouter request policy · #87
+
+`agent/planning_models.py` owns the planner's prompt, tool declarations and context
+projection. `agent/run.py` passes that request builder to the OpenRouter adapter,
+which encodes the final request, fits the byte limit and parses response receipts.
+`domain/instruction_requests.py` owns the evidence projection, prompts and assessment
+schema for structured instruction requests. Existing commands still decide whether
+to admit inference and accept its results. Default provider assembly, catalogue
+state and remaining access wiring are separate #87 and #88 work.
+
 ## Campaign setup and reporting contracts · #87
 
 `ports/campaign_effects.py` owns the setup provider, delivery binding and reporting
@@ -189,7 +199,7 @@ Move existing files in small changes when a feature needs their boundary. Preser
 
 The composer calls `/api/agent/placements`. `AgentRuntime` delegates these runs to `PlacementAgent`, retaining the shared `agent_runs`, `agent_steps` and campaign command path. `planner_sessions` pins model and actor scope; `planner_jobs` pins the request, initial revision, catalog, routing policy and turn allowance. `planner_turns` reserves inference before dispatch and retains its receipt before executing the requested tool. Specialist results are reserved and cached on the job. Tool saves use a savepoint inside the transaction that records the result, preventing a recoverable tool error from committing a partial draft. The model chooses tools from observations rather than a fixed step index.
 
-`CampaignConversations` owns `planner_messages` and the campaign binding on `planner_sessions`. User messages commit with run creation; terminal replies commit with the tool result and draft change. `/api/agent/conversations` lists the current operator's campaign conversations, and `/api/agent/conversation?id=…` returns a scoped transcript. The React `CampaignChat` displays stored text and revision references. The client sends `after_message` to reject stale views; replaying the same run ID returns the original run. Starting a new follow-up supersedes unfinished requests before taking its dialogue snapshot. The provider receives up to 20 recent messages within an 8 KB serialized budget. `OpenRouterPlanner.prepare_turn` measures the complete wire JSON through the shared transport encoder and trims oldest dialogue/tool pairs to fit 32 KB before reservation; the current request is never clipped. Omission flags and retained message IDs accompany inference provenance. Full transcripts and tool results remain persisted. `replies.py` generates all accepted conversational wording from topics/reasons and current application facts; old unconstrained messages are retained as audit data and projected as needing verification. Progress still uses one HTTP step per request.
+`CampaignConversations` owns `planner_messages` and the campaign binding on `planner_sessions`. User messages commit with run creation; terminal replies commit with the tool result and draft change. `/api/agent/conversations` lists the current operator's campaign conversations, and `/api/agent/conversation?id=…` returns a scoped transcript. The React `CampaignChat` displays stored text and revision references. The client sends `after_message` to reject stale views; replaying the same run ID returns the original run. Starting a new follow-up supersedes unfinished requests before taking its dialogue snapshot. The provider receives up to 20 recent messages within an 8 KB serialized budget. `openrouter_reviews.OpenRouterPlanner.prepare_turn` measures the complete wire JSON through the shared transport encoder and trims oldest dialogue/tool pairs to fit 32 KB before reservation; the current request is never clipped. Omission flags and retained message IDs accompany inference provenance. Full transcripts and tool results remain persisted. `replies.py` generates all accepted conversational wording from topics/reasons and current application facts; old unconstrained messages are retained as audit data and projected as needing verification. Progress still uses one HTTP step per request.
 
 `PlacementDiscovery` owns registered catalogs and source checks. Discovery adds new video IDs while preserving existing saved placements when catalogs overlap. `CampaignDrafts` validates every selected fact and independent `source_reference` against scoped catalog entries before saving. The reference travels with the approved snapshot and export. Older catalog entries recover it from their immutable catalog snapshot; previous draft and approval snapshots stay unchanged. Existing experiment commands remain callable, and the planner passes its inherited main-model choice to their narrower inference adapters. The current specialist is simulated; live Jev and other budgeted routes remain separate integration work.
 

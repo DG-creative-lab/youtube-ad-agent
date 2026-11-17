@@ -9,6 +9,7 @@ from time import time_ns
 
 from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
+from .domain.instructions import ASSESSMENT_REASONS as ASSESSMENT_REASONS
 from .domain.instruction_policy import ADDITIONAL_BATCH_SIZE, POLICY_V1, SAMPLE_CAP, recommend_instruction_action
 from .measurement import ViewerNotFound
 from campaign_agent.domain.errors import PackageConflict
@@ -24,11 +25,6 @@ EVIDENCE_PROTOCOL = {
 ASSIGNMENT_SOURCES = ("participant", "rehearsal", "fixture")
 # Bump when saved assessments need reverification under a changed acceptance contract.
 ASSESSMENT_VERSION = "evidence-reasons-v2"
-ASSESSMENT_REASONS = {
-    "insufficient_visits": ("insufficient_evidence", "Insufficient evidence"),
-    "continue_observation": ("keep_collecting", "Keep collecting evidence"),
-    "revised_not_higher": ("prepare_another_test", "Consider another instruction test"),
-}
 LEGACY_REASON_CODES = {kind: code for code, (kind, _title) in ASSESSMENT_REASONS.items()}
 
 
