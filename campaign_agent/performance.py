@@ -7,14 +7,13 @@ from pathlib import Path
 import re
 import sqlite3
 
+from .domain.performance import LOW_COMPLETION_RATE, MIN_LOCAL_ARRIVALS, apply_correction
 from .handoff import package_fingerprint
 from campaign_agent.domain.errors import PackageConflict
 
 
 DELIVERY_FIXTURE = Path(__file__).resolve().parents[1] / "examples/tts-performance/delivery.json"
 MIN_SAMPLE_IMPRESSIONS = 100
-MIN_LOCAL_ARRIVALS = 3
-LOW_COMPLETION_RATE = 0.5
 VIEWER_ATTRIBUTION = "campaign_comparison_content_v1"
 CORRECTION_CHOICES = {
     "keep_takes": "Keep both takes unchanged",
@@ -34,20 +33,6 @@ def comparison_identity(group, *, keep_takes=False):
     return package_fingerprint({"comparison_version": group["comparison_version"], "content": content})
 
 
-def apply_correction(proposal, correction):
-    if correction["kind"] == "keep_takes":
-        changes = {
-            "title": "Test clearer comparison instructions",
-            "change": "Compare revised instructions with the current wording in a local test.",
-            "hold_constant": "Keep the ad, both takes and the choice controls the same.",
-        }
-    else:
-        changes = {
-            "title": "Test how the ad sets up the comparison",
-            "change": "Compare a clearer invitation to try both takes with the current ad invitation.",
-            "hold_constant": "Keep the placements, takes and viewer experience the same.",
-        }
-    return {**proposal, **changes, "correction": correction}
 
 
 class SampleCampaignReporting:

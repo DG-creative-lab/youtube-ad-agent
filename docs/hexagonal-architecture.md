@@ -372,7 +372,7 @@ and unchanged Python/planner CI. No browser check is applicable to #83's data/do
 ## Initial #84 enforcement and limits
 
 The user-approved H84-simple-v5 scope replaces the unpublished broad analyzer.
-The [live policy](architecture-policy.json) assigns exact roles to 69 Python files after the CampaignDrafts move;
+The [live policy](architecture-policy.json) assigns exact roles to 71 Python files after the CampaignDrafts move;
 [86 readable module-edge exceptions](architecture-baseline.json) record source,
 target, rule, owner and whole-import retirement milestone. No call-level finding
 catalogue or compact occurrence schema is needed. The historical module map,
