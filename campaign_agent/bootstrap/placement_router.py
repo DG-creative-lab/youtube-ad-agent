@@ -75,7 +75,7 @@ class PlacementRouter:
         if path == "/api/agent/run":
             return (set(data) == {"run_id"} and isinstance(data["run_id"], str)
                     and re.fullmatch(r"[0-9a-f]{32}", data["run_id"]) is not None
-                    and self._eligible(data["run_id"]))
+                    and self.owns(data["run_id"]) and self._eligible(data["run_id"]))
         required = {"request", "model", "session_id", "run_id", "catalog_id"}
         if (path != "/api/agent/placements" or not required <= data.keys()
                 or data.keys() - required - {"after_message", "draft_permission"}
