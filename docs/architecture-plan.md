@@ -9,8 +9,7 @@ human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pul
 at `9fabf358b30cbc794455c1da78440043593d1497`. Its static Python import guard
 remains small. The first #85 slice moves scope values, shared errors and video-ID
 syntax to pure domain owners with inward compatibility reexports. Live policy
-covers 67 Python modules and the baseline remains at 86 after the initial 88 → 86 shrink. CampaignDrafts
-orchestration and other #85 policies remain separate work. The historical
+covers 69 Python modules and the baseline remains at 86 after the initial 88 → 86 shrink. CampaignDrafts now lives in the application module while its native storage remains uninverted. Other #85 policies remain separate work. The historical
 [ADR/map](hexagonal-architecture.md) migration/authority obligations are unchanged.
 #87 foundation → #86 complete local pilot UOW → #87 external → #88 composition
 integrate serially, then the named #37 native graph → #84 import strict zero → #89

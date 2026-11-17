@@ -35,7 +35,7 @@ from campaign_agent.performance import CampaignPerformance
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, parse_command
 from campaign_agent.ports.inference import ProviderError
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
+from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
 from campaign_agent.domain.errors import PackageConflict, StaleDraft
 from scripts.google_ads_sandbox import google_transport
 

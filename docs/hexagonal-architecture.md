@@ -56,7 +56,7 @@ not discharge those obligations.
 Current concrete seams are useful but incomplete. `SQLiteDraftStore`,
 `SQLiteConversationStore`, `SQLitePlannerStore` and `SQLiteRunStore` borrow native
 connections; callers still import them, issue SQL, initialize schema and decide
-lifecycle. `CampaignDrafts` remains reusable application code in `scripts/`.
+lifecycle. At the observed base, `CampaignDrafts` was reusable application code in `scripts/`; it now has an application owner with an inward compatibility wrapper.
 `AgentRuntime` constructs concrete collaborators. `planning_models.py` mixes a
 Protocol/tool definitions, simulation and OpenRouter. `hosted.py` and
 `scripts/placement_review.py` mix inbound transport with composition and native
@@ -372,7 +372,7 @@ and unchanged Python/planner CI. No browser check is applicable to #83's data/do
 ## Initial #84 enforcement and limits
 
 The user-approved H84-simple-v5 scope replaces the unpublished broad analyzer.
-The [live policy](architecture-policy.json) assigns exact roles to 67 Python files after the #85 policy slice;
+The [live policy](architecture-policy.json) assigns exact roles to 69 Python files after the CampaignDrafts move;
 [86 readable module-edge exceptions](architecture-baseline.json) record source,
 target, rule, owner and whole-import retirement milestone. No call-level finding
 catalogue or compact occurrence schema is needed. The historical module map,

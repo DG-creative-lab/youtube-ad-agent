@@ -10,7 +10,7 @@ from uuid import uuid4
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.creatives import render_instruction_choices
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
+from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
 from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import package_fingerprint

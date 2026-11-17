@@ -20,8 +20,9 @@ new Python module metadata; application JSON/error/fingerprint semantics remain.
 
 The subsequent #85 policy slice moves the unchanged instruction-test decision calculations into the domain package. The old module remains a compatibility reexport; monkeypatches of globals on that wrapper do not change the implementation globals.
 
-#85 remains open: CampaignDrafts orchestration, other domain policies and remaining
-core DTO ownership need later small slices. After #85 foundation work, #87
+CampaignDrafts now has an application owner; the script remains an inward compatibility
+wrapper. Its native storage, defaults and authority checks remain for later inversion.
+#85 remains open for other domain policies and remaining core DTO ownership. After #85 foundation work, #87
 foundation contracts/offline injection precede #86 whole pilot-native UOW; #87
 external and #88 composition follow. #37's residual named native graph, #84 import
 strict zero and #89 broader conformance retain their gates. PostgreSQL/cloud and
