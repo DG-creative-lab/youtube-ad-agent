@@ -25,6 +25,8 @@
     "campaign_agent/agent/replies.py": "application",
     "campaign_agent/agent/review_tools.py": "application",
     "campaign_agent/agent/run.py": "application",
+    "campaign_agent/application/__init__.py": "marker",
+    "campaign_agent/application/campaigns.py": "application",
     "campaign_agent/assets.py": "application",
     "campaign_agent/campaign_setup.py": "application",
     "campaign_agent/contracts/__init__.py": "marker",

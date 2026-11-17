@@ -10,7 +10,7 @@ external adoption and #88 consolidation afterward.
 On 16 November the user chose a smaller #84 dependency checker, superseding the
 unpublished broad analyzer. The [ADR](hexagonal-architecture.md) and historical
 [module map](hexagonal-module-map.json) retain application/migration obligations.
-The [live policy](architecture-policy.json) classifies 67 Python files after the #85 policy slice by exact
+The [live policy](architecture-policy.json) classifies 69 Python files after the CampaignDrafts move by exact
 path. Web/legacy-client inventory remains in the historical map; this checker
 analyzes Python imports only. Tests are excluded consumers, never runtime dependencies.
 
@@ -56,15 +56,14 @@ aliases or symbols on an admitted edge remain admitted; the waiver covers that
 module coupling. It does not authorize runtime effects. Missing/duplicate/malformed
 configurations fail, including deletion of an empty baseline.
 
-The checker recognizes one planned CampaignDrafts relocation from
+The checker recognizes the reviewed CampaignDrafts relocation from
 `scripts/campaign_drafts.py` to `campaign_agent/application/campaigns.py`.
 It permits only the five existing exceptions to move together, with unchanged
 metadata, actual matching imports and an application role. The destination must
 match the pinned original source exactly except for the default database path's
 one directory-depth adjustment. This is not a general waiver-growth mechanism.
-The checker change must be accepted on the current integration base before the
-relocation can pass CI's trusted-base check. After the move, ordinary shrinking
-rules apply. The existing selected-base trust boundary still applies.
+The prerequisite checker change must be merged before this move targets main.
+After the move, ordinary shrinking rules apply. The existing selected-base trust boundary still applies.
 
 To retire an exception, eliminate the forbidden module edge and remove its row.
 Surviving metadata must be identical; new exceptions fail. Stale rows fail and

@@ -11,7 +11,7 @@ if not __package__:
 
 from campaign_agent.adapters.google_ads_sandbox import API_VERSION, GoogleAdsSandbox
 from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
+from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
 
 ADS_SCOPE = 'https://www.googleapis.com/auth/adwords'
 

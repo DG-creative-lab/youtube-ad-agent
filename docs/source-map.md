@@ -13,12 +13,13 @@ plans until implemented. PR #90 accepted #83 at
 Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
 at `9fabf358b30cbc794455c1da78440043593d1497`. The first #85 domain-foundation
 slice adds five Python modules (including the inert package marker), for 66 exact
-roles after that slice; the decision policy adds a 67th role in the [live policy](architecture-policy.json). The
+roles after that slice; the decision policy added a 67th role; the campaign application module and marker bring the [live policy](architecture-policy.json) to 69. The
 [baseline](architecture-baseline.json) shrinks from 88 to 86 module edges. Pure
 scope values, shared errors and video-ID syntax now have domain owners; old paths
 reexport the same objects and runtime consumers use the new owners directly.
-Class `__module__` metadata changes with ownership; application JSON/error/hash
-compatibility is preserved. Remaining #85 orchestration/policy work and deeper
+Relocated classes, including CampaignDrafts, have new `__module__` metadata.
+Patching globals on the old script wrapper does not patch its moved methods;
+application JSON/error/hash compatibility is preserved. CampaignDrafts now resides in the application module; other #85 policy work and deeper
 inversion stay open. Web inventory remains in the historical map.
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
@@ -42,7 +43,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [scripts/hosted_access_fixture.py](../scripts/hosted_access_fixture.py) and [adapters/fixture_access.py](../campaign_agent/adapters/fixture_access.py) | Loopback-only synthetic identity/access composition; refuses nonfixture data and cannot select a real provider. |
 | [campaign_agent/access.py](../campaign_agent/access.py), [ports/access.py](../campaign_agent/ports/access.py) and [adapters/local_access.py](../campaign_agent/adapters/local_access.py) | Server-resolved workspace context, operator brand grants, current capability decisions and the exact local-only access adapter. |
 | [campaign_agent/workspaces.py](../campaign_agent/workspaces.py) | Immutable brand/workspace/installation and campaign ownership, trusted provisioning and explicit legacy demo admission. |
-| [scripts/campaign_drafts.py](../scripts/campaign_drafts.py) | Seed brief and rules, schema/legacy recovery, catalog registration, draft validation, revision checks, JSON serialization, approval snapshots and immutable instruction versions. Native SQLite `write_unit()` owns standalone save and planner final-commit transactions; borrowed saves retain caller ownership. |
+| [application/campaigns.py](../campaign_agent/application/campaigns.py) | CampaignDrafts commands, native SQLite lifecycle and approvals. The old [script](../scripts/campaign_drafts.py) reexports the same objects for compatibility; storage inversion remains future work. |
 | [campaign_agent/adapters/sqlite_drafts.py](../campaign_agent/adapters/sqlite_drafts.py) | Concrete native SQLite revision existence/latest/exact raw reads, raw appends and two fixed scoped catalog fact lookups, used by `CampaignDrafts` seed/read/placement/fresh-brief/instruction paths. Borrows the supplied connection without owning its lifecycle or authority. |
 | [campaign_agent/agent/planner.py](../campaign_agent/agent/planner.py) and [planning_models.py](../campaign_agent/agent/planning_models.py) | Main-model port, tool schemas, simulated profiles, OpenRouter tool calling, pinned conversations, request receipts and the bounded placement loop. `_commit_turn()` uses the native draft write unit for draft/step/outcome/reply atomicity; inference and receipt phases remain separate. |
 | [campaign_agent/adapters/sqlite_planner.py](../campaign_agent/adapters/sqlite_planner.py) | Concrete native SQLite default/job/turn records and ordered joined raw step history, used immediately by `PlacementAgent`. Borrows the supplied connection; preserves raw tuples/text/NULLs, the original three-field default scope and partial-column updates. JSON, authority, recovery decisions and lifecycle remain application-owned. |
