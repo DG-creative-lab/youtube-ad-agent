@@ -1,4 +1,5 @@
 """Complete placement save effects and already-received recovery stay atomic."""
+from contextlib import closing
 import json
 import sqlite3
 import unittest
@@ -114,7 +115,7 @@ class PlacementCommitTests(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 runtime.resume(run, max_steps=1)
         # Authored persisted foreground-origin marker; receipt has already been captured.
-        with sqlite3.connect(self.case.path) as db:
+        with closing(sqlite3.connect(self.case.path)) as db, db:
             source = json.loads(db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run,)).fetchone()[0])
             source['settings']['foreground'] = True
             db.execute('UPDATE planner_jobs SET snapshot=? WHERE run_id=?', (json.dumps(source), run))
