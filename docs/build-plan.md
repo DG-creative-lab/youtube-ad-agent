@@ -4,7 +4,18 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 conversation transaction participant
+## Current architecture milestone · #86 planner read snapshot
+
+The planner run projection now uses a typed scoped reader and an adapter-owned
+snapshot. Run status, saved outcome, turns and joined tool history observe the same
+committed view even if another worker finishes a turn during the read. Both current
+access checks and all four ownership dimensions are retained before detail reads.
+History rendering in write paths borrows the existing transaction's repository.
+
+The shared planner/draft/access write unit and native error mapping remain legacy
+boundaries for the complete #86 pilot. No alternate runtime backend is selected.
+
+### Delivered conversation participant
 
 Following PR #99's catalogue foundation, conversation commands now consume typed
 repositories. Planner begin/session/finish borrow that repository from the exact

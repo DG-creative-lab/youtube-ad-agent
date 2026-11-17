@@ -129,10 +129,10 @@ class SQLitePlannerStoreTests(unittest.TestCase):
         self.assertEqual(self.store.history_rows('missing'), [])
         self.assertEqual(self.store.turn_rows('missing'), [])
         with self.assertRaises(json.JSONDecodeError):
-            self.runtime.planner._history(self.db, 'Run')
+            self.runtime.planner._history(self.store, 'Run')
         self.db.execute("UPDATE agent_steps SET result='{}' WHERE run_id='Run' AND position=2")
         with self.assertRaises(TypeError):
-            self.runtime.planner._history(self.db, 'Run')
+            self.runtime.planner._history(self.store, 'Run')
 
     def test_borrowed_uncommitted_visibility_savepoint_sibling_rollback_and_reopen(self):
         self.assertIs(self.store.connection, self.db)

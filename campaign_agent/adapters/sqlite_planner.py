@@ -7,6 +7,8 @@ catalogue transactions.
 """
 
 import sqlite3
+from .sqlite_runs import SQLiteRunStore
+from campaign_agent.ports.planner_records import PlannerRunScope
 from .sqlite_conversations import SQLiteConversationStore, SQLiteConversationStorage
 from contextlib import closing, contextmanager
 
@@ -18,6 +20,10 @@ from campaign_agent.ports.catalogs import (
 class SQLitePlannerStore:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
+
+    def scoped_run_row(self, run_id: str, scope: PlannerRunScope):
+        return SQLiteRunStore(self.connection).scoped_run_row(
+            run_id, scope.client_id, scope.brand_id, scope.actor_id, scope.campaign_id)
 
     @property
     def conversations(self):
@@ -186,3 +192,33 @@ class SQLiteCatalogStorage:
 
     def write(self):
         return self._unit(writable=True)
+
+
+class _SQLitePlannerReader:
+    """Expose only projection operations, keeping native handles inside the adapter."""
+    def __init__(self, store):
+        self._store = store
+
+    def scoped_run_row(self, run_id, scope):
+        return self._store.scoped_run_row(run_id, scope)
+
+    def job_result_row(self, run_id):
+        return self._store.job_result_row(run_id)
+
+    def turn_rows(self, run_id):
+        return self._store.turn_rows(run_id)
+
+    def history_rows(self, run_id):
+        return self._store.history_rows(run_id)
+
+
+class SQLitePlannerReadStorage:
+    """Keep the scoped status, outcome and receipt projection on one snapshot."""
+    def __init__(self, path):
+        self._path = path
+
+    @contextmanager
+    def read(self):
+        with closing(sqlite3.connect(self._path)) as db, db:
+            db.execute('BEGIN')
+            yield _SQLitePlannerReader(SQLitePlannerStore(db))
