@@ -5,7 +5,7 @@ import re
 import sqlite3
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
@@ -81,6 +81,7 @@ class PlacementAgent:
                     run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
                     PRIMARY KEY(run_id,position));
             ''')
+        self.conversation_storage = SQLiteConversationStorage(self.path)
         self.conversations = CampaignConversations(self)
 
     def _require_model_available(self, settings):
@@ -145,7 +146,7 @@ class PlacementAgent:
             expected = (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id, json.dumps(settings))
             self.catalogs.read(db, catalog_id)
             current = self.drafts._read(db)
-            previous, truncated = self.conversations.begin(db, session_id, settings, run_id, request,
+            previous, truncated = self.conversations.begin(SQLitePlannerStore(db).conversations, session_id, settings, run_id, request,
                                                           catalog_id, current['revision'], after_message)
             context = {'request': request, 'session_id': session_id, 'catalog_id': catalog_id,
                        'revision': current['revision'], 'settings': settings,
@@ -182,7 +183,7 @@ class PlacementAgent:
         if status != 'running':
             raise PackageConflict('This request is no longer active. Read the latest conversation.')
         source = json.loads(SQLitePlannerStore(db).job_snapshot_row(run_id)[0])
-        if self.conversations.session(db, source['session_id']) != source['settings']:
+        if self.conversations.session(SQLitePlannerStore(db).conversations, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
         if self.drafts._read(db)['revision'] != source['revision']:
             raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
@@ -349,7 +350,7 @@ class PlacementAgent:
     def _finish(self, db, run_id, result, status):
         SQLiteRunStore(db).update_status(run_id, status)
         SQLitePlannerStore(db).update_outcome(run_id, json.dumps(result))
-        self.conversations.finish(db, run_id, result, status)
+        self.conversations.finish(SQLitePlannerStore(db).conversations, run_id, result, status)
 
     def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
         name, args = call['tool'], call['arguments']

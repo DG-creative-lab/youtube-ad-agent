@@ -7,6 +7,7 @@ catalogue transactions.
 """
 
 import sqlite3
+from .sqlite_conversations import SQLiteConversationStore, SQLiteConversationStorage
 from contextlib import closing, contextmanager
 
 from campaign_agent.ports.catalogs import (
@@ -17,6 +18,10 @@ from campaign_agent.ports.catalogs import (
 class SQLitePlannerStore:
     def __init__(self, connection: sqlite3.Connection):
         self.connection = connection
+
+    @property
+    def conversations(self):
+        return SQLiteConversationStore(self.connection)
 
     def default_row(self, client_id, brand_id, actor_id):
         return self.connection.execute(
