@@ -4,7 +4,27 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 completion candidate
+## Current architecture milestone · #87 structured model services
+
+PR #104 merged at `6eb7f000f3c458fca3c4b433b4630a43e4190910` and closed #86.
+This build adopts both remaining structured model use cases together: instruction-
+test assessment and instruction drafting. Purpose-specific contracts in
+`ports/planning.py` are injected as `instruction_reviewer` and
+`instruction_drafter` into `AgentRuntime`, including the existing local bootstrap.
+Main-model/classifier injection from #87 foundation remains unchanged.
+
+Supplied structured services are for offline application commands. The application
+blocks fresh use in web mode and foreground attachment regardless of a supplied
+service's own flags or preflight behavior. Previously received receipts remain
+recoverable without another call. Existing defaults, wire requests, model settings,
+source validation, receipt phases and application-owned output/budget checks remain.
+
+#87 stays open for request-policy/transport separation, remaining model/provider,
+access and effect consumer inversion. Legacy concrete construction stays explicit
+#87/#88 debt; this build introduces no service registry or alternative command path.
+Application ceilings also validate saved non-foreground settings, and accepted receipts must match the saved model, prompt, evidence identity and declared limits. Models receive copies of request data. Independent source review, exact-head verification and human merge remain required.
+
+### Delivered #86 local placement pilot
 
 The next build targets the whole accepted local authored simulated-placement pilot,
 not another single participant. `bootstrap/planner.py:create_local_planner` performs
@@ -16,8 +36,7 @@ corrections and started tests; logical media facts and original command permits
 retain their full scope and preimage checks. Other tools and foreground workflows
 remain supported on the original native store through their retained paths.
 
-#86 is a completion candidate, pending final independent source review, exact-commit
-verification, current CI and human merge. It is not marked complete by this plan.
+#86 was accepted by human merge of [PR #104](https://github.com/DG-creative-lab/youtube-ad-agent/pull/104).
 The [residual native graph](native-storage-migration.md) assigns the remaining
 families to #37/#87/#88 and records the compatibility schema copies. No backend
 switch, PostgreSQL acceptance, provider activation or hosted release follows.

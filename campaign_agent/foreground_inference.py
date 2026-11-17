@@ -53,7 +53,7 @@ class ForegroundInference:
             raise ProviderError('route_unqualified')
 
     def attach(self,runtime):
-        if not runtime.planner.foreground_compatible:
+        if not runtime.planner.foreground_compatible or not runtime.structured_foreground_compatible:
             self.close()
             raise ProviderError('route_unqualified')
         self.runtime=runtime

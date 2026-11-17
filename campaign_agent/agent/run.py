@@ -1,6 +1,8 @@
 """An offline campaign preparation run using recorded tool decisions."""
 from contextlib import closing
+from copy import deepcopy
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
@@ -8,7 +10,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
-from campaign_agent.ports.planning import PlannerModel
+from campaign_agent.ports.planning import PlannerModel, InstructionReviewer, InstructionDrafter, STRUCTURED_MAX_OUTPUT_TOKENS
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore, SQLiteRunStorage
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
@@ -70,10 +72,14 @@ class AgentRuntime:
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
                  planner_model: PlannerModel | None = None,
+                 instruction_reviewer: InstructionReviewer | None = None,
+                 instruction_drafter: InstructionDrafter | None = None,
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
                  web=False, initialize=True):
         operator.require_brand(context.scope)
         self.foreground = None
+        self.web = web
+        self.structured_foreground_compatible = instruction_reviewer is None and instruction_drafter is None
         self.operator = operator
         self.scope = context.scope
         self.path = Path(path)
@@ -92,8 +98,10 @@ class AgentRuntime:
                                                   initialize=initialize)
         self.instruction_findings = InstructionFindings(self.instruction_tests, initialize=initialize)
         self.model = model or RecordedInference()
-        self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
-        self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
+        self.openrouter: InstructionReviewer = (instruction_reviewer if instruction_reviewer is not None
+                                               else OpenRouterReviews(openrouter_models, transport=review_transport))
+        self.openrouter_drafts: InstructionDrafter = (instruction_drafter if instruction_drafter is not None
+                                                     else OpenRouterInstructions(openrouter_draft_models, transport=draft_transport))
         if initialize:
             SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
                                         legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
@@ -161,7 +169,7 @@ class AgentRuntime:
             raise ValueError("Offline drafts do not use provider settings.")
         if provider_selection_id is not None and (mode!='openrouter' or self.foreground is None): raise ValueError('Use a provider selection only for OpenRouter.')
         settings = ({"mode":"offline"} if mode=='offline' else
-            self.foreground.settings(provider_selection_id,model,'structured_review',self.openrouter_drafts.prompt_version) if provider_selection_id is not None else self.openrouter_drafts.settings(model))
+            self.foreground.settings(provider_selection_id,model,'structured_review',self.openrouter_drafts.prompt_version) if provider_selection_id is not None else self._structured_settings(self.openrouter_drafts, model))
         if mode == "openrouter" and operation_id is None:
             raise ValueError("Use a valid drafting operation ID.")
         identity = {"client": self.scope.client_id, "brand": self.scope.brand_id,
@@ -182,8 +190,8 @@ class AgentRuntime:
                 if json.loads(existing[0]) != source or (json.loads(saved[0]) if saved else {"mode": "offline"}) != settings:
                     raise ValueError("This drafting operation was already used for a different request.")
                 return run_id
-            if mode=='openrouter' and self.openrouter_drafts.web_disabled:
-                self.openrouter_drafts.require_available(settings)
+            if mode=='openrouter' and (self.web or self.openrouter_drafts.web_disabled):
+                self._require_structured_available(self.openrouter_drafts, settings)
             self._next_test_context(db, source)
             SQLiteRunStore(db).create_run(
                 run_id, self.scope.client_id, self.scope.brand_id,
@@ -213,7 +221,7 @@ class AgentRuntime:
         settings = {"mode": "offline"}
         if mode == "openrouter":
             settings = (self.foreground.settings(provider_selection_id,model,'structured_review',self.openrouter.prompt_version)
-                        if provider_selection_id is not None and self.foreground is not None else self.openrouter.settings(model))
+                        if provider_selection_id is not None and self.foreground is not None else self._structured_settings(self.openrouter, model))
             if operation_id is None:
                 raise ValueError("Use a valid review operation ID.")
         if operation_id is not None:
@@ -231,8 +239,8 @@ class AgentRuntime:
                     if json.loads(row[0])["test_id"] != test_id or json.loads(row[1]) != settings:
                         raise ValueError("This review operation was already used for a different request.")
                     return run_id
-        if mode=='openrouter' and self.openrouter.web_disabled:
-            self.openrouter.require_available(settings)
+        if mode=='openrouter' and (self.web or self.openrouter.web_disabled):
+            self._require_structured_available(self.openrouter, settings)
         context = self.instruction_tests.review_context(test_id)
         if operation_id is None:
             run_id = package_fingerprint({
@@ -313,6 +321,46 @@ class AgentRuntime:
                                        "receipt": receipt["inference"] if receipt else None, "error": inference[3]}
             return result
 
+    @staticmethod
+    def _validate_structured_settings(settings):
+        fields = {'mode', 'model', 'prompt_version', 'max_calls', 'max_output_tokens', 'max_cost_usd'}
+        if (not isinstance(settings, dict) or set(settings) != fields
+                or settings['mode'] != 'openrouter'
+                or not isinstance(settings['model'], str) or not settings['model']
+                or not isinstance(settings['prompt_version'], str) or not settings['prompt_version']
+                or type(settings['max_calls']) is not int or settings['max_calls'] != 1
+                or type(settings['max_output_tokens']) is not int
+                or not 1 <= settings['max_output_tokens'] <= STRUCTURED_MAX_OUTPUT_TOKENS
+                or type(settings['max_cost_usd']) not in (int, float) or settings['max_cost_usd'] != 0):
+            raise ReviewInferenceError('The structured-model settings exceed the application limits.')
+
+    def _structured_settings(self, service, model):
+        settings = deepcopy(service.settings(model))
+        if not self.structured_foreground_compatible:
+            self._validate_structured_settings(settings)
+            if settings['model'] != model or settings['prompt_version'] != service.prompt_version:
+                raise ReviewInferenceError('The structured-model settings do not match the selected model.')
+        return settings
+
+    @staticmethod
+    def _require_structured_receipt(receipt, context, settings):
+        metadata = receipt.get('inference') if isinstance(receipt, dict) else None
+        if (not isinstance(metadata, dict)
+                or any(metadata.get(key) != settings.get(key) for key in ('mode', 'model', 'prompt_version'))
+                or metadata.get('evidence_id') != package_fingerprint(context)
+                or any(key in metadata and metadata[key] != settings.get(key)
+                       for key in ('max_calls', 'max_output_tokens', 'max_cost_usd'))):
+            raise ReviewInferenceError(
+                'The structured-model receipt does not match the saved request. Its receipt was retained.')
+
+    def _require_structured_available(self, model, settings):
+        # Supplied services are offline-only until their dispatch is admitted by a port.
+        # This fence is application-owned; a permissive supplied service cannot waive it.
+        if not self.structured_foreground_compatible and (self.web or settings.get('foreground')):
+            raise ReviewInferenceError(
+                'Browser inference awaits scoped admission and recovery. Use offline mode.')
+        model.require_available(deepcopy(settings))
+
     def _resume_openrouter(self, run_id):
         """Reserve a single request, call outside SQLite, and persist its receipt before the step."""
         self.require("youtube:agent.run")
@@ -331,6 +379,8 @@ class AgentRuntime:
             settings = json.loads(row[0])
             if settings["mode"] != "openrouter":
                 return False
+            if not settings.get("foreground"):
+                self._validate_structured_settings(settings)
             source = json.loads(db.execute("SELECT source FROM agent_test_sources WHERE run_id = ?", (run_id,)).fetchone()[0])
             context = self._inference_context(db, request, source)
             if request == NEXT_TEST_REQUEST and context.get("next_action") == "wait":
@@ -339,21 +389,35 @@ class AgentRuntime:
             if row[1] == "received":
                 receipt = json.loads(row[2])
             elif row[1] == "pending" or settings.get('foreground'):
-                adapter.require_available(settings)
+                self._require_structured_available(adapter, settings)
                 db.execute("UPDATE agent_review_inference SET state = 'requested' WHERE run_id = ?", (run_id,))
             else:
                 raise ReviewInferenceError(row[3] or
                     "This request is in progress or its outcome is unknown. Start a new operation to retry.")
         if receipt is None:
             try:
-                receipt = (adapter.assess_instruction_test(context, settings) if request == REVIEW_TEST_REQUEST
-                           else adapter.draft_instructions(context, settings))
+                receipt = (adapter.assess_instruction_test(deepcopy(context), deepcopy(settings)) if request == REVIEW_TEST_REQUEST
+                           else adapter.draft_instructions(deepcopy(context), deepcopy(settings)))
+                receipt = deepcopy(receipt)
+                usage = receipt["inference"]["usage"]
+                for field in ('input_tokens', 'output_tokens'):
+                    value = usage[field]
+                    if value is not None and (type(value) is not int or value < 0):
+                        raise ValueError('Invalid structured-model usage')
+                cost = usage['cost_usd']
+                if not settings.get('foreground') and cost is not None and (
+                        type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0):
+                    raise ValueError('Invalid structured-model cost')
                 receipt["inference"]["run_id"] = run_id
-            except ReviewInferenceError as exc:
+            except Exception as error:
+                if self.structured_foreground_compatible and not isinstance(error, ReviewInferenceError):
+                    raise  # Preserve existing native/foreground transport error mappings.
+                exc = error if isinstance(error, ReviewInferenceError) else ReviewInferenceError(
+                    'The structured-model request failed or its outcome is unknown. Start a new operation to retry.')
                 with closing(sqlite3.connect(self.path)) as db, db:
                     db.execute("UPDATE agent_review_inference SET state = 'failed', error = ? WHERE run_id = ?",
                                (str(exc), run_id))
-                raise
+                raise exc from None
             with closing(sqlite3.connect(self.path)) as db, db:
                 db.execute("UPDATE agent_review_inference SET state = 'received', receipt = ? WHERE run_id = ?",
                            (json.dumps(receipt), run_id))
@@ -365,6 +429,7 @@ class AgentRuntime:
             if SQLiteRunStore(db).step_exists_row(run_id, 1):
                 return True
             self._inference_context(db, request, source)
+            self._require_structured_receipt(receipt, context, settings)
             usage = receipt["inference"]["usage"]
             if ((not settings.get('foreground') and usage["cost_usd"] is not None and usage["cost_usd"] > 0)
                     or (usage["output_tokens"] is not None and usage["output_tokens"] > settings["max_output_tokens"])):

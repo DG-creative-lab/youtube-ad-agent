@@ -35,6 +35,20 @@ preservation. Refresh the affected local HTTP/UI path and final trusted/candidat
 architecture checks. Record the exact commit and independent roles; old passes do
 not certify a later repair. #86 closure remains pending that evidence and human merge.
 
+## Structured model service verification · #87
+
+For the assessment/drafting injection slice, run
+`python3 -B -m unittest discover -s tests -p test_structured_model_services.py -v`
+before the full offline suite and canonical portfolio below. Both services must
+exercise successful application commands, denied preflight, received-receipt
+reopen, failed receipt persistence, stale source, invalid output and over-budget
+usage. Check a permissive supplied service in web mode and foreground attachment:
+application-owned qualification must deny it before a new request is reserved.
+Exercise expanded supplied/saved budgets, forged receipt provenance and input mutation as well. The tests use authored service objects and temporary native stores, without keys,
+network calls or live model-quality claims. Existing native provider/foreground
+checks remain part of the full suite. No client source or wire schema changes are
+required for these constructor seams.
+
 ## Architecture migration gates
 
 #83 was accepted in PR #90 at `7c139e19bfbf0d829b31f8d09320e912e5561f6b`.
