@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from campaign_agent.domain.errors import PackageConflict
 from .adapters import demo_delivery
 from .campaign_setup import CampaignSetup
-from .delivery_next_test import next_action, respect_correction
+from .domain.delivery_next_test import next_action, respect_correction
 from .handoff import package_fingerprint
 from .measurement import ViewerMeasurement
 

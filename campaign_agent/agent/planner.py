@@ -9,7 +9,7 @@ from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.delivery import delivery_message
-from campaign_agent.delivery_next_test import recommendation_message
+from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
 from campaign_agent.domain.errors import PackageConflict

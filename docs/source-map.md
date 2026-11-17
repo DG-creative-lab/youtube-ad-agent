@@ -13,7 +13,7 @@ plans until implemented. PR #90 accepted #83 at
 Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
 at `9fabf358b30cbc794455c1da78440043593d1497`. The first #85 domain-foundation
 slice adds five Python modules (including the inert package marker), for 66 exact
-roles after that slice; the decision policy added a 67th role; the campaign application module and marker bring the [live policy](architecture-policy.json) to 69. The
+roles after that slice; the decision policy added a 67th role; the campaign application module and marker bring the [live policy](architecture-policy.json) to 69; the delivery policy adds two roles for 71. The
 [baseline](architecture-baseline.json) shrinks from 88 to 86 module edges. Pure
 scope values, shared errors and video-ID syntax now have domain owners; old paths
 reexport the same objects and runtime consumers use the new owners directly.
@@ -28,6 +28,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 
 | Path | What it owns today |
 | --- | --- |
+| [domain/delivery_next_test.py](../campaign_agent/domain/delivery_next_test.py), [domain/performance.py](../campaign_agent/domain/performance.py) | Pure delivery recommendations, evidence thresholds and buyer-correction choices; storage and authorization stay in application modules. Old imports reexport the same objects; patching globals on the old recommendation wrapper does not patch the moved functions. |
 | [domain/scope.py](../campaign_agent/domain/scope.py) | BrandScope, Operator and WorkspaceContext values/validation; defaults and current-authority decisions stay in access.py. |
 | [domain/errors.py](../campaign_agent/domain/errors.py), [domain/inference_errors.py](../campaign_agent/domain/inference_errors.py) | Shared campaign conflicts and sanitized inference failure, independent of script/provider modules. |
 | [domain/placements.py](../campaign_agent/domain/placements.py) | Shared video-ID syntax, independent of script imports. |
