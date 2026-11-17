@@ -5,9 +5,10 @@ import re
 import sqlite3
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage, SQLitePlacementCommitStorage
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.placement_commit import PlacementCommitUnit, PlacementCommitStorage, PlacementRepositories
 from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
@@ -82,6 +83,7 @@ class PlacementAgent:
                     run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
                     PRIMARY KEY(run_id,position));
             ''')
+        self.placement_commit_storage: PlacementCommitStorage = SQLitePlacementCommitStorage(self.path)
         self.read_storage: PlannerReadStorage = SQLitePlannerReadStorage(self.path)
         self.conversation_storage = SQLiteConversationStorage(self.path)
         self.conversations = CampaignConversations(self)
@@ -311,12 +313,18 @@ class PlacementAgent:
                         setup_id=source['delivery_setup_id'], demo_scenario=source.get('delivery_demo_scenario'))
                 except PackageConflict:
                     pass
-            if not self._commit_turn(run_id, position, receipt, classified, captured_review):
+            if not self._commit_turn(run_id, position, receipt, classified, captured_review,
+                                     foreground=bool(source['settings'].get('foreground'))):
                 return self.read(run_id)
         if self.owner.foreground: self.owner.foreground.policy.refresh()
         return self.read(run_id)
 
-    def _commit_turn(self, run_id, position, receipt, classified, captured_review):
+    def _commit_turn(self, run_id, position, receipt, classified, captured_review, *, foreground=True):
+        if receipt['tool'] == 'save_placement_draft' and not foreground and self.owner.foreground is None:
+            return self._commit_placement_turn(run_id, position, receipt)
+        return self._commit_legacy_turn(run_id, position, receipt, classified, captured_review)
+
+    def _commit_legacy_turn(self, run_id, position, receipt, classified, captured_review):
         """Commit one received tool turn, rechecking current native state."""
         with self.drafts.write_unit() as db:
             _, status = self.owner._owned_run(db, run_id)
@@ -348,6 +356,82 @@ class PlacementAgent:
             if status != 'running':
                 self._finish(db, run_id, result, status)
         return True
+
+    def _owned_placement_run(self, unit: PlacementCommitUnit, run_id):
+        self.owner.require("youtube:campaign.read")
+        scope = PlannerRunScope(self.owner.scope.client_id, self.owner.scope.brand_id,
+                                self.owner.operator.id, self.owner.drafts.campaign_id)
+        row = unit.runs.scoped_run_row(run_id, scope)
+        if row is None:
+            raise PermissionError("The run is unavailable to this operator.")
+        return row
+
+    def _placement_context(self, unit: PlacementCommitUnit, run_id):
+        self.owner.require("youtube:campaign.read")
+        _, status = self._owned_placement_run(unit, run_id)
+        if status != 'running':
+            raise PackageConflict('This request is no longer active. Read the latest conversation.')
+        source = json.loads(unit.planner.job_snapshot_row(run_id)[0])
+        if source['settings'].get('foreground'):
+            raise PackageConflict('Foreground placement commits require their original admission path.')
+        if self.conversations.session(unit.conversations, source['session_id']) != source['settings']:
+            raise PermissionError('The conversation scope or model has changed.')
+        if self.drafts.read_from(unit.drafts)['revision'] != source['revision']:
+            raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
+        return source
+
+    def _commit_placement_turn(self, run_id, position, receipt):
+        with self.placement_commit_storage.write() as unit:
+            _, status = self._owned_placement_run(unit, run_id)
+            if status != 'running':
+                return False
+            source = self._placement_context(unit, run_id)
+            if unit.runs.step_exists_row(run_id, position):
+                return True
+            history = self._history(unit.planner, run_id)
+            self.owner.require("youtube:agent.run")
+            try:
+                with unit.tool_attempt():
+                    result, status = self._save_placement_tool(unit, source, history, receipt)
+            except (ValueError, TypeError):
+                result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
+            unit.runs.append_step(run_id, position, receipt['tool'], json.dumps(result))
+            if status == 'running' and position + 1 >= source['max_turns']:
+                result, status = {'revision': source['revision'], 'ambiguous': [],
+                                  'message': 'The turn allowance is exhausted. Start a new request with more context.',
+                                  'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
+            if status != 'running':
+                unit.runs.update_status(run_id, status)
+                unit.planner.update_outcome(run_id, json.dumps(result))
+                self.conversations.finish(unit.conversations, run_id, result, status)
+            unit.commit()
+        return True
+
+    def _save_placement_tool(self, unit: PlacementRepositories, source, history, call):
+        args = call['arguments']
+        if set(args) not in ({'video_ids'}, {'contexts'}):
+            raise ValueError('Unknown tool')
+        if not permits(source, 'save_placement_draft'):
+            return self.review_tools.outcome(source['revision'], None, 'placement_draft_not_authorized'), 'needs_input'
+        classification = next((step['result'] for step in reversed(history)
+                               if step['tool'] == 'classify_catalog' and 'error' not in step['result']), None)
+        if classification is None:
+            raise ValueError('Classify catalog first')
+        selected = args.get('video_ids')
+        if 'contexts' in args:
+            contexts = args['contexts']
+            known = self.drafts.read_from(unit.drafts)['brief']['contexts']
+            if (not isinstance(contexts, list) or not contexts or any(not isinstance(item, str) or item not in known for item in contexts)
+                    or len(contexts) != len(set(contexts))):
+                raise ValueError('Choose known campaign contexts')
+            selected = [item['id'] for item in classification['assignments'] if item['context'] in contexts]
+        saved = self.catalogs.save(None, source['catalog_id'], source['revision'],
+                                   classification['assignments'], selected, repositories=unit)
+        rows = {row['video_id']: row for row in self.catalogs.read_from(unit.catalogs, source['catalog_id'])}
+        ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
+                      'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
+        return {'revision': saved['revision'], 'ambiguous': ambiguous,
+                'message': 'Placement draft saved for package review. Classifications are simulated.'}, 'ready_for_review'
 
     def _finish(self, db, run_id, result, status):
         SQLiteRunStore(db).update_status(run_id, status)
@@ -426,27 +510,7 @@ class PlacementAgent:
         if name == 'prepare_next_test':
             return self.review_tools.prepare(db, run_id, source, history, call)
         if name == 'save_placement_draft' and set(args) in ({'video_ids'}, {'contexts'}):
-            if not permits(source, name):
-                return self.review_tools.outcome(source['revision'], None, 'placement_draft_not_authorized'), 'needs_input'
-            classification = next((step['result'] for step in reversed(history)
-                                   if step['tool'] == 'classify_catalog' and 'error' not in step['result']), None)
-            if classification is None:
-                raise ValueError('Classify catalog first')
-            selected = args.get('video_ids')
-            if 'contexts' in args:
-                contexts = args['contexts']
-                known = self.drafts._read(db)['brief']['contexts']
-                if (not isinstance(contexts, list) or not contexts or any(not isinstance(item, str) or item not in known for item in contexts)
-                        or len(contexts) != len(set(contexts))):
-                    raise ValueError('Choose known campaign contexts')
-                selected = [item['id'] for item in classification['assignments'] if item['context'] in contexts]
-            saved = self.catalogs.save(db, source['catalog_id'], source['revision'],
-                                       classification['assignments'], selected)
-            rows = {row['video_id']: row for row in self.catalogs.read(db, source['catalog_id'])}
-            ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
-                          'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
-            return {'revision': saved['revision'], 'ambiguous': ambiguous,
-                    'message': 'Placement draft saved for package review. Classifications are simulated.'}, 'ready_for_review'
+            return self._save_placement_tool(SQLitePlannerStore(db).placement_repositories, source, history, call)
         if name == 'ask_clarification' and set(args) == {'reason'}:
             return clarification(args['reason'], source['revision']), 'needs_input'
         if name == 'respond' and set(args) == {'topic'}:

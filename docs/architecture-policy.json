@@ -59,6 +59,8 @@
     "campaign_agent/ports/access.py": "port",
     "campaign_agent/ports/catalogs.py": "port",
     "campaign_agent/ports/conversations.py": "port",
+    "campaign_agent/ports/drafts.py": "port",
+    "campaign_agent/ports/placement_commit.py": "port",
     "campaign_agent/ports/inference.py": "port",
     "campaign_agent/ports/planning.py": "port",
     "campaign_agent/ports/planner_records.py": "port",

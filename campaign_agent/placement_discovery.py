@@ -1,7 +1,8 @@
 """Immutable permitted catalogs and validated placement proposals."""
 import json
+from campaign_agent.ports.placement_commit import PlacementRepositories
 from campaign_agent.ports.planning import PlacementClassifier
-from campaign_agent.ports.catalogs import CatalogStorage, CatalogScope, CatalogRecord, CatalogEntry
+from campaign_agent.ports.catalogs import CatalogStorage, CatalogReader, CatalogScope, CatalogRecord, CatalogEntry
 
 from .handoff import package_fingerprint
 from .placements import rule_assignment
@@ -67,21 +68,29 @@ class PlacementDiscovery:
             raise ValueError('Choose an available catalog for this campaign.')
         return json.loads(row[0])
 
+    def read_from(self, catalogs: CatalogReader, catalog_id):
+        self.drafts.require("youtube:campaign.read")
+        row = catalogs.read_snapshot(self._catalog_scope, catalog_id)
+        if row is None:
+            raise ValueError('Choose an available catalog for this campaign.')
+        return json.loads(row[0])
+
     def list(self):
         self.drafts.require("youtube:campaign.read")
         with self.catalog_storage.read() as catalogs:
             return [{'id': row.id, 'label': row.label, 'count': len(json.loads(row.snapshot))}
                     for row in catalogs.list_catalogs(self._catalog_scope)]
 
-    def save(self, db, catalog_id, expected_revision, assignments, selected_ids):
-        rows = self.read(db, catalog_id)
+    def save(self, db, catalog_id, expected_revision, assignments, selected_ids,
+             *, repositories: PlacementRepositories | None = None):
+        rows = self.read_from(repositories.catalogs, catalog_id) if repositories is not None else self.read(db, catalog_id)
         if (not isinstance(selected_ids, list) or not selected_ids or any(not isinstance(item, str) for item in selected_ids)
                 or len(selected_ids) != len(set(selected_ids))):
             raise ValueError('Choose distinct classified video IDs.')
         allowed = {row['id']: row['context'] for row in assignments if row['context'] != 'review'}
         if any(item not in allowed for item in selected_ids):
             raise ValueError('Only classified, unambiguous catalog videos can be saved.')
-        current = self.drafts._read(db)
+        current = self.drafts.read_from(repositories.drafts) if repositories is not None else self.drafts._read(db)
         if current['revision'] != expected_revision:
             raise PackageConflict('The campaign changed. Start a new placement run from the latest revision.')
         identity = {'scope': vars(self.drafts.scope), 'campaign': self.drafts.campaign_id, 'rows': rows}
@@ -93,4 +102,5 @@ class PlacementDiscovery:
                     'source_reference': row['source_reference'],
                     'catalog_ref': package_fingerprint({**identity, 'video': row['video_id']})[:32]}
         return self.drafts.save({'campaign_id': self.drafts.campaign_id, 'revision': expected_revision,
-                                 'placements': list(chosen.values())}, connection=db)
+                                 'placements': list(chosen.values())},
+                                **({'repository': repositories.drafts} if repositories is not None else {'connection': db}))

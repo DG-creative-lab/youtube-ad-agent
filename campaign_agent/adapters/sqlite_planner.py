@@ -8,6 +8,7 @@ catalogue transactions.
 
 import sqlite3
 from .sqlite_runs import SQLiteRunStore
+from .sqlite_drafts import SQLiteDraftRepository
 from campaign_agent.ports.planner_records import PlannerRunScope
 from .sqlite_conversations import SQLiteConversationStore, SQLiteConversationStorage
 from contextlib import closing, contextmanager
@@ -24,6 +25,10 @@ class SQLitePlannerStore:
     def scoped_run_row(self, run_id: str, scope: PlannerRunScope):
         return SQLiteRunStore(self.connection).scoped_run_row(
             run_id, scope.client_id, scope.brand_id, scope.actor_id, scope.campaign_id)
+
+    @property
+    def placement_repositories(self):
+        return SQLitePlacementRepositories(self.connection)
 
     @property
     def conversations(self):
@@ -116,6 +121,11 @@ class SQLitePlannerStore:
 class _CatalogRepository:
     def __init__(self, unit):
         self._unit = unit
+
+    def read_snapshot(self, scope: CatalogScope, catalog_id: str):
+        return self._unit._connection().execute(
+            'SELECT snapshot FROM placement_catalogs WHERE id=? AND client_id=? AND brand_id=? AND campaign_id=?',
+            (catalog_id, scope.client_id, scope.brand_id, scope.campaign_id)).fetchone()
 
     def list_catalogs(self, scope: CatalogScope) -> tuple[CatalogRecord, ...]:
         db = self._unit._connection()
@@ -222,3 +232,83 @@ class SQLitePlannerReadStorage:
         with closing(sqlite3.connect(self._path)) as db, db:
             db.execute('BEGIN')
             yield _SQLitePlannerReader(SQLitePlannerStore(db))
+
+
+class _PlacementRuns:
+    def __init__(self, db):
+        self._store = SQLiteRunStore(db)
+
+    def scoped_run_row(self, run_id, scope):
+        return self._store.scoped_run_row(run_id, scope.client_id, scope.brand_id, scope.actor_id, scope.campaign_id)
+
+    def step_exists_row(self, run_id, position):
+        return self._store.step_exists_row(run_id, position)
+
+    def append_step(self, run_id, position, tool, result):
+        self._store.append_step(run_id, position, tool, result)
+
+    def update_status(self, run_id, status):
+        self._store.update_status(run_id, status)
+
+
+class _PlacementPlanner:
+    def __init__(self, db):
+        self._store = SQLitePlannerStore(db)
+
+    def job_snapshot_row(self, run_id):
+        return self._store.job_snapshot_row(run_id)
+
+    def history_rows(self, run_id):
+        return self._store.history_rows(run_id)
+
+    def update_outcome(self, run_id, outcome):
+        self._store.update_outcome(run_id, outcome)
+
+
+class SQLitePlacementRepositories:
+    def __init__(self, db):
+        self._db, self._active = db, True
+        self.runs = _PlacementRuns(db)
+        self.planner = _PlacementPlanner(db)
+        self.drafts = SQLiteDraftRepository(db)
+        self.catalogs = _CatalogRepository(self)
+        self.conversations = SQLiteConversationStore(db)
+
+    def _connection(self, *, write=False):
+        if not self._active:
+            raise RuntimeError('Placement transaction is closed.')
+        return self._db
+
+class _PlacementCommitUnit(SQLitePlacementRepositories):
+    @contextmanager
+    def tool_attempt(self):
+        db = self._connection()
+        db.execute('SAVEPOINT planner_tool')
+        try:
+            yield
+        except BaseException:
+            db.execute('ROLLBACK TO planner_tool')
+            raise
+        finally:
+            db.execute('RELEASE planner_tool')
+
+    def commit(self):
+        self._connection().commit()
+        self._active = False
+
+
+class SQLitePlacementCommitStorage:
+    """The receipt was already saved; only the local placement effects commit here."""
+    def __init__(self, path):
+        self._path = path
+
+    @contextmanager
+    def write(self):
+        with closing(sqlite3.connect(self._path)) as db:
+            unit = _PlacementCommitUnit(db)
+            try:
+                db.execute('BEGIN IMMEDIATE')
+                yield unit
+            finally:
+                unit._active = False
+                db.rollback()
