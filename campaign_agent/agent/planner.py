@@ -8,6 +8,7 @@ from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
@@ -53,12 +54,15 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 
 class PlacementAgent:
-    def __init__(self, owner, models=(), *, transport=None, simulator=None, classifier=None):
+    def __init__(self, owner, models=(), *, transport=None, main_model: PlannerModel | None = None,
+                 simulator: MainModel | None = None, classifier: PlacementClassifier | None = None):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
+        self.foreground_compatible = main_model is None
+        self.web_disabled = False
         self.catalogs = PlacementDiscovery(self.drafts)
-        self.remote = OpenRouterPlanner(models, transport=transport)
-        self.simulator = simulator or SimulatedPlanner()
-        self.classifier = classifier or SimulatedClassifier()
+        self.remote: PlannerModel = main_model if main_model is not None else OpenRouterPlanner(models, transport=transport)
+        self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
+        self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
         self.review_tools = CampaignReviewTools(self)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('''
@@ -77,11 +81,18 @@ class PlacementAgent:
             ''')
         self.conversations = CampaignConversations(self)
 
+    def _require_model_available(self, settings):
+        # The supplied-model seam is offline-only until admitted dispatch is a port.
+        if self.web_disabled and not self.foreground_compatible:
+            raise ReviewInferenceError(
+                'Browser inference awaits scoped admission and recovery. Use offline mode.')
+        self.remote.require_available(settings)
+
     def options(self):
         self.owner.require("youtube:campaign.read")
         models = [{'id': 'simulated', 'label': 'Simulated agent', 'mode': 'simulated'},
                   {'id': 'simulated-inspect', 'label': 'Simulated agent · inspect first', 'mode': 'simulated'}]
-        if not self.remote.web_disabled:
+        if not self.web_disabled and not self.remote.web_disabled:
             models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
         with closing(sqlite3.connect(self.path)) as db:
             row = SQLitePlannerStore(db).default_row(
@@ -127,8 +138,8 @@ class PlacementAgent:
                 if source.get('draft_permission', 'none') != draft_permission:
                     raise ValueError('This run ID has different draft authority. Send a new request to change it.')
                 return run_id
-            if settings['mode']=='openrouter' and self.remote.web_disabled:
-                self.remote.require_available(settings)
+            if settings['mode']=='openrouter' and (self.web_disabled or self.remote.web_disabled):
+                self._require_model_available(settings)
             expected = (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id, json.dumps(settings))
             self.catalogs.read(db, catalog_id)
             current = self.drafts._read(db)
@@ -242,8 +253,8 @@ class PlacementAgent:
                 receipt = json.loads(row[1]) if row and row[1] else None
                 if not row:
                     if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
-                        self.remote.require_available(source['settings'])
-                        self.remote.prepare_turn(source, history, source['settings'])
+                        self._require_model_available(source['settings'])
+                        self.remote.validate_turn(source, history, source['settings'])
                     SQLitePlannerStore(db).request_turn(run_id, position)
             if receipt is None:
                 try:

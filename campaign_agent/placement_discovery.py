@@ -2,16 +2,12 @@
 from contextlib import closing
 import json
 import sqlite3
-from typing import Protocol
+from campaign_agent.ports.planning import PlacementClassifier
 
 from .handoff import package_fingerprint
 from .placements import rule_assignment
 from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.domain.placements import VIDEO_ID
-
-
-class PlacementClassifier(Protocol):
-    def classify(self, rows: list[dict], contexts: dict) -> list[dict]: ...
 
 
 class SimulatedClassifier:

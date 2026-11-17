@@ -1,6 +1,6 @@
 """Main-model port, simulated profiles and scoped campaign tool schemas."""
 import json
-from typing import Protocol
+from campaign_agent.ports.planning import MainModel
 
 from campaign_agent.adapters.openrouter_reviews import OpenRouterInference, parse_json
 from campaign_agent.domain.inference_errors import ReviewInferenceError
@@ -36,10 +36,6 @@ TOOLS = [
     tool('respond', 'Select a reply topic. The application supplies factual wording from the current campaign; no action is performed.',
          {'topic': {'type': 'string', 'enum': list(TOPICS)}}, ['topic']),
 ]
-
-
-class MainModel(Protocol):
-    def next_turn(self, context: dict, history: list[dict], settings: dict) -> dict: ...
 
 
 class SimulatedPlanner:
@@ -180,6 +176,10 @@ class OpenRouterPlanner(OpenRouterInference):
                 else:
                     raise ReviewInferenceError('The current message cannot fit the configured input limit. '
                                                'No model request was sent. Shorten the message before trying again.') from None
+
+    def validate_turn(self, context, history, settings):
+        """Check input limits without exposing the provider request body to callers."""
+        self.prepare_turn(context, history, settings)
 
     def next_turn(self, context, history, settings):
         context, body = self.prepare_turn(context, history, settings)
