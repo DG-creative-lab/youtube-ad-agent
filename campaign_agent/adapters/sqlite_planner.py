@@ -1,9 +1,9 @@
 """Native planner records on a caller-owned SQLite connection.
 
-Application commands retain JSON, authorization, inference/recovery decisions,
-schema initialization and transaction ownership for those legacy records. Rows
-and text pass through. SQLiteCatalogStorage separately owns the first adopted
-catalogue transactions.
+Application commands retain JSON, authorization and inference/recovery decisions.
+Borrowed stores keep the caller transaction; lifecycle helpers own native startup
+and separate receipt writes. Rows and text pass through. Dedicated catalogue, read
+snapshot and placement commit adapters own their adopted transactions.
 """
 
 import sqlite3
@@ -25,6 +25,10 @@ class SQLitePlannerStore:
     def scoped_run_row(self, run_id: str, scope: PlannerRunScope):
         return SQLiteRunStore(self.connection).scoped_run_row(
             run_id, scope.client_id, scope.brand_id, scope.actor_id, scope.campaign_id)
+
+    @property
+    def catalogs(self):
+        return _CatalogRepository(_CatalogUnit(self.connection, writable=False))
 
     @property
     def placement_repositories(self):
@@ -209,6 +213,12 @@ class _SQLitePlannerReader:
     def __init__(self, store):
         self._store = store
 
+    def default_row(self, client_id, brand_id, actor_id):
+        return self._store.default_row(client_id, brand_id, actor_id)
+
+    def job_exists_row(self, run_id):
+        return self._store.job_exists_row(run_id)
+
     def scoped_run_row(self, run_id, scope):
         return self._store.scoped_run_row(run_id, scope)
 
@@ -312,3 +322,43 @@ class SQLitePlacementCommitStorage:
             finally:
                 unit._active = False
                 db.rollback()
+
+
+class SQLitePlannerLifecycleStorage:
+    """Initialize native planner tables and persist each receipt phase separately."""
+    def __init__(self, path):
+        self._path = path
+
+    @staticmethod
+    def initialize(path):
+        with closing(sqlite3.connect(path)) as db, db:
+            db.executescript('''
+                CREATE TABLE IF NOT EXISTS planner_sessions (
+                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL, settings TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS planner_defaults (
+                    client_id TEXT, brand_id TEXT, actor_id TEXT, model TEXT NOT NULL,
+                    PRIMARY KEY(client_id,brand_id,actor_id));
+                CREATE TABLE IF NOT EXISTS planner_jobs (
+                    run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, snapshot TEXT NOT NULL,
+                    classification_state TEXT NOT NULL DEFAULT 'pending', classification TEXT, outcome TEXT);
+                CREATE TABLE IF NOT EXISTS planner_turns (
+                    run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
+                    PRIMARY KEY(run_id,position));
+            ''')
+
+    def fail_classification(self, run_id):
+        with closing(sqlite3.connect(self._path)) as db, db:
+            SQLitePlannerStore(db).fail_classification(run_id)
+
+    def receive_classification(self, run_id, classification):
+        with closing(sqlite3.connect(self._path)) as db, db:
+            SQLitePlannerStore(db).receive_classification(run_id, classification)
+
+    def fail_turn(self, run_id, position, error):
+        with closing(sqlite3.connect(self._path)) as db, db:
+            SQLitePlannerStore(db).fail_turn(run_id, position, error)
+
+    def receive_turn(self, run_id, position, receipt):
+        with closing(sqlite3.connect(self._path)) as db, db:
+            SQLitePlannerStore(db).receive_turn(run_id, position, receipt)

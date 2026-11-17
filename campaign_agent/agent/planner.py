@@ -5,11 +5,11 @@ import re
 import sqlite3
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage, SQLitePlacementCommitStorage
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage, SQLitePlacementCommitStorage, SQLitePlannerLifecycleStorage
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.ports.placement_commit import PlacementCommitUnit, PlacementCommitStorage, PlacementRepositories
-from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage
+from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage, PlannerReceiptStorage
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
@@ -68,21 +68,8 @@ class PlacementAgent:
         self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
         self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
         self.review_tools = CampaignReviewTools(self)
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS planner_sessions (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    actor_id TEXT NOT NULL, settings TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS planner_defaults (
-                    client_id TEXT, brand_id TEXT, actor_id TEXT, model TEXT NOT NULL,
-                    PRIMARY KEY(client_id,brand_id,actor_id));
-                CREATE TABLE IF NOT EXISTS planner_jobs (
-                    run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                    classification_state TEXT NOT NULL DEFAULT 'pending', classification TEXT, outcome TEXT);
-                CREATE TABLE IF NOT EXISTS planner_turns (
-                    run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
-                    PRIMARY KEY(run_id,position));
-            ''')
+        SQLitePlannerLifecycleStorage.initialize(self.path)
+        self.receipt_storage: PlannerReceiptStorage = SQLitePlannerLifecycleStorage(self.path)
         self.placement_commit_storage: PlacementCommitStorage = SQLitePlacementCommitStorage(self.path)
         self.read_storage: PlannerReadStorage = SQLitePlannerReadStorage(self.path)
         self.conversation_storage = SQLiteConversationStorage(self.path)
@@ -101,16 +88,16 @@ class PlacementAgent:
                   {'id': 'simulated-inspect', 'label': 'Simulated agent · inspect first', 'mode': 'simulated'}]
         if not self.web_disabled and not self.remote.web_disabled:
             models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
-        with closing(sqlite3.connect(self.path)) as db:
-            row = SQLitePlannerStore(db).default_row(
+        with self.read_storage.read() as records:
+            row = records.default_row(
                 self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)
         default = row[0] if row and row[0] in {item['id'] for item in models} else 'simulated'
         return {'models': models, 'default': default, 'max_turns': MAX_TURNS,
                 'specialist': 'simulated_decision', 'specialist_label': 'Automatic · simulated decision model'}
 
     def owns(self, run_id):
-        with closing(sqlite3.connect(self.path)) as db:
-            return SQLitePlannerStore(db).job_exists_row(run_id) is not None
+        with self.read_storage.read() as records:
+            return records.job_exists_row(run_id) is not None
 
     def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none', provider_selection_id=None):
         if self.owner.foreground:
@@ -148,7 +135,7 @@ class PlacementAgent:
             if settings['mode']=='openrouter' and (self.web_disabled or self.remote.web_disabled):
                 self._require_model_available(settings)
             expected = (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id, json.dumps(settings))
-            self.catalogs.read(db, catalog_id)
+            self.catalogs.read(SQLitePlannerStore(db).catalogs, catalog_id)
             current = self.drafts._read(db)
             previous, truncated = self.conversations.begin(SQLitePlannerStore(db).conversations, session_id, settings, run_id, request,
                                                           catalog_id, current['revision'], after_message)
@@ -215,7 +202,7 @@ class PlacementAgent:
                 raise ReviewInferenceError('The specialist request outcome is unknown. Start a new run.')
             if self.classifier.route != source['routing']['classifier']:
                 raise ValueError('The pinned specialist route is unavailable.')
-            rows = self.catalogs.read(db, source['catalog_id'])
+            rows = self.catalogs.read(SQLitePlannerStore(db).catalogs, source['catalog_id'])
             contexts = self.drafts._read(db)['brief']['contexts']
             SQLitePlannerStore(db).request_classification(run_id)
         try:
@@ -228,13 +215,11 @@ class PlacementAgent:
                     or {row['id'] for row in assignments} != {row['video_id'] for row in rows}):
                 raise ValueError('Invalid classification receipt')
         except Exception:
-            with closing(sqlite3.connect(self.path)) as db, db:
-                SQLitePlannerStore(db).fail_classification(run_id)
+            self.receipt_storage.fail_classification(run_id)
             raise ReviewInferenceError('The specialist response failed validation. Start a new run.') from None
         result = {'assignments': assignments, 'route': source['routing']['classifier'],
                   'label': 'Simulated decision response; accuracy not evaluated'}
-        with closing(sqlite3.connect(self.path)) as db, db:
-            SQLitePlannerStore(db).receive_classification(run_id, json.dumps(result))
+        self.receipt_storage.receive_classification(run_id, json.dumps(result))
         return result
 
     def resume(self, run_id, max_steps=1):
@@ -286,12 +271,10 @@ class PlacementAgent:
                 except ProviderError:
                     raise
                 except Exception:
-                    with closing(sqlite3.connect(self.path)) as db, db:
-                        SQLitePlannerStore(db).fail_turn(
-                            run_id, position, 'The main-model request failed or its outcome is unknown. Start a new run.')
+                    self.receipt_storage.fail_turn(
+                        run_id, position, 'The main-model request failed or its outcome is unknown. Start a new run.')
                     raise ReviewInferenceError('The main-model request failed or its outcome is unknown. Start a new run.') from None
-                with closing(sqlite3.connect(self.path)) as db, db:
-                    SQLitePlannerStore(db).receive_turn(run_id, position, json.dumps(receipt))
+                self.receipt_storage.receive_turn(run_id, position, json.dumps(receipt))
             if self.owner.foreground: self.owner.foreground.before_commit(source['settings'])
             self.owner.require("youtube:agent.run")
             classified = None
@@ -427,7 +410,7 @@ class PlacementAgent:
                     or len(contexts) != len(set(contexts))):
                 raise ValueError('Choose known campaign contexts')
             selected = [item['id'] for item in classification['assignments'] if item['context'] in contexts]
-        saved = self.catalogs.save(None, source['catalog_id'], source['revision'],
+        saved = self.catalogs.save(source['catalog_id'], source['revision'],
                                    classification['assignments'], selected, repositories=unit)
         rows = {row['video_id']: row for row in self.catalogs.read_from(unit.catalogs, source['catalog_id'])}
         ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
@@ -457,7 +440,7 @@ class PlacementAgent:
                     'placements': [{key: row[key] for key in ('id', 'creative', 'source')} for row in draft['placements'][:30]],
                     'placement_count': len(draft['placements']), 'buyer_corrections': [item for item in corrections if item]}, 'running'
         if name == 'inspect_catalog':
-            rows = self.catalogs.read(db, source['catalog_id'])
+            rows = self.catalogs.read(SQLitePlannerStore(db).catalogs, source['catalog_id'])
             return {'entries': [{**row, 'description': row['description'][:300], 'source_reference': row['source_reference'][:200]} for row in rows[:10]],
                     'total': len(rows), 'shown': min(10, len(rows))}, 'running'
         if name == 'validate_campaign_setup' and not args:

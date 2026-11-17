@@ -3,7 +3,7 @@ from contextlib import closing
 import json
 import sqlite3
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, PropertyMock
 
 from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.agent.planning_models import SimulatedPlanner
@@ -24,7 +24,8 @@ class PlacementCommitTests(unittest.TestCase):
         with patch.object(runtime.planner, '_commit_legacy_turn', side_effect=AssertionError('Legacy commit')), \
              patch.object(runtime.drafts, 'write_unit', side_effect=AssertionError('Native writer')), \
              patch.object(runtime.drafts, '_save', side_effect=AssertionError('Native draft writer')), \
-             patch.object(runtime.planner.catalogs, 'read', side_effect=AssertionError('Native catalogue read')):
+             patch('campaign_agent.adapters.sqlite_planner.SQLitePlannerStore.catalogs',
+                   new_callable=PropertyMock, side_effect=AssertionError('Legacy catalogue factory')):
             result = runtime.resume(run, max_steps=1)
         self.assertEqual(result['status'], 'ready_for_review')
         self.assertEqual(result['result']['revision'], 2)

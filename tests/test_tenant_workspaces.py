@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
+
 from campaign_agent.access import BrandScope, LOCAL_BRAND, LOCAL_CONTEXT, LOCAL_OPERATOR, Operator, WorkspaceContext
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
@@ -82,7 +84,7 @@ class TenantWorkspaceTests(unittest.TestCase):
                 other.drafts.export_setup(first.drafts.campaign_id, 2, review["fingerprint"])
             foreign_catalog = self.catalog(first)
             with closing(sqlite3.connect(self.path)) as db, self.assertRaises(ValueError):
-                other.planner.catalogs.read(db, foreign_catalog)
+                other.planner.catalogs.read(SQLitePlannerStore(db).catalogs, foreign_catalog)
         # Different campaigns under one brand are also independent execution contexts.
         provision_workspace(self.path, self.contexts[0], "another-campaign", operator=self.operator, access=self.policy)
         sibling = self.runtime(campaign_id="another-campaign")
