@@ -291,6 +291,65 @@ class ArchitectureBoundaries(unittest.TestCase):
         forged = r.git('commit-tree', changed_tree, '-p', seed_base, '-p', first, '-m', 'changed merge tree')
         r.git('reset', '--hard', forged); invoke(2)
 
+    def test_campaign_debt_transfer_is_exact_and_one_time(self):
+        import hashlib
+        old = 'scripts/campaign_drafts.py'
+        new = 'campaign_agent/application/campaigns.py'
+        before = ("from pathlib import Path\nimport sqlite3\nfrom uuid import uuid4\n"
+                  "from campaign_agent.adapters import local_access, sqlite_drafts\n"
+                  "DEFAULT_DRAFT_PATH = Path(__file__).resolve().parents[1] / \".local/campaign-drafts.sqlite3\"\n"
+                  "class CampaignDrafts: pass\n")
+        adapter_a = 'campaign_agent/adapters/local_access.py'
+        adapter_b = 'campaign_agent/adapters/sqlite_drafts.py'
+        edges = [('direction', adapter_a), ('direction', adapter_b),
+                 ('external', 'pathlib'), ('external', 'sqlite3'), ('external', 'uuid')]
+        roles = {old: 'application', adapter_a: 'outbound', adapter_b: 'outbound'}
+        for scenario in ('valid', 'changed_body', 'wrong_role', 'partial', 'changed_metadata',
+                         'extra_exception', 'old_edge_remains', 'wrong_mode', 'untrusted_original', 'changed_line_endings', 'staged_modified'):
+            with self.subTest(scenario=scenario):
+                rows = [exception(rule=rule, source=old, target=target) for rule, target in edges]
+                r = self.repo({old: before, adapter_a: 'pass\n', adapter_b: 'pass\n'}, roles.copy(), rows)
+                # A disposable authored vector exercises the production gate with its own pinned source.
+                temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+                tool = Path(temp.name) / 'checker.py'
+                original_pin = '4b04b7b29ad01f3d48156df252d3bec30fff75864e1a159a8024a3ccd79d1be3'
+                pin = hashlib.sha256(before.encode()).hexdigest()
+                tool.write_text(CHECKER.read_text().replace(original_pin, ('0' * 64 if scenario == 'untrusted_original' else pin)))
+                r.write(new, before.replace('parents[1]', 'parents[2]'))
+                r.write(old, 'from campaign_agent.application.campaigns import CampaignDrafts\n')
+                r.policy['roles'][new] = 'application'
+                r.baseline['exceptions'] = [{**row, 'source': new} for row in rows]
+                if scenario == 'changed_body': r.write(new, before.replace('parents[1]', 'parents[2]') + 'x = 1\n')
+                if scenario == 'wrong_role': r.policy['roles'][new] = 'bootstrap'
+                if scenario == 'partial': r.baseline['exceptions'][0] = rows[0]
+                if scenario == 'changed_metadata': r.baseline['exceptions'][0]['owner_issue'] = 88; r.baseline['exceptions'][0]['removal_milestone'] = '88-composition'
+                if scenario == 'extra_exception': r.baseline['exceptions'].append(exception(source=new, target='socket'))
+                if scenario == 'old_edge_remains': r.write(old, before)
+                if scenario == 'wrong_mode': (r.root / new).chmod(0o755)
+                if scenario == 'changed_line_endings': (r.root / new).write_bytes(before.replace('parents[1]', 'parents[2]').replace('\n', '\r\n').encode())
+                r.save()
+                if scenario == 'staged_modified':
+                    r.git('add', '-A'); r.git('commit', '-qm', 'candidate')
+                    r.write(new, before.replace('parents[1]', 'parents[2]') + 'x = 1\n')
+                    r.git('add', new)
+                    r.write(new, before.replace('parents[1]', 'parents[2]'))
+                    result = subprocess.run([sys.executable, str(tool), '--root', str(r.root),
+                                             '--base-ref', r.base, '--format', 'json'],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2, result.stdout)
+                    self.assertIn('staged campaign transfer', json.loads(result.stdout)['error'])
+                    continue
+                if scenario == 'valid':
+                    self.assert_cli(r, 0, tool=tool)
+                    # On later changes the normal subset rule applies without freezing the moved file.
+                    accepted = r.git('rev-parse', 'HEAD')
+                    r.write(new, before.replace('parents[1]', 'parents[2]') + '\n# harmless later edit\n')
+                    self.assert_cli(r, 0, base=accepted, tool=tool)
+                    self.assert_cli(r, 1, '--strict', base=accepted, tool=tool)
+                else:
+                    code, _ = r.run(tool=tool)
+                    self.assertNotEqual(code, 0)
+
     def test_trusted_checker_catches_a_weakened_candidate(self):
         r = self.repo({'app.py': 'pass\n'}, {'app.py': 'application'})
         r.write('app.py', 'import sqlite3\n')

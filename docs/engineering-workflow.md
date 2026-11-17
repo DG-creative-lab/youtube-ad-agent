@@ -56,6 +56,16 @@ aliases or symbols on an admitted edge remain admitted; the waiver covers that
 module coupling. It does not authorize runtime effects. Missing/duplicate/malformed
 configurations fail, including deletion of an empty baseline.
 
+The checker recognizes one planned CampaignDrafts relocation from
+`scripts/campaign_drafts.py` to `campaign_agent/application/campaigns.py`.
+It permits only the five existing exceptions to move together, with unchanged
+metadata, actual matching imports and an application role. The destination must
+match the pinned original source exactly except for the default database path's
+one directory-depth adjustment. This is not a general waiver-growth mechanism.
+The checker change must be accepted on the current integration base before the
+relocation can pass CI's trusted-base check. After the move, ordinary shrinking
+rules apply. The existing selected-base trust boundary still applies.
+
 To retire an exception, eliminate the forbidden module edge and remove its row.
 Surviving metadata must be identical; new exceptions fail. Stale rows fail and
 must be removed. Two accepted shrinks compare each candidate with its immediately
