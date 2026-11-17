@@ -1,10 +1,9 @@
 """Build the manual handoff for the fictional campaign."""
 import hashlib
-import json
 from pathlib import Path
-from urllib.parse import urlencode
 
 from .creatives import EXAMPLES
+from .domain.fingerprints import package_fingerprint as package_fingerprint
 from .application.planner_context import assemble_package
 
 
@@ -67,8 +66,3 @@ def package_blockers(package):
         if not content["preview_sha256"] or any(not take["sha256"] for take in content["takes"]):
             blockers.append(f"Prepare the preview and comparison media for {title}.")
     return blockers
-
-
-def package_fingerprint(package):
-    encoded = json.dumps(package, sort_keys=True, separators=(",", ":")).encode()
-    return media_sha256(encoded)

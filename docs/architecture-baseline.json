@@ -2,9 +2,6 @@
   "schema_version": 1,
   "exceptions": [
     {"rule": "direction","source": "campaign_agent/adapters/gateplane.py","target": "campaign_agent/access.py","owner_issue": 86,"removal_milestone": "86-first-uow","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "direction","source": "campaign_agent/adapters/google_ads_reporting.py","target": "campaign_agent/campaign_setup.py","owner_issue": 87,"removal_milestone": "87-external","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "direction","source": "campaign_agent/adapters/google_ads_sandbox.py","target": "campaign_agent/campaign_setup.py","owner_issue": 87,"removal_milestone": "87-external","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "direction","source": "campaign_agent/adapters/google_ads_sandbox.py","target": "campaign_agent/handoff.py","owner_issue": 85,"removal_milestone": "85-core","reason": "Retire this direct import under the accepted module migration; see original import row."},
     {"rule": "direction","source": "campaign_agent/adapters/local_access.py","target": "campaign_agent/access.py","owner_issue": 86,"removal_milestone": "86-first-uow","reason": "Retire this direct import under the accepted module migration; see original import row."},
     {"rule": "direction","source": "campaign_agent/adapters/openrouter_models.py","target": "campaign_agent/model_catalogue.py","owner_issue": 85,"removal_milestone": "85-core","reason": "Retire this direct import under the accepted module migration; see original import row."},
     {"rule": "direction","source": "campaign_agent/adapters/openrouter_reviews.py","target": "campaign_agent/handoff.py","owner_issue": 85,"removal_milestone": "85-core","reason": "Retire this direct import under the accepted module migration; see original import row."},

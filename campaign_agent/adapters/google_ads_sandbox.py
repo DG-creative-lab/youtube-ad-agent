@@ -5,12 +5,12 @@ from hashlib import sha256
 import re
 from urllib.parse import urlsplit
 
-from campaign_agent.campaign_setup import SetupProviderError
-from campaign_agent.handoff import package_fingerprint
+from campaign_agent.domain.fingerprints import package_fingerprint
+from campaign_agent.domain.placements import VIDEO_ID as VIDEO_ID
+from campaign_agent.ports.campaign_effects import SetupProviderError
 
 API_VERSION = 'v26'
 TEST_BUDGET_MICROS = 10_000_000
-VIDEO_ID = re.compile(r'[A-Za-z0-9_-]{11}')
 RESOURCE_ID = re.compile(r'[1-9][0-9]{0,18}')
 CHANNELS = {'youtubeInStream': True}
 CHANNEL_FIELDS = ', '.join('ad_group.demand_gen_ad_group_settings.channel_controls.selected_channels.' + name

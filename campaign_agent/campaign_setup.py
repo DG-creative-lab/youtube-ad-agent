@@ -4,30 +4,15 @@ from datetime import datetime, timezone
 import json
 import re
 import sqlite3
-from typing import Protocol
 from urllib.parse import urlsplit
 
-from .handoff import package_fingerprint
+from .domain.fingerprints import package_fingerprint
+from .ports.campaign_effects import SetupProvider as SetupProvider, SetupProviderError as SetupProviderError
 from campaign_agent.domain.errors import PackageConflict
 
 
 def _valid_resource_id(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r'\S+', value) is not None
-
-
-class SetupProviderError(RuntimeError):
-    """The provider operation's outcome could not be established."""
-
-
-class SetupProvider(Protocol):
-    name: str
-    account_id: str
-    local_validation: bool
-
-    def prepare(self, package: dict, fingerprint: str) -> dict: ...
-    def validate(self, plan: dict) -> str | None: ...
-    def create_paused(self, operation_id: str, plan: dict) -> dict: ...
-    def readback(self, operation_id: str, plan: dict) -> dict | None: ...
 
 
 class CampaignSetup:

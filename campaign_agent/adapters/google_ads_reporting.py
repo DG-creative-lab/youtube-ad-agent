@@ -4,8 +4,9 @@ from functools import partial
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from campaign_agent.campaign_setup import SetupProviderError
-from .google_ads_sandbox import GoogleAdsSandbox, RESOURCE_ID, VIDEO_ID, query_rows, verify_test_account
+from campaign_agent.domain.placements import VIDEO_ID
+from campaign_agent.ports.campaign_effects import DeliveryBinding, SetupProviderError
+from .google_ads_sandbox import GoogleAdsSandbox, RESOURCE_ID, query_rows, verify_test_account
 
 
 PLACEMENT_LIMIT = 200
@@ -34,7 +35,7 @@ class GoogleAdsReporting:
             raise ValueError('Configure distinct Google Ads test manager and customer IDs.')
         self.manager_id, self.account_id, self.connect = manager_id, account_id, connect
 
-    def snapshot(self, binding):
+    def snapshot(self, binding: DeliveryBinding) -> dict:
         campaign_id = binding['campaign_id']
         ids = [group['ad_group_id'] for group in binding['groups']]
         if (binding['account_id'] != self.account_id or not ids

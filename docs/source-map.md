@@ -23,6 +23,16 @@ application JSON/error/hash compatibility is preserved. CampaignDrafts now resid
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
+## Campaign setup and reporting contracts · #87
+
+`ports/campaign_effects.py` owns the setup provider, delivery binding and reporting
+contracts, and the setup error shared by their callers. The Google Ads adapters
+use those contracts and pure domain helpers for fingerprints and video IDs.
+Existing setup and delivery imports remain available. Setup approval, creation
+reservation and read-back still use the recorded plan, while delivery matches the
+verified setup before saving a report. Filesystem and runtime composition changes
+remain separate migration work.
+
 ## Structured model services · #87
 
 `ports/planning.py` owns `InstructionReviewer` and `InstructionDrafter` with typed
