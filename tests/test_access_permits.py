@@ -78,7 +78,7 @@ class AccessPermitTests(unittest.TestCase):
 
     def test_permit_expiring_during_native_verification_is_rejected(self):
         permit=self.permit()
-        from campaign_agent import access as native
+        from campaign_agent.adapters import sqlite_access as native
         original=native.command_hash;calls=[0]
         def slow_hash(value):
             calls[0]+=1
