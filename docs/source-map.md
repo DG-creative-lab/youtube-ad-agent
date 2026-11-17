@@ -25,8 +25,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 
 ## Provider wiring and catalogue state · #87
 
-The supported local bootstrap supplies model and setup provider factories and local
-access. The hosted fixture supplies the staff authority factory explicitly, and
+The supported local bootstrap supplies its simulated setup provider and local access. The hosted fixture supplies the staff authority factory explicitly, and
 the hosted runtime still resolves the current principal before looking up assets
 or constructing commands. Local and Gateplane access adapters use the same native
 permit check against the caller's connection. Their command hashes and capability
@@ -37,9 +36,10 @@ with an explicit clock. The process cache remains scoped to the serving instance
 and is supplied to the provider-session commands via `CatalogueState`. The cache
 still stores advice, and sessions prove scope and key binding before using it.
 
-Legacy constructors in the compatibility launchers still assemble defaults, and
-the static checker still records those edges. Their retirement requires an
-explicit entrypoint transition. #87 remains open.
+The core runtime still constructs the native OpenRouter adapters used for foreground
+admission. Legacy defaults and process cache implementation retain their existing
+import exceptions. Their retirement requires an entrypoint transition that preserves
+foreground qualification and launcher compatibility. #87 remains open.
 
 ## OpenRouter request policy · #87
 
