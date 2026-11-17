@@ -10,7 +10,7 @@ external adoption and #88 consolidation afterward.
 On 16 November the user chose a smaller #84 dependency checker, superseding the
 unpublished broad analyzer. The [ADR](hexagonal-architecture.md) and historical
 [module map](hexagonal-module-map.json) retain application/migration obligations.
-The [live policy](architecture-policy.json) classifies 66 Python files after the first #85 domain slice by exact
+The [live policy](architecture-policy.json) classifies 67 Python files after the #85 policy slice by exact
 path. Web/legacy-client inventory remains in the historical map; this checker
 analyzes Python imports only. Tests are excluded consumers, never runtime dependencies.
 

@@ -34,6 +34,7 @@
     "campaign_agent/domain/__init__.py": "marker",
     "campaign_agent/domain/errors.py": "domain",
     "campaign_agent/domain/inference_errors.py": "domain",
+    "campaign_agent/domain/instruction_policy.py": "domain",
     "campaign_agent/domain/placements.py": "domain",
     "campaign_agent/domain/scope.py": "domain",
     "campaign_agent/foreground_inference.py": "application",

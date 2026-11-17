@@ -13,7 +13,7 @@ plans until implemented. PR #90 accepted #83 at
 Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
 at `9fabf358b30cbc794455c1da78440043593d1497`. The first #85 domain-foundation
 slice adds five Python modules (including the inert package marker), for 66 exact
-roles in the [live policy](architecture-policy.json). The
+roles after that slice; the decision policy adds a 67th role in the [live policy](architecture-policy.json). The
 [baseline](architecture-baseline.json) shrinks from 88 to 86 module edges. Pure
 scope values, shared errors and video-ID syntax now have domain owners; old paths
 reexport the same objects and runtime consumers use the new owners directly.
@@ -60,7 +60,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [campaign_agent/performance.py](../campaign_agent/performance.py) | Sample reporting, saved reviews, buyer corrections and validation of the evidence supporting an instruction test. |
 | [campaign_agent/creatives.py](../campaign_agent/creatives.py) | Published examples and the approved neutral instruction components used to validate and assemble provider proposals. |
 | [campaign_agent/instruction_tests.py](../campaign_agent/instruction_tests.py) | Approved test pairs, stable viewer assignments, saved agent assessments and cumulative learning evidence snapshots. |
-| [campaign_agent/instruction_policy.py](../campaign_agent/instruction_policy.py) | Offline posterior and value of one more batch from the latest saved participant snapshot and pinned test limits. |
+| [domain/instruction_policy.py](../campaign_agent/domain/instruction_policy.py) | Offline posterior and value of one more batch; the old instruction_policy module reexports its objects for compatibility. |
 | [campaign_agent/learning.py](../campaign_agent/learning.py) | Scoped instruction findings, source freshness, retirement, and reuse through the campaign draft writer. |
 | [scripts/compare_instruction_policies.py](../scripts/compare_instruction_policies.py) | Frozen offline simulations, native assessment comparison, decision scoring and the persisted fresh-brief walkthrough. |
 | [campaign_agent/handoff.py](../campaign_agent/handoff.py) | Package content fingerprints, media references and the manual setup export. |

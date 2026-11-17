@@ -106,6 +106,8 @@ The walkthrough is a separate deterministic integration example. The comparison 
 
 ## Source fingerprints
 
+These fingerprints record the original comparison run. The policy has since moved to `campaign_agent/domain/instruction_policy.py`; newly generated reports fingerprint both the implementation and the compatibility module.
+
 - `scripts/compare_instruction_policies.py` has SHA-256 `428619ae706ce7c9318bc0ef994638293a64030566303a134765a60a8b7dd295`.
 - `campaign_agent/instruction_policy.py` has SHA-256 `593989a8b2a3140e488c9d0c86600d871a952c6a84ff9cf807314865aeef8194`.
 - `campaign_agent/instruction_tests.py` has SHA-256 `1383d9dfc4503021b3ce5f17c9dfe961d2702206d62eca14c047b54bffce7fcf`.

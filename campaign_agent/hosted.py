@@ -19,7 +19,7 @@ from campaign_agent.assets import AssetUnavailable
 from campaign_agent.adapters.gateplane import GateplaneAccess
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
 from campaign_agent.handoff import caption_bytes, media_sha256, read_media
-from campaign_agent.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
+from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.publications import Publications
