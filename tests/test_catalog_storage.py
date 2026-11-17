@@ -1,8 +1,13 @@
 """Catalogue transaction and command conformance with authored data."""
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack, redirect_stdout
+from email.message import Message
+import io
+import json
 import sqlite3
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+
+from scripts import placement_review
 
 from campaign_agent.adapters.sqlite_planner import SQLiteCatalogStorage
 from campaign_agent.placement_discovery import PlacementDiscovery
@@ -123,6 +128,44 @@ class CatalogStorageTests(unittest.TestCase):
             with self.assertRaisesRegex(PermissionError, 'Authored revocation'):
                 self.commands.register('Storage fixture', ROWS)
         self.assertEqual(self.stored(), ([], []))
+
+    def test_local_catalog_handler_preserves_safe_503_for_storage_failures(self):
+        servers = []
+
+        def server(address, handler):
+            result = MagicMock(server_port=address[1])
+            result.__enter__.return_value = result
+            result.handler = handler
+            servers.append(result)
+            return result
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(placement_review, 'ThreadingHTTPServer', side_effect=server))
+            stack.enter_context(patch.object(placement_review, 'Thread'))
+            stack.enter_context(patch.object(placement_review, 'AgentRuntime', return_value=self.case.runtime))
+            stack.enter_context(patch.object(placement_review.secrets, 'token_urlsafe', return_value='authored-operator'))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            placement_review.serve(18981, False, draft_path=self.case.path, viewer_port=18982)
+        handler = servers[0].handler.__new__(servers[0].handler)
+        handler.server = servers[0]
+        handler.path = '/api/agent/catalog'
+        handler.send = MagicMock()
+        body = json.dumps({'label': 'Storage fixture', 'rows': ROWS}).encode()
+        handler.headers = Message()
+        for name, value in {'Host': '127.0.0.1:18981', 'Origin': 'http://127.0.0.1:18981',
+                            'X-Local-Operator': 'authored-operator', 'Content-Type': 'application/json',
+                            'Content-Length': str(len(body))}.items():
+            handler.headers[name] = value
+        handler.rfile = io.BytesIO(body)
+        handler.do_POST()
+        self.assertEqual(handler.send.call_args.args[0], 200)
+        self.assertEqual(handler.send.call_args.args[1]['id'], EXPECTED_ID)
+        for operation in ('write', 'read'):
+            with self.subTest(operation=operation):
+                handler.rfile = io.BytesIO(body)
+                with patch.object(self.commands.catalog_storage, operation, side_effect=CatalogStorageError()):
+                    handler.do_POST()
+                self.assertEqual(handler.send.call_args.args, (503, {'error': 'Could not save the catalog.'}))
 
     def test_real_commands_accept_an_isolated_authored_store(self):
         class AuthoredStorage:
