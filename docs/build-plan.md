@@ -4,7 +4,22 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 complete local placement commit
+## Current architecture milestone · #86 planner storage lifecycle
+
+Catalogue read/save now require typed repositories throughout; the application
+module has no remaining SQL or native connection path. All planner catalogue
+reads borrow their existing transaction, including start/classification/tool reads.
+Planner options/run-existence reads use the snapshot reader. Run/planner schema
+initialization and local legacy backfill are explicit native adapter operations.
+Each model/classifier receive/fail write uses a core-owned receipt port and its own
+adapter transaction, preserving separately durable receipts before tool commit.
+
+The receipt port changes storage ownership, not inference retry or failure policy.
+Schemas, raw serialized data and local-only legacy identities are preserved. The
+reservation/start/preflight/access graph, remaining tool commits and composition
+still retain legacy boundaries; this does not complete #86 or select another backend.
+
+### Delivered placement commit
 
 The non-foreground placement save now uses a typed write unit. Scoped run/session
 and revision checks, catalogue/provenance reads, draft append, step, run outcome

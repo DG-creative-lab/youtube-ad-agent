@@ -60,20 +60,15 @@ class PlacementDiscovery:
             unit.commit()
         return catalog_id
 
-    def read(self, db, catalog_id):
-        self.drafts.require("youtube:campaign.read")
-        row = db.execute('SELECT snapshot FROM placement_catalogs WHERE id=? AND client_id=? AND brand_id=? AND campaign_id=?',
-                         (catalog_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id)).fetchone()
-        if row is None:
-            raise ValueError('Choose an available catalog for this campaign.')
-        return json.loads(row[0])
-
-    def read_from(self, catalogs: CatalogReader, catalog_id):
+    def read(self, catalogs: CatalogReader, catalog_id):
         self.drafts.require("youtube:campaign.read")
         row = catalogs.read_snapshot(self._catalog_scope, catalog_id)
         if row is None:
             raise ValueError('Choose an available catalog for this campaign.')
         return json.loads(row[0])
+
+    def read_from(self, catalogs: CatalogReader, catalog_id):
+        return self.read(catalogs, catalog_id)
 
     def list(self):
         self.drafts.require("youtube:campaign.read")
@@ -81,16 +76,16 @@ class PlacementDiscovery:
             return [{'id': row.id, 'label': row.label, 'count': len(json.loads(row.snapshot))}
                     for row in catalogs.list_catalogs(self._catalog_scope)]
 
-    def save(self, db, catalog_id, expected_revision, assignments, selected_ids,
-             *, repositories: PlacementRepositories | None = None):
-        rows = self.read_from(repositories.catalogs, catalog_id) if repositories is not None else self.read(db, catalog_id)
+    def save(self, catalog_id, expected_revision, assignments, selected_ids,
+             *, repositories: PlacementRepositories):
+        rows = self.read(repositories.catalogs, catalog_id)
         if (not isinstance(selected_ids, list) or not selected_ids or any(not isinstance(item, str) for item in selected_ids)
                 or len(selected_ids) != len(set(selected_ids))):
             raise ValueError('Choose distinct classified video IDs.')
         allowed = {row['id']: row['context'] for row in assignments if row['context'] != 'review'}
         if any(item not in allowed for item in selected_ids):
             raise ValueError('Only classified, unambiguous catalog videos can be saved.')
-        current = self.drafts.read_from(repositories.drafts) if repositories is not None else self.drafts._read(db)
+        current = self.drafts.read_from(repositories.drafts)
         if current['revision'] != expected_revision:
             raise PackageConflict('The campaign changed. Start a new placement run from the latest revision.')
         identity = {'scope': vars(self.drafts.scope), 'campaign': self.drafts.campaign_id, 'rows': rows}
@@ -103,4 +98,4 @@ class PlacementDiscovery:
                     'catalog_ref': package_fingerprint({**identity, 'video': row['video_id']})[:32]}
         return self.drafts.save({'campaign_id': self.drafts.campaign_id, 'revision': expected_revision,
                                  'placements': list(chosen.values())},
-                                **({'repository': repositories.drafts} if repositories is not None else {'connection': db}))
+                                repository=repositories.drafts)

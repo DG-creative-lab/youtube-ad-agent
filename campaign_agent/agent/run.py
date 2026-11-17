@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.ports.planning import PlannerModel
-from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
+from campaign_agent.adapters.sqlite_runs import SQLiteRunStore, SQLiteRunStorage
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
 from campaign_agent.domain.errors import PackageConflict
@@ -88,35 +88,8 @@ class AgentRuntime:
         self.model = model or RecordedInference()
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
         self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS agent_runs (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    actor_id TEXT NOT NULL, request TEXT NOT NULL, status TEXT NOT NULL, campaign_id TEXT NOT NULL
-                )
-            """)
-            if "campaign_id" not in {row[1] for row in db.execute("PRAGMA table_info(agent_runs)")}:
-                db.execute("ALTER TABLE agent_runs ADD COLUMN campaign_id TEXT")
-                db.execute("UPDATE agent_runs SET campaign_id='tts-sample' WHERE client_id=? AND brand_id=?",
-                           (LOCAL_CONTEXT.scope.client_id, LOCAL_CONTEXT.scope.brand_id))
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS agent_steps (
-                    run_id TEXT NOT NULL, position INTEGER NOT NULL, tool TEXT NOT NULL,
-                    result TEXT NOT NULL, PRIMARY KEY (run_id, position)
-                )
-            """)
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS agent_test_sources (
-                    run_id TEXT PRIMARY KEY, source TEXT NOT NULL
-                )
-            """)
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS agent_review_inference (
-                    run_id TEXT PRIMARY KEY, settings TEXT NOT NULL,
-                    state TEXT NOT NULL DEFAULT 'pending', receipt TEXT, error TEXT
-                )
-            """)
+        SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
+                                    legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
 
         self.planner = PlacementAgent(self, main_models, transport=main_transport, main_model=planner_model,
                                       simulator=planner_simulator, classifier=placement_classifier)
