@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 from time import time
 
-from .access import WorkspaceContext
+from campaign_agent.domain.scope import WorkspaceContext
 from .migrations import migrate_path
 from .model_catalogue import CatalogueCache, fingerprint, normalize, select_endpoint, compatible_model, model_id, price
 from .ports.access import AccessRequest, AccessUnavailable

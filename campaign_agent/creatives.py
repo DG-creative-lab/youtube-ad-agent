@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 
-from .access import BrandScope, LOCAL_BRAND
+from campaign_agent.domain.scope import BrandScope
+from .access import LOCAL_BRAND
 
 
 # Provider proposals can combine these neutral clauses; arbitrary viewer prose is not accepted.

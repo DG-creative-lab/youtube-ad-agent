@@ -6,7 +6,8 @@ from typing import Protocol
 
 from .handoff import package_fingerprint
 from .placements import rule_assignment
-from scripts.campaign_drafts import PackageConflict, VIDEO_ID
+from campaign_agent.domain.errors import PackageConflict
+from campaign_agent.domain.placements import VIDEO_ID
 
 
 class PlacementClassifier(Protocol):

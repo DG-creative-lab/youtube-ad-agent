@@ -17,11 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if not __package__:
     sys.path.insert(0, str(ROOT))
 
-from campaign_agent.access import LOCAL_BRAND, Operator
+from campaign_agent.access import LOCAL_BRAND
+from campaign_agent.domain.scope import Operator
 from campaign_agent.agent.run import AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.placement_discovery import SimulatedClassifier
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 
 CORPUS = ROOT / 'examples/agent-behavior-evals.v1.json'
 CORPUS_SHA256 = '9c082805b752a1c8393ec7b392e9ac11c8e28c3d261b25f3bed3579cc6592b32'

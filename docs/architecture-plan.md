@@ -4,17 +4,17 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-16 November architecture boundary: #83 is accepted in PR #90 at
-`7c139e19bfbf0d829b31f8d09320e912e5561f6b`. The [ADR](hexagonal-architecture.md)
-and historical [module map](hexagonal-module-map.json) retain the accepted
-semantics and migration owners. Initial #84 adds an offline Python import ratchet,
-[live policy](architecture-policy.json) and finite [baseline](architecture-baseline.json),
-under the user-approved smaller scope (module directions/cycles, no runtime-effect inference).
-Without runtime inversion, after human merge, #85 is next. #87 foundation → #86
-complete local pilot UOW → #87 external adoption → #88 composition integrate
-serially. Finish the named #37 native graph → #84 strict zero → #89 conformance;
-later #37 PostgreSQL/cloud work does not block #89. The historical map covers60
-Python/17web/legacy1; live policy adds the exact developer checker for61Python.
+17 November architecture boundary: #83 was accepted in PR #90; initial #84 was
+human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`. Its static Python import guard
+remains small. The first #85 slice moves scope values, shared errors and video-ID
+syntax to pure domain owners with inward compatibility reexports. Live policy
+covers 66 Python modules and the baseline shrinks 88 → 86. CampaignDrafts
+orchestration and other #85 policies remain separate work. The historical
+[ADR/map](hexagonal-architecture.md) migration/authority obligations are unchanged.
+#87 foundation → #86 complete local pilot UOW → #87 external → #88 composition
+integrate serially, then the named #37 native graph → #84 import strict zero → #89
+conformance. Later PostgreSQL/cloud work stays separate.
 
 15 November hosted decision: [proposed topology and first migration contract](hosted-topology-decision.md)
 selects separate Vercel Python ASGI staff/viewer origins in Frankfurt, Neon

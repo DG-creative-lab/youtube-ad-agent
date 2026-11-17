@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 
-from .access import BrandScope
+from campaign_agent.domain.scope import BrandScope
 from .assets import asset_name, read_blob, write_blob
 from .handoff import package_fingerprint
 from .migrations import MIGRATIONS, SchemaConflict, versions

@@ -4,25 +4,27 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · initial #84
+## Current architecture milestone · #85 domain foundations
 
-#83's [ADR](hexagonal-architecture.md) and immutable historical
-[module map](hexagonal-module-map.json) were accepted in PR #90 at
-`7c139e19bfbf0d829b31f8d09320e912e5561f6b`. Initial #84 supplies the tested offline
-ratchet, [live policy](architecture-policy.json) and owner-linked shrinking
-[baseline](architecture-baseline.json). This initial delivery keeps #84 open:
-normal mode admits 88 reviewed Python module-edge exceptions; strict rejects them all.
-The user simplified the unpublished analyzer on 16 November: use/SQL/callback/effect
-analysis and occurrence identities are outside this checker. Tests and review retain
-those responsibilities; import strict zero is only one conformance gate.
+Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`. The small static Python import
+checker is the accepted guard; deeper effect/authority properties remain test and
+review responsibilities. #84 stays open through its later strict-zero milestone.
 
-After exact-head independent acceptance, current Python/Planner CI and human
-merge, #85 core relocation is next. #87 foundation contracts/offline injection
-precede #86's complete pilot-native graph and minimal factory; #87 external
-adoption and #88 composition follow serially. #37 completes the residual named
-native graph, then #84 strict zero and #89 conformance finish architecture
-acceptance. Later PostgreSQL/cloud/recovery remains separate. Existing authority,
-receipt, project/producer and foreground-activation gates are unchanged.
+The first bounded #85 slice gives shared scope values, campaign/inference errors
+and video-ID syntax pure domain owners. Runtime consumers import those owners;
+legacy paths reexport the same objects for compatibility. The baseline shrinks
+from 88 to 86 module edges, with no new exceptions. No SQL, transaction, provider,
+identity-default or wire behavior moves in this slice. Relocated classes acquire
+new Python module metadata; application JSON/error/fingerprint semantics remain.
+
+#85 remains open: CampaignDrafts orchestration, other domain policies and remaining
+core DTO ownership need later small slices. After #85 foundation work, #87
+foundation contracts/offline injection precede #86 whole pilot-native UOW; #87
+external and #88 composition follow. #37's residual named native graph, #84 import
+strict zero and #89 broader conformance retain their gates. PostgreSQL/cloud and
+provider/identity activation remain separate. Each PR requires independent review,
+verification, current CI and human merge.
 
 Updated 15 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
 

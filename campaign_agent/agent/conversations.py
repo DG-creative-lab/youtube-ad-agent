@@ -5,7 +5,7 @@ import sqlite3
 
 from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 from .replies import verified_result
 
 MAX_CONTEXT_MESSAGES = 20

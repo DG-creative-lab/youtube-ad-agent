@@ -14,7 +14,8 @@ import secrets
 import sqlite3
 import stat
 
-from .access import BrandScope, require_access
+from campaign_agent.domain.scope import BrandScope
+from .access import require_access
 from .creatives import Example
 from .handoff import media_sha256, package_fingerprint
 from .migrations import migrate_path

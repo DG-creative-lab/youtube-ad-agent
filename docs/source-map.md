@@ -10,13 +10,16 @@ snapshot (60Python/17web plus retained legacy client). Proposed targets remain
 plans until implemented. PR #90 accepted #83 at
 `7c139e19bfbf0d829b31f8d09320e912e5561f6b`.
 
-Initial #84's [live policy](architecture-policy.json) classifies 61 Python files.
-The [baseline](architecture-baseline.json) contains 88 reviewed module-edge
-exceptions with owner and whole-import retirement milestone. The user-approved
-smaller checker handles static import directions/cycles; indirect runtime effects
-remain responsibilities of behavior tests and review. Web inventory stays in the
-historical map. After human merge, #85 relocation is next; inversion and strict
-import-debt zero remain pending.
+Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`. The first #85 domain-foundation
+slice adds five Python modules (including the inert package marker), for 66 exact
+roles in the [live policy](architecture-policy.json). The
+[baseline](architecture-baseline.json) shrinks from 88 to 86 module edges. Pure
+scope values, shared errors and video-ID syntax now have domain owners; old paths
+reexport the same objects and runtime consumers use the new owners directly.
+Class `__module__` metadata changes with ownership; application JSON/error/hash
+compatibility is preserved. Remaining #85 orchestration/policy work and deeper
+inversion stay open. Web inventory remains in the historical map.
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
@@ -24,6 +27,9 @@ This map translates the [application architecture](architecture-plan.md) into co
 
 | Path | What it owns today |
 | --- | --- |
+| [domain/scope.py](../campaign_agent/domain/scope.py) | BrandScope, Operator and WorkspaceContext values/validation; defaults and current-authority decisions stay in access.py. |
+| [domain/errors.py](../campaign_agent/domain/errors.py), [domain/inference_errors.py](../campaign_agent/domain/inference_errors.py) | Shared campaign conflicts and sanitized inference failure, independent of script/provider modules. |
+| [domain/placements.py](../campaign_agent/domain/placements.py) | Shared video-ID syntax, independent of script imports. |
 | [scripts/check_architecture.py](../scripts/check_architecture.py) | Small stdlib Python import/role/cycle checker with selected-base shrink guard and strict mode; never executes scanned code. |
 | [tests/test_architecture_boundaries.py](../tests/test_architecture_boundaries.py) | Authored temporary CLI/Git fixtures for import boundaries, cycle failures and baseline shrinking; developer/test support only. |
 | [architecture-policy.json](architecture-policy.json), [architecture-baseline.json](architecture-baseline.json) | Schema-1 exact Python classifications and readable module-edge exceptions; detailed ownership/line diagnostics, no baseline updater. |

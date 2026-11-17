@@ -10,20 +10,20 @@ external adoption and #88 consolidation afterward.
 On 16 November the user chose a smaller #84 dependency checker, superseding the
 unpublished broad analyzer. The [ADR](hexagonal-architecture.md) and historical
 [module map](hexagonal-module-map.json) retain application/migration obligations.
-The [live policy](architecture-policy.json) classifies 61 Python files by exact
+The [live policy](architecture-policy.json) classifies 66 Python files after the first #85 domain slice by exact
 path. Web/legacy-client inventory remains in the historical map; this checker
 analyzes Python imports only. Tests are excluded consumers, never runtime dependencies.
 
 Run from a committed candidate with the **current accepted integration base**:
 
 ```sh
-python3 scripts/check_architecture.py --base-ref 7c139e19bfbf0d829b31f8d09320e912e5561f6b
-python3 scripts/check_architecture.py --base-ref 7c139e19bfbf0d829b31f8d09320e912e5561f6b --format json --details
+python3 scripts/check_architecture.py --base-ref 9fabf358b30cbc794455c1da78440043593d1497
+python3 scripts/check_architecture.py --base-ref 9fabf358b30cbc794455c1da78440043593d1497 --format json --details
 python3 -m unittest discover -s tests -p test_architecture_boundaries.py -v
 ```
 
-The example SHA applies only to this initial delivery. After merge, use the latest
-accepted base, not that historical SHA. CI supplies PR `base.sha` or push `before`,
+The example SHA applies to this first #85 slice. After each merge, use the latest
+accepted base, not a historical SHA. CI supplies PR `base.sha` or push `before`,
 fetches history, runs the selected base's checker from a temporary file when
 present, then runs the candidate checker. Missing/nonancestor/self bases fail.
 The first seed requires exact accepted #83, clean committed source, unchanged
@@ -48,8 +48,8 @@ Every edge within a cyclic strongly connected component is checked separately.
 New/moved Python files need explicit classification; surviving roles cannot change
 under the ordinary shrink gate.
 
-The readable [baseline](architecture-baseline.json) has **88 module-edge exceptions**:
-58 external imports and 30 direction violations. Each has source, target, rule,
+The readable [baseline](architecture-baseline.json) has **86 module-edge exceptions** after the first #85 slice:
+58 external imports and 28 direction violations (initial #84 seeded 88). Each has source, target, rule,
 owner issue, whole-import removal milestone and reason. There are no source-site
 IDs, compressed profiles or runtime-effect metadata. Repeated imports, different
 aliases or symbols on an admitted edge remain admitted; the waiver covers that
@@ -74,7 +74,8 @@ an import, adding a port or passing strict does not prove the architecture migra
 or its security/transaction requirements complete. The deeper use/partial-adoption
 obligations in the accepted map remain review and migration acceptance criteria.
 
-Initial #84 remains open for strict zero. After human merge, #85 is next, then
+Initial #84 is merged in PR #91 and remains open for strict zero. #85 begins with
+pure scope/error/video-ID ownership; orchestration and other policies remain. Then
 #87 foundation → #86 whole pilot UOW → #87 external → #88 composition → #37 named
 native graph → #84 import strict zero → #89 broader conformance. PostgreSQL/cloud
 closure is separate. Keep the unchanged native recipe, behavior tests, canonical

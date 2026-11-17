@@ -8,6 +8,8 @@ import re
 import sqlite3
 from uuid import uuid4
 
+from campaign_agent.domain.errors import StaleDraft, PackageConflict
+from campaign_agent.domain.placements import VIDEO_ID
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, require_access
 from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore
@@ -17,7 +19,6 @@ from campaign_agent import handoff
 from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
-VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 MAX_PLACEMENTS = 2400
 MAX_DRAFT_BYTES = 2_000_000
 CATALOG_SOURCES = {"creator_supplied", "licensed"}
@@ -54,18 +55,6 @@ POLICY = {
         "Confirm targeting in Google Ads before launch.",
     ],
 }
-
-
-class StaleDraft(ValueError):
-    """A later revision already exists for this campaign."""
-
-    def __init__(self, latest):
-        super().__init__("A newer draft exists. Review your changes against it before saving.")
-        self.latest = latest
-
-
-class PackageConflict(ValueError):
-    """The reviewed package is stale or lacks a matching approval."""
 
 
 def _catalog_schema(db):

@@ -6,7 +6,7 @@ import sqlite3
 from time import time
 from uuid import uuid4
 
-from campaign_agent.access import BrandScope, Operator, WorkspaceContext
+from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
 from campaign_agent.assets import AssetStore
 from campaign_agent.adapters.gateplane import timestamp, validate_record
 from campaign_agent.agent.run import AgentRuntime

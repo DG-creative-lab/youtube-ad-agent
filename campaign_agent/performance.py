@@ -8,7 +8,7 @@ import re
 import sqlite3
 
 from .handoff import package_fingerprint
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 
 
 DELIVERY_FIXTURE = Path(__file__).resolve().parents[1] / "examples/tts-performance/delivery.json"

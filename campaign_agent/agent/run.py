@@ -10,14 +10,16 @@ from uuid import uuid4
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.creatives import render_instruction_choices
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, PackageConflict
+from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH
+from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
 from campaign_agent.learning import InstructionFindings
-from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews, ReviewInferenceError
+from campaign_agent.adapters.openrouter_reviews import OpenRouterReviews
+from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup

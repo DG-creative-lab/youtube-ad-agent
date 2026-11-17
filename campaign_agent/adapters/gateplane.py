@@ -15,7 +15,8 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator, FormatChecker
 from rfc3986_validator import validate_rfc3986
 
-from campaign_agent.access import BrandScope, CAPABILITIES, WorkspaceContext
+from campaign_agent.domain.scope import BrandScope, WorkspaceContext
+from campaign_agent.access import CAPABILITIES
 from campaign_agent.ports.access import AccessUnavailable, GateplaneClient, CommandPermit
 from campaign_agent.access import validate_permit
 

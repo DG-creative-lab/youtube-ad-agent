@@ -2,7 +2,8 @@
 import json
 from typing import Protocol
 
-from campaign_agent.adapters.openrouter_reviews import OpenRouterInference, ReviewInferenceError, parse_json
+from campaign_agent.adapters.openrouter_reviews import OpenRouterInference, parse_json
+from campaign_agent.domain.inference_errors import ReviewInferenceError
 from .replies import QUESTIONS, TOPICS
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.instruction_tests import ASSESSMENT_REASONS, recorded_assessment

@@ -6,7 +6,7 @@ import sqlite3
 from typing import Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 from .adapters import demo_delivery
 from .campaign_setup import CampaignSetup
 from .delivery_next_test import next_action, respect_correction
