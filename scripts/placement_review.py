@@ -22,6 +22,7 @@ if not __package__:
     sys.path.insert(0, str(ROOT))
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.ports.catalogs import CatalogStorageError
 from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.domain.inference_errors import ReviewInferenceError
@@ -345,7 +346,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(200, {"id": catalog_id, "catalogs": agent.planner.catalogs.list()})
             except (ValueError, TypeError, RecursionError):
                 self.send(400, {"error": "Use a named catalog of 1–200 permitted rows with source references."})
-            except sqlite3.Error:
+            except (sqlite3.Error, CatalogStorageError):
                 self.send(503, {"error": "Could not save the catalog."})
 
         def post_agent(self):

@@ -1,8 +1,7 @@
 """Immutable permitted catalogs and validated placement proposals."""
-from contextlib import closing
 import json
-import sqlite3
 from campaign_agent.ports.planning import PlacementClassifier
+from campaign_agent.ports.catalogs import CatalogStorage, CatalogScope, CatalogRecord, CatalogEntry
 
 from .handoff import package_fingerprint
 from .placements import rule_assignment
@@ -18,12 +17,13 @@ class SimulatedClassifier:
 
 
 class PlacementDiscovery:
-    def __init__(self, drafts):
+    def __init__(self, drafts, catalog_storage: CatalogStorage):
         self.drafts = drafts
-        with closing(sqlite3.connect(drafts.path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS placement_catalogs (
-                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                campaign_id TEXT NOT NULL, label TEXT NOT NULL, snapshot TEXT NOT NULL)''')
+        self.catalog_storage = catalog_storage
+
+    @property
+    def _catalog_scope(self):
+        return CatalogScope(self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id)
 
     def register(self, label, rows):
         self.drafts.require("youtube:catalog.write")
@@ -48,18 +48,15 @@ class PlacementDiscovery:
             clean.append(dict(video_id=video, description=text, source=source, source_reference=reference))
         identity = {'scope': vars(self.drafts.scope), 'campaign': self.drafts.campaign_id, 'rows': clean}
         catalog_id = package_fingerprint(identity)[:32]
-        with closing(sqlite3.connect(self.drafts.path)) as db, db:
-            self.drafts.require("youtube:catalog.write")
-            db.execute('INSERT INTO placement_catalogs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
-                       (catalog_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id,
-                        label.strip(), json.dumps(clean)))
+        # As before, refresh permission before the first SQL/write transaction.
+        self.drafts.require("youtube:catalog.write")
+        with self.catalog_storage.write() as unit:
+            unit.catalogs.add_catalog(CatalogRecord(catalog_id, self._catalog_scope, label.strip(), json.dumps(clean)))
             for row in clean:
-                ref = package_fingerprint({**identity, 'video': row['video_id']})[:32]
-                db.execute('''INSERT INTO placement_catalog_entries
-                           (ref,client_id,brand_id,campaign_id,video_id,title,source,source_reference)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING''',
-                           (ref, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id,
-                            row['video_id'], row['description'], row['source'], row['source_reference']))
+                ref = package_fingerprint({**identity, "video": row["video_id"]})[:32]
+                unit.catalogs.add_entry(CatalogEntry(ref, self._catalog_scope, row['video_id'],
+                                                   row['description'], row['source'], row['source_reference']))
+            unit.commit()
         return catalog_id
 
     def read(self, db, catalog_id):
@@ -72,11 +69,9 @@ class PlacementDiscovery:
 
     def list(self):
         self.drafts.require("youtube:campaign.read")
-        with closing(sqlite3.connect(self.drafts.path)) as db:
-            return [{'id': key, 'label': label, 'count': len(json.loads(snapshot))}
-                    for key, label, snapshot in db.execute(
-                        'SELECT id,label,snapshot FROM placement_catalogs WHERE client_id=? AND brand_id=? AND campaign_id=?',
-                        (self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id))]
+        with self.catalog_storage.read() as catalogs:
+            return [{'id': row.id, 'label': row.label, 'count': len(json.loads(row.snapshot))}
+                    for row in catalogs.list_catalogs(self._catalog_scope)]
 
     def save(self, db, catalog_id, expected_revision, assignments, selected_ids):
         rows = self.read(db, catalog_id)

@@ -57,6 +57,7 @@
     "campaign_agent/placements.py": "application",
     "campaign_agent/ports/__init__.py": "marker",
     "campaign_agent/ports/access.py": "port",
+    "campaign_agent/ports/catalogs.py": "port",
     "campaign_agent/ports/inference.py": "port",
     "campaign_agent/ports/planning.py": "port",
     "campaign_agent/provider_sessions.py": "application",

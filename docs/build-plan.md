@@ -4,16 +4,25 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #87 planning dependency foundation
+## Current architecture milestone · #86 catalogue transaction foundation
 
-#85 closed under its revised scope after PR #97. This #87 slice adds core-owned
-planning/classifier contracts and a supplied planner model through the existing
-runtime constructor. Supplied planners are offline-only: foreground attachment
-and fresh web inference fail closed; received receipts remain recoverable. It preserves default construction for compatibility; wider
-provider inversion and consolidated startup composition remain later #87/#88 work.
-The supplied-model path is checked through native draft writes, denial and receipt
-recovery. #86 preparation can inspect those transactions in parallel; its runtime
-implementation follows the accepted foundation contracts.
+#85 closed under its revised scope after PR #97. PR #98 supplied the first #87
+planning/classifier contracts and supplied-model seam; broader provider inversion
+and composition remain open.
+
+The first #86 adoption is catalogue registration/listing through typed core-owned
+records and read/write units. The SQLite adapter owns these connections, snapshot
+reads, commit/rollback and catalogue initialization. Registration commits the
+catalogue and its provenance entries together, with an explicit application commit.
+Native catalogue IDs, raw snapshots and duplicate-registration behavior remain.
+
+This is a preparatory adoption, not completion of the placement pilot. Planner
+catalogue read/save still borrow the existing native transaction; campaign,
+conversation, review/access and run/step participants must join the later complete
+UOW. Runtime composition keeps catalogue operations on that same SQLite path;
+alternate storage is exercised only against isolated registration/listing commands.
+One unused SQLite import exception retires; raw-handle/SQL use still needs review
+and migration even when an import disappears. #86 remains open.
 
 ### Delivered #85 foundations
 

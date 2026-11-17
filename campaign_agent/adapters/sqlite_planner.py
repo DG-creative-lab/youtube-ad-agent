@@ -1,10 +1,17 @@
 """Native planner records on a caller-owned SQLite connection.
 
 Application commands retain JSON, authorization, inference/recovery decisions,
-schema initialization and transaction ownership. Rows and text pass through.
+schema initialization and transaction ownership for those legacy records. Rows
+and text pass through. SQLiteCatalogStorage separately owns the first adopted
+catalogue transactions.
 """
 
 import sqlite3
+from contextlib import closing, contextmanager
+
+from campaign_agent.ports.catalogs import (
+    CatalogEntry, CatalogRecord, CatalogScope, CatalogStorageError, CatalogUnitClosed,
+)
 
 
 class SQLitePlannerStore:
@@ -89,3 +96,88 @@ class SQLitePlannerStore:
         return self.connection.execute(
             'SELECT position,state,receipt FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,),
         ).fetchall()
+
+
+# Catalogue commands are the first typed transaction adoption. The remaining
+# planner stores above retain their existing caller-owned native connections.
+
+
+class _CatalogRepository:
+    def __init__(self, unit):
+        self._unit = unit
+
+    def list_catalogs(self, scope: CatalogScope) -> tuple[CatalogRecord, ...]:
+        db = self._unit._connection()
+        return tuple(CatalogRecord(key, scope, label, snapshot) for key, label, snapshot in db.execute(
+            'SELECT id,label,snapshot FROM placement_catalogs WHERE client_id=? AND brand_id=? AND campaign_id=?',
+            (scope.client_id, scope.brand_id, scope.campaign_id)))
+
+    def add_catalog(self, record: CatalogRecord) -> None:
+        db = self._unit._connection(write=True)
+        db.execute('INSERT INTO placement_catalogs VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+                   (record.id, record.scope.client_id, record.scope.brand_id, record.scope.campaign_id,
+                    record.label, record.snapshot))
+
+    def add_entry(self, entry: CatalogEntry) -> None:
+        db = self._unit._connection(write=True)
+        db.execute('''INSERT INTO placement_catalog_entries
+                   (ref,client_id,brand_id,campaign_id,video_id,title,source,source_reference)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING''',
+                   (entry.ref, entry.scope.client_id, entry.scope.brand_id, entry.scope.campaign_id,
+                    entry.video_id, entry.title, entry.source, entry.source_reference))
+
+
+class _CatalogUnit:
+    def __init__(self, db, *, writable):
+        self._db, self._writable, self._active = db, writable, True
+        self.catalogs = _CatalogRepository(self)
+
+    def _connection(self, *, write=False):
+        if not self._active:
+            raise CatalogUnitClosed()
+        if write and not self._writable:
+            raise CatalogStorageError()
+        return self._db
+
+    def commit(self) -> None:
+        self._connection(write=True).commit()
+        self._active = False
+
+
+class SQLiteCatalogStorage:
+    """Own catalogue connections and atomic catalogue/provenance transactions."""
+    def __init__(self, path):
+        self._path = path
+
+    def initialize(self):
+        # CampaignDrafts has already initialized/adopted provenance entries.
+        # Keep the original catalogue schema and startup ordering.
+        try:
+            with closing(sqlite3.connect(self._path)) as db, db:
+                db.execute('''CREATE TABLE IF NOT EXISTS placement_catalogs (
+                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                    campaign_id TEXT NOT NULL, label TEXT NOT NULL, snapshot TEXT NOT NULL)''')
+        except sqlite3.Error:
+            raise CatalogStorageError() from None
+
+    @contextmanager
+    def _unit(self, *, writable):
+        try:
+            with closing(sqlite3.connect(self._path)) as db:
+                unit = _CatalogUnit(db, writable=writable)
+                try:
+                    db.execute('BEGIN')
+                    yield unit
+                finally:
+                    unit._active = False
+                    db.rollback()
+        except sqlite3.Error:
+            raise CatalogStorageError() from None
+
+    @contextmanager
+    def read(self):
+        with self._unit(writable=False) as unit:
+            yield unit.catalogs
+
+    def write(self):
+        return self._unit(writable=True)

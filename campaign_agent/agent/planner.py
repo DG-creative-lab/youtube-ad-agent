@@ -5,7 +5,7 @@ import re
 import sqlite3
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
@@ -59,7 +59,9 @@ class PlacementAgent:
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
         self.foreground_compatible = main_model is None
         self.web_disabled = False
-        self.catalogs = PlacementDiscovery(self.drafts)
+        catalog_storage = SQLiteCatalogStorage(self.path)
+        catalog_storage.initialize()
+        self.catalogs = PlacementDiscovery(self.drafts, catalog_storage)
         self.remote: PlannerModel = main_model if main_model is not None else OpenRouterPlanner(models, transport=transport)
         self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
         self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
