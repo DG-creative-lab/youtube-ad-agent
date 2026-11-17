@@ -1,15 +1,7 @@
 """Instruction drafting through the bounded OpenRouter transport."""
 
 from .openrouter_reviews import OpenRouterInference
-from campaign_agent.creatives import INSTRUCTION_COMPONENTS
-
-
-INSTRUCTION_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "properties": {key: {"type": "string", "enum": list(options)}
-                   for key, options in INSTRUCTION_COMPONENTS.items()},
-    "required": list(INSTRUCTION_COMPONENTS),
-}
+from campaign_agent.domain.instructions import INSTRUCTION_COMPONENTS, INSTRUCTION_SCHEMA
 
 
 class OpenRouterInstructions(OpenRouterInference):
