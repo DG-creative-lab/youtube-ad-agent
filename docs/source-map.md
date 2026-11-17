@@ -23,17 +23,32 @@ application JSON/error/hash compatibility is preserved. CampaignDrafts now resid
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
+## Structured model services · #87
+
+`ports/planning.py` owns `InstructionReviewer` and `InstructionDrafter` with typed
+logical receipts/usage; no provider request, credential or HTTP object crosses
+these contracts. `agent/run.py` accepts either dependency explicitly and uses the
+same assessment/drafting commands, source checks and receipt lifecycle as before.
+`bootstrap/planner.py:create_local_planner` forwards those constructor options.
+Default OpenRouter classes and their imports remain compatible.
+
+`agent/run.py` owns the offline-only fence for supplied structured dependencies;
+`foreground_inference.py` rejects their attachment before credentials/policy or
+provider configuration. A received receipt skips fresh-effect checks and inference.
+These are consumer seams, not completion of #87's provider/request-policy cleanup
+or #88's legacy-constructor consolidation. See `test_structured_model_services.py`
+for actual substituted workflows, faults, freshness, replay and denial checks.
+
 ## Selected #86 placement composition
 
-The current completion candidate is `bootstrap/planner.py:create_local_planner`,
+The #86 pilot accepted in PR #104 is `bootstrap/planner.py:create_local_planner`,
 which initializes native adapters before `AgentRuntime(initialize=False)` and
 selects the typed local simulated-placement application. It is integrated with the
 local planner UI and the shared dispatcher; retained review/delivery/experiment and
 foreground commands keep their supported original-store paths. Earlier role counts
 and checkpoint narratives above are historical; #85 closed under its revised scope.
 See the [residual native graph](native-storage-migration.md) for the complete #37
-migration inventory and #87/#88 boundaries. Final review, verification and human
-merge determine #86 closure.
+migration inventory and #87/#88 boundaries. #86 is closed; its broader residual graph remains open under those owners.
 
 | Current selected owner | Responsibility |
 | --- | --- |
