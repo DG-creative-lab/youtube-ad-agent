@@ -8,6 +8,7 @@ from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
@@ -53,12 +54,13 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 
 class PlacementAgent:
-    def __init__(self, owner, models=(), *, transport=None, simulator=None, classifier=None):
+    def __init__(self, owner, models=(), *, transport=None, main_model: PlannerModel | None = None,
+                 simulator: MainModel | None = None, classifier: PlacementClassifier | None = None):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
         self.catalogs = PlacementDiscovery(self.drafts)
-        self.remote = OpenRouterPlanner(models, transport=transport)
-        self.simulator = simulator or SimulatedPlanner()
-        self.classifier = classifier or SimulatedClassifier()
+        self.remote: PlannerModel = main_model if main_model is not None else OpenRouterPlanner(models, transport=transport)
+        self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
+        self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
         self.review_tools = CampaignReviewTools(self)
         with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('''
@@ -243,7 +245,7 @@ class PlacementAgent:
                 if not row:
                     if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
                         self.remote.require_available(source['settings'])
-                        self.remote.prepare_turn(source, history, source['settings'])
+                        self.remote.validate_turn(source, history, source['settings'])
                     SQLitePlannerStore(db).request_turn(run_id, position)
             if receipt is None:
                 try:

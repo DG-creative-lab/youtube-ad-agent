@@ -4,7 +4,17 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #85 domain foundations
+## Current architecture milestone · #87 planning dependency foundation
+
+#85 closed under its revised scope after PR #97. This #87 slice adds core-owned
+planning/classifier contracts and a supplied planner model through the existing
+runtime constructor. It preserves default construction for compatibility; wider
+provider inversion and consolidated startup composition remain later #87/#88 work.
+The supplied-model path is checked through native draft writes, denial and receipt
+recovery. #86 preparation can inspect those transactions in parallel; its runtime
+implementation follows the accepted foundation contracts.
+
+### Delivered #85 foundations
 
 Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
 at `9fabf358b30cbc794455c1da78440043593d1497`. The small static Python import
@@ -22,7 +32,8 @@ The subsequent #85 policy slice moves the unchanged instruction-test decision ca
 
 CampaignDrafts now has an application owner; the script remains an inward compatibility
 wrapper. Its native storage, defaults and authority checks remain for later inversion.
-#85 remains open for other domain policies and remaining core DTO ownership. After #85 foundation work, #87
+#85's broader module-map sweep was deferred by the agreed scope reduction;
+remaining baseline entries are visible, not declared completed. #87
 foundation contracts/offline injection precede #86 whole pilot-native UOW; #87
 external and #88 composition follow. #37's residual named native graph, #84 import
 strict zero and #89 broader conformance retain their gates. PostgreSQL/cloud and

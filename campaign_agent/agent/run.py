@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
+from campaign_agent.ports.planning import PlannerModel
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
@@ -68,6 +69,7 @@ class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
+                 planner_model: PlannerModel | None = None,
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
                  web=False):
         operator.require_brand(context.scope)
@@ -116,7 +118,7 @@ class AgentRuntime:
                 )
             """)
 
-        self.planner = PlacementAgent(self, main_models, transport=main_transport,
+        self.planner = PlacementAgent(self, main_models, transport=main_transport, main_model=planner_model,
                                       simulator=planner_simulator, classifier=placement_classifier)
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.

@@ -27,6 +27,40 @@ CATALOG = [
 ]
 
 
+class AuthoredPlanner:
+    """Complete application model contract without credentials or network transport."""
+    models = (MODEL,)
+    prompt_version = 'authored-planner-v1'
+    web_disabled = False
+
+    def __init__(self):
+        self.calls = 0
+
+    def __bool__(self):
+        return False
+
+    def settings(self, model):
+        if model not in self.models:
+            raise ValueError('Authored model unavailable')
+        return {'mode': 'openrouter', 'model': model, 'prompt_version': self.prompt_version}
+
+    def require_available(self, settings):
+        if self.web_disabled or settings != self.settings(settings['model']):
+            raise ReviewInferenceError('Authored model unavailable')
+
+    def validate_turn(self, context, history, settings):
+        pass
+
+    def next_turn(self, context, history, settings):
+        self.calls += 1
+        calls = [('read_campaign', {}), ('classify_catalog', {}),
+                 ('save_placement_draft', {'video_ids': ['SAMPLE00001', 'SAMPLE00002']}),
+                 ('respond', {'topic': 'placements'})]
+        name, arguments = calls[min(len(history), 3)]
+        return {'call_id': f'authored-{len(history)}', 'tool': name, 'arguments': arguments,
+                'inference': {'mode': 'openrouter', 'model': MODEL, 'usage': None}}
+
+
 class PlacementPlannerTests(unittest.TestCase):
     def setUp(self):
         self.directory = Path(self.enterContext(TemporaryDirectory()))
@@ -77,6 +111,95 @@ class PlacementPlannerTests(unittest.TestCase):
         return json.dumps({'call_id': f'simulated-{position}', 'tool': 'save_placement_draft',
                           'arguments': {'video_ids': list(selected)},
                           'inference': {'mode': 'simulated', 'model': 'simulated', 'usage': None}})
+
+    def test_supplied_models_and_classifier_drive_native_draft_without_default_construction(self):
+        class AuthoredClassifier:
+            route = 'simulated_decision'
+
+            def __bool__(self):
+                return False
+
+            def classify(self, rows, contexts):
+                return [{'id': 'SAMPLE00001', 'context': 'audiobook'},
+                        {'id': 'SAMPLE00002', 'context': 'video-editing'},
+                        {'id': 'SAMPLE00003', 'context': 'review'}]
+
+        class OfflinePlanner(SimulatedPlanner):
+            def __bool__(self):
+                return False
+
+        with patch('campaign_agent.agent.planner.OpenRouterPlanner', side_effect=AssertionError('Default model constructed')), \
+             patch('campaign_agent.agent.planner.SimulatedPlanner', side_effect=AssertionError('Default simulator constructed')), \
+             patch('campaign_agent.agent.planner.SimulatedClassifier', side_effect=AssertionError('Default classifier constructed')):
+            runtime = self.reopen(planner_model=AuthoredPlanner(), planner_simulator=OfflinePlanner(),
+                                  placement_classifier=AuthoredClassifier())
+            self.assertIn(MODEL, [item['id'] for item in runtime.planner.options()['models']])
+            result = self.finish(self.start(runtime=runtime, model=MODEL), runtime)
+            self.assertEqual(result['status'], 'ready_for_review')
+            self.assertEqual([(row['id'], row['creative']) for row in runtime.drafts.read()['placements']],
+                             [('SAMPLE00001', 'audiobook'), ('SAMPLE00002', 'video-editing')])
+            self.assertIsNone(runtime.drafts.review_package('tts-sample', 2)['approval'])
+            offline = self.finish(self.start(runtime=runtime, session=uuid4().hex), runtime)
+            self.assertEqual(offline['status'], 'ready_for_review')
+
+    def test_supplied_model_preflight_denial_precedes_request_reservation(self):
+        for method in ('require_available', 'validate_turn'):
+            with self.subTest(method=method):
+                model = AuthoredPlanner()
+                runtime = self.reopen(planner_model=model)
+                run_id = self.start(runtime=runtime, model=MODEL, session=uuid4().hex)
+                with patch.object(model, method, side_effect=ReviewInferenceError('Authored preflight denial')):
+                    with self.assertRaisesRegex(ReviewInferenceError, 'Authored preflight denial'):
+                        runtime.resume(run_id, max_steps=1)
+                self.assertEqual(self.persisted(run_id)['turns'], [])
+                self.assertEqual(model.calls, 0)
+                self.assertEqual(runtime.drafts.read()['revision'], 1)
+
+    def test_supplied_model_cannot_grant_draft_permission(self):
+        runtime = self.reopen(planner_model=AuthoredPlanner())
+        run_id = runtime.planner.start('Find placements', MODEL, self.session, uuid4().hex, self.catalog)
+        runtime.resume(run_id, max_steps=3)
+        stored = self.persisted(run_id)
+        self.assertEqual(json.loads(stored['steps'][-1][2])['reply_code'], 'placement_draft_not_authorized')
+        self.assertEqual(self.reopen().drafts.read()['revision'], 1)
+
+    def test_supplied_model_receipt_recovers_without_new_inference_or_preflight(self):
+        runtime = self.reopen(planner_model=AuthoredPlanner())
+        run_id = self.start(runtime=runtime, model=MODEL)
+        runtime.resume(run_id, max_steps=2)
+        before = self.persisted(run_id)
+        save = runtime.planner.catalogs.save
+
+        def interrupted(*args, **kwargs):
+            save(*args, **kwargs)
+            raise sqlite3.OperationalError('Interrupted supplied-model write')
+
+        with patch.object(runtime.planner.catalogs, 'save', side_effect=interrupted):
+            with self.assertRaises(sqlite3.OperationalError):
+                runtime.resume(run_id, max_steps=1)
+        received = self.persisted(run_id)
+        self.assertEqual(received['revisions'], before['revisions'])
+        self.assertEqual(received['steps'], before['steps'])
+        self.assertEqual(received['turns'][-1][1], 'received')
+        model = AuthoredPlanner()
+        reopened = self.reopen(planner_model=model, web=True)
+        with patch.object(model, 'next_turn', side_effect=AssertionError('Must reuse receipt')), \
+             patch.object(model, 'require_available', side_effect=AssertionError('No fresh inference')), \
+             patch.object(model, 'validate_turn', side_effect=AssertionError('No fresh request')):
+            result = reopened.resume(run_id, max_steps=1)
+        self.assertEqual(result['result']['revision'], 2)
+        self.assertEqual(self.persisted(run_id)['turns'], received['turns'])
+
+    def test_supplied_model_invalid_receipt_cannot_save(self):
+        model = AuthoredPlanner()
+        runtime = self.reopen(planner_model=model)
+        run_id = self.start(runtime=runtime, model=MODEL)
+        with patch.object(model, 'next_turn', return_value={'call_id': 'bad', 'tool': 'save_placement_draft',
+                                                          'arguments': 'untrusted prose'}):
+            with self.assertRaises(ReviewInferenceError):
+                runtime.resume(run_id, max_steps=1)
+        self.assertEqual(self.reopen().drafts.read()['revision'], 1)
+        self.assertEqual(self.persisted(run_id)['turns'][0][1:3], ('failed', None))
 
     def test_models_choose_different_orders_and_catalogs_change_the_saved_proposal(self):
         first = self.finish(self.start())
