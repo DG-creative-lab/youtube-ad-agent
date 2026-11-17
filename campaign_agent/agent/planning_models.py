@@ -5,10 +5,9 @@ from typing import Protocol
 from campaign_agent.adapters.openrouter_reviews import OpenRouterInference, parse_json
 from campaign_agent.domain.inference_errors import ReviewInferenceError
 from .replies import QUESTIONS, TOPICS
-from campaign_agent.creatives import render_instruction_choices
+from campaign_agent.domain.instructions import INSTRUCTION_SCHEMA, render_instruction_choices
 from campaign_agent.instruction_tests import ASSESSMENT_REASONS, recorded_assessment
 from campaign_agent.foreground_inference import model_context
-from campaign_agent.adapters.openrouter_instructions import INSTRUCTION_SCHEMA
 from .draft_permissions import permits
 
 
