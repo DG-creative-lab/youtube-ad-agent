@@ -28,10 +28,12 @@ def bounded_context(messages):
 
 
 class CampaignConversations:
-    def __init__(self, planner):
+    def __init__(self, planner, *, initialize=True):
         self.planner = planner
         self.path, self.operator = planner.path, planner.owner.operator
         self.storage: ConversationStorage = planner.conversation_storage
+        if not initialize:
+            return
         with self.storage.initialize() as store:
             for run_id, session_id, snapshot, outcome, status in store.legacy_transcripts():
                 source = json.loads(snapshot)

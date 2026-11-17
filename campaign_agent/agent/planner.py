@@ -57,23 +57,25 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 class PlacementAgent:
     def __init__(self, owner, models=(), *, transport=None, main_model: PlannerModel | None = None,
-                 simulator: MainModel | None = None, classifier: PlacementClassifier | None = None):
+                 simulator: MainModel | None = None, classifier: PlacementClassifier | None = None, initialize=True):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
         self.foreground_compatible = main_model is None
         self.web_disabled = False
         catalog_storage = SQLiteCatalogStorage(self.path)
-        catalog_storage.initialize()
+        if initialize:
+            catalog_storage.initialize()
         self.catalogs = PlacementDiscovery(self.drafts, catalog_storage)
         self.remote: PlannerModel = main_model if main_model is not None else OpenRouterPlanner(models, transport=transport)
         self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
         self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
         self.review_tools = CampaignReviewTools(self)
-        SQLitePlannerLifecycleStorage.initialize(self.path)
+        if initialize:
+            SQLitePlannerLifecycleStorage.initialize(self.path)
         self.receipt_storage: PlannerReceiptStorage = SQLitePlannerLifecycleStorage(self.path)
         self.placement_commit_storage: PlacementCommitStorage = SQLitePlacementCommitStorage(self.path)
         self.read_storage: PlannerReadStorage = SQLitePlannerReadStorage(self.path)
         self.conversation_storage = SQLiteConversationStorage(self.path)
-        self.conversations = CampaignConversations(self)
+        self.conversations = CampaignConversations(self, initialize=initialize)
 
     def _require_model_available(self, settings):
         # The supplied-model seam is offline-only until admitted dispatch is a port.

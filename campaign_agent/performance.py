@@ -108,12 +108,14 @@ def propose_next_test(delivery, activity):
 
 
 class CampaignPerformance:
-    def __init__(self, drafts, viewer, reporting=None):
+    def __init__(self, drafts, viewer, reporting=None, *, initialize=True):
         if viewer.campaign_id != drafts.campaign_id:
             raise ValueError("Bind measurement to this campaign before reviewing activity.")
         self.drafts = drafts
         self.viewer = viewer
         self.reporting = reporting if reporting is not None else SampleCampaignReporting()
+        if not initialize:
+            return
         with closing(sqlite3.connect(drafts.path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("""

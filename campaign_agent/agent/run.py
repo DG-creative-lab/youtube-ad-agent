@@ -71,28 +71,35 @@ class AgentRuntime:
                  main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
                  planner_model: PlannerModel | None = None,
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
-                 web=False):
+                 web=False, initialize=True):
         operator.require_brand(context.scope)
         self.foreground = None
         self.operator = operator
         self.scope = context.scope
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
-                                     context=context, campaign_id=campaign_id, access=access, examples=examples)
-        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path), viewer_links=viewer_links)
-        self.performance = CampaignPerformance(self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
-                                                                            campaign_id=self.drafts.campaign_id))
-        self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting, demo_scenario=demo_scenario)
-        self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance)
-        self.instruction_findings = InstructionFindings(self.instruction_tests)
+                                     context=context, campaign_id=campaign_id, access=access, examples=examples,
+                                     initialize=initialize)
+        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path, initialize=initialize),
+                                   viewer_links=viewer_links, initialize=initialize)
+        self.performance = CampaignPerformance(
+            self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
+                                           campaign_id=self.drafts.campaign_id, initialize=initialize),
+            initialize=initialize)
+        self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting,
+                                         demo_scenario=demo_scenario, initialize=initialize)
+        self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance,
+                                                  initialize=initialize)
+        self.instruction_findings = InstructionFindings(self.instruction_tests, initialize=initialize)
         self.model = model or RecordedInference()
         self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
         self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
-        SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
-                                    legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
+        if initialize:
+            SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
+                                        legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
 
         self.planner = PlacementAgent(self, main_models, transport=main_transport, main_model=planner_model,
-                                      simulator=planner_simulator, classifier=placement_classifier)
+                                      simulator=planner_simulator, classifier=placement_classifier, initialize=initialize)
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.
         self.planner.web_disabled = web

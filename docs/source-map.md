@@ -19,10 +19,30 @@ scope values, shared errors and video-ID syntax now have domain owners; old path
 reexport the same objects and runtime consumers use the new owners directly.
 Relocated classes, including CampaignDrafts, have new `__module__` metadata.
 Patching globals on the old script wrapper does not patch its moved methods;
-application JSON/error/hash compatibility is preserved. CampaignDrafts now resides in the application module; other #85 policy work and deeper
-inversion stay open. Web inventory remains in the historical map.
+application JSON/error/hash compatibility is preserved. CampaignDrafts now resides in the application module. PR #97 closed the revised #85 scope; deeper inversion remains in the later issues. Web inventory remains in the historical map.
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
+
+## Selected #86 placement composition
+
+The current completion candidate is `bootstrap/planner.py:create_local_planner`,
+which initializes native adapters before `AgentRuntime(initialize=False)` and
+selects the typed local simulated-placement application. It is integrated with the
+local planner UI and the shared dispatcher; retained review/delivery/experiment and
+foreground commands keep their supported original-store paths. Earlier role counts
+and checkpoint narratives above are historical; #85 closed under its revised scope.
+See the [residual native graph](native-storage-migration.md) for the complete #37
+migration inventory and #87/#88 boundaries. Final review, verification and human
+merge determine #86 closure.
+
+| Current selected owner | Responsibility |
+| --- | --- |
+| [bootstrap/planner.py](../campaign_agent/bootstrap/planner.py), [placement_router.py](../campaign_agent/bootstrap/placement_router.py) | Explicit local startup and supported command/UI selection; existing nonpilot workflows retain their original dispatcher after the selected unit exits. |
+| [application/planner_runtime.py](../campaign_agent/application/planner_runtime.py), [ports/placement_commit.py](../campaign_agent/ports/placement_commit.py) | Scoped placement start/follow-up, reservation, tool validation, terminal commit and recovery over typed same-store units. |
+| [application/access.py](../campaign_agent/application/access.py), [adapters/local_placement_authority.py](../campaign_agent/adapters/local_placement_authority.py) | Original command permits acquired outside locks, same-unit owner/preimage/deadline validation and explicit authorized draft postimage. |
+| [application/planner_context.py](../campaign_agent/application/planner_context.py), [ports/planner_context.py](../campaign_agent/ports/planner_context.py), [adapters/sqlite_planner_context.py](../campaign_agent/adapters/sqlite_planner_context.py) | Package identity and actual scoped approval/review/correction/started-test context, including nonempty evidence. |
+| [adapters/local_media.py](../campaign_agent/adapters/local_media.py), [ports/storage_errors.py](../campaign_agent/ports/storage_errors.py) | Real logical media capture/currentness and safe adopted storage failures; no native handles or driver objects in application contracts. |
+| [adapters/sqlite_schema.py](../campaign_agent/adapters/sqlite_schema.py), [sqlite_workspace_admission.py](../campaign_agent/adapters/sqlite_workspace_admission.py), [sqlite_planner_startup.py](../campaign_agent/adapters/sqlite_planner_startup.py) | Native schema, owner/demo admission, seed, viewer legacy quarantine, correction/provenance and transcript adoption; journal/history semantics preserved. |
 
 ## Current checkout
 
@@ -49,7 +69,7 @@ This map translates the [application architecture](architecture-plan.md) into co
 | [campaign_agent/agent/planner.py](../campaign_agent/agent/planner.py) and [planning_models.py](../campaign_agent/agent/planning_models.py) | Main-model port, tool schemas, simulated profiles, OpenRouter tool calling, pinned conversations, request receipts and the bounded placement loop. `_commit_turn()` uses the native draft write unit for draft/step/outcome/reply atomicity; inference and receipt phases remain separate. |
 | [campaign_agent/adapters/sqlite_planner.py](../campaign_agent/adapters/sqlite_planner.py) | Concrete native SQLite default/job/turn records and ordered joined raw step history, used immediately by `PlacementAgent`. Borrows the supplied connection; preserves raw tuples/text/NULLs, the original three-field default scope and partial-column updates. JSON, authority, recovery decisions and lifecycle remain application-owned. |
 | [campaign_agent/adapters/sqlite_runs.py](../campaign_agent/adapters/sqlite_runs.py) | Concrete native SQLite common run/step records: fully scoped raw run pairs, three distinct run insert conflict forms, status updates, ordered steps, strict append, count and existence. Runtime/planner/conversation status/foreground count use the exact borrowed connection; authorization, JSON, policy and lifecycle stay in application code. |
-| [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Application-owned private scope/model checks, JSON, verified replies, context/limit/title policy, constructor transcript migration and follow-up supersession. Uses the borrowed conversation store for fixed record operations. |
+| [campaign_agent/agent/conversations.py](../campaign_agent/agent/conversations.py) | Application-owned private scope/model checks, JSON, verified replies and context/limit/title policy through typed repositories. The selected unit includes follow-up supersession and messages; the SQLite adapter owns transcript adoption. |
 | [campaign_agent/adapters/sqlite_conversations.py](../campaign_agent/adapters/sqlite_conversations.py) | Concrete native SQLite raw session/message/job-context rows, message appends, latest ID/count, session/settings writes and four-scope lists for `CampaignConversations`. Preserves tuples/text and borrows the exact connection without lifecycle, JSON or authority. |
 | [campaign_agent/agent/replies.py](../campaign_agent/agent/replies.py) | Application-owned reply topics, clarification wording and safe projection of legacy unverified replies. |
 | [campaign_agent/agent/capabilities.py](../campaign_agent/agent/capabilities.py) | Immutable advisory capability metadata and current-access/configuration projection; the runtime and local/hosted staff GET route share its read command. [Version 1 API contract](agent-capabilities.md). It supplies no dispatch authority. |

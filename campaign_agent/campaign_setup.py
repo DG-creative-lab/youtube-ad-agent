@@ -31,10 +31,12 @@ class SetupProvider(Protocol):
 
 
 class CampaignSetup:
-    def __init__(self, drafts, provider: SetupProvider, *, viewer_links=None):
+    def __init__(self, drafts, provider: SetupProvider, *, viewer_links=None, initialize=True):
         self.drafts, self.provider = drafts, provider
         self.viewer_links = viewer_links
         self.path = drafts.path
+        if not initialize:
+            return
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             columns = {row[1] for row in db.execute('PRAGMA table_info(campaign_setups)')}

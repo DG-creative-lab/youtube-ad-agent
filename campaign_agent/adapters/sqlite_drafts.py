@@ -59,6 +59,11 @@ class SQLiteDraftRepository:
     def __init__(self, db):
         self._store = SQLiteDraftStore(db)
 
+    def latest_revision_row(self, campaign_id):
+        return self._store.connection.execute(
+            'SELECT revision,snapshot FROM campaign_revisions WHERE campaign_id=? ORDER BY revision DESC LIMIT 1',
+            (campaign_id,)).fetchone()
+
     def owner_row(self, campaign_id):
         return self._store.connection.execute(
             'SELECT b.client_id,b.brand_id,b.workspace_id,b.installation_id '

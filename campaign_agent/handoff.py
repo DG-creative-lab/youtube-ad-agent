@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from .creatives import EXAMPLES
+from .application.planner_context import assemble_package
 
 
 MEDIA_DIR = Path(__file__).resolve().parents[1] / ".local/viewer-media"
@@ -47,55 +48,13 @@ def example_content(example, media_dir):
 
 
 def sample_package(draft, media_dir, *, examples=None):
-    examples = {example.ref: example for example in (EXAMPLES if examples is None else examples)}
-    groups = []
-    for context, brief in draft["brief"]["contexts"].items():
-        example = examples[brief["destination_ref"] + "-v1"]
-        content = example_content(example, media_dir)
-        content["instruction"] = draft.get("comparison_instructions", {}).get(example.creative_ref, example.instruction)
-        preview_hash = content["preview_sha256"]
-        groups.append({
-            "context": context,
-            "title": brief["title"],
-            "creative_version": example.creative_ref,
-            "preview_asset": example.preview,
-            "preview_path": (
-                f"/viewer/media/{example.creative_ref}/{example.ref}/preview?sha256={preview_hash}"
-                if preview_hash else None
-            ),
-            "comparison_version": example.ref,
-            "content": content,
-            "placements": [
-                {"demo_id": row["id"], "title": row["title"], "source": row["source"],
-                 "label": "Catalog candidate · inventory unverified" if row["source"] in {"licensed", "creator_supplied"} else "Fictional placement",
-                 **({"catalog_ref": row["catalog_ref"]} if "catalog_ref" in row else {}),
-                 **({"source_reference": row["source_reference"]} if "source_reference" in row else {})}
-                for row in draft["placements"] if row["creative"] == context
-            ],
-        })
-    references = [(group["comparison_version"], package_fingerprint(group["content"])) for group in groups]
-    for group, (_, fingerprint) in zip(groups, references):
-        query = [("ad", group["creative_version"]), ("content", fingerprint)]
-        query.extend(("reviewed", f"{ref}:{digest}") for ref, digest in references)
-        group["viewer_path"] = "/viewer?" + urlencode(query)
-    return {
-        "campaign_id": draft["campaign_id"],
-        "revision": draft["revision"],
-        "data_label": ("Catalog candidates · inventory unverified" if any(row["source"] in {"licensed", "creator_supplied"}
-                       for row in draft["placements"]) else "Fictional placements for an offline sample"),
-        "title": draft["brief"]["title"],
-        "brief": {"id": draft["brief"]["id"], "revision": draft["brief"]["revision"]},
-        "policy": {"id": draft["policy"]["id"], "revision": draft["policy"]["revision"]},
-        "proposed_setup": {
-            "objective": draft["brief"]["goal"],
-            "format": "YouTube video ad example",
-            "budget": "Unset for the offline sample",
-            "schedule": "Unscheduled",
-        },
-        "groups": groups,
-        **({"instruction_test": draft["instruction_test"]} if "instruction_test" in draft else {}),
-        **({"instruction_reuse": draft["instruction_reuse"]} if "instruction_reuse" in draft else {}),
-    }
+    selected = EXAMPLES if examples is None else examples
+
+    class LogicalContent:
+        def content(self, example):
+            return example_content(example, media_dir)
+
+    return assemble_package(draft, selected, LogicalContent())
 
 
 def package_blockers(package):

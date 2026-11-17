@@ -58,6 +58,11 @@ POLICY = {
 }
 
 
+def _initialize_workspace(db):
+    # Preserve the existing module-level initialization binding despite the keyword name.
+    initialize(db)
+
+
 def _catalog_schema(db):
     columns = {row[1] for row in db.execute("PRAGMA table_info(catalog_entries)")}
     legacy = bool(columns) and "client_id" not in columns
@@ -77,7 +82,7 @@ def _catalog_schema(db):
 
 class CampaignDrafts:
     def __init__(self, path, live, operator=LOCAL_OPERATOR, *, media_dir=None,
-                 context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None):
+                 context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, initialize=True):
         self.operator = operator
         self.context = context
         self.scope = context.scope
@@ -95,10 +100,12 @@ class CampaignDrafts:
             raise PermissionError("Supply the brand's own comparison catalog.")
         self.require("youtube:campaign.read")
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}
+        if not initialize:
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(path)) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            initialize(db)
+            _initialize_workspace(db)
             if context == LOCAL_CONTEXT and self.campaign_id in {"tts-sample", "tts-catalog"}:
                 admit_demo_campaign(db, self.campaign_id)
             verify(db, context, self.campaign_id)
@@ -181,6 +188,9 @@ class CampaignDrafts:
         return json.loads(snapshot) if snapshot is not None else None
 
     def read(self, revision=None):
+        route = getattr(self, "_placement_commands", None)
+        if route is not None and route[1]():
+            return route[0].read(revision)
         with closing(sqlite3.connect(self.path)) as db:
             return self._read(db, revision)
 
@@ -422,6 +432,9 @@ class CampaignDrafts:
             yield db
 
     def save(self, payload, *, connection=None, repository: DraftRepository | None = None):
+        route = getattr(self, "_placement_commands", None)
+        if connection is None and repository is None and route is not None and route[1]():
+            return route[0].save(payload)
         if connection is not None and repository is not None:
             raise ValueError("Choose one draft transaction source.")
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:

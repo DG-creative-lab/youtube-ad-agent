@@ -4,6 +4,37 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
+## Selected local placement workflow
+
+The #86 completion candidate uses the explicit local composition rather than
+claiming every legacy command has migrated. See the [native migration map](native-storage-migration.md)
+for the selected scope and retained #37/#87/#88 graph. Startup preserves the
+existing store and histories; it does not choose another backend or activate a
+provider. The original entrypoints remain supported.
+
+From the repository root, a temporary authored store can use the same application
+commands as the local planner UI:
+
+```sh
+python3 -m campaign_agent.bootstrap.planner --store /tmp/placement-pilot.sqlite3 --media-dir examples/viewer-media demo
+python3 -m campaign_agent.bootstrap.planner --store /tmp/placement-pilot.sqlite3 --media-dir examples/viewer-media serve
+```
+
+Use `status RUN_ID` or `resume RUN_ID` in place of `demo`, substituting the returned
+run ID. `serve` uses planner port 4173 and viewer port 8000 by default; choose
+exclusive `--port`/`--viewer-port` values for concurrent test fixtures. Use only
+authored temporary stores and permitted media. Missing media stays visible as
+missing evidence; a draft save is not package approval or launch.
+
+For completion verification, exercise `tests/test_placement_uow_pilot.py`,
+`tests/test_planner_context.py` and `tests/test_planner_startup.py` alongside the
+full offline suite and canonical portfolio below. Include nonempty context,
+permission expiry/revocation, stale revisions/messages, supersession, received-write
+faults, savepoint/commit rollback, reopen/replay and original row/fingerprint
+preservation. Refresh the affected local HTTP/UI path and final trusted/candidate
+architecture checks. Record the exact commit and independent roles; old passes do
+not certify a later repair. #86 closure remains pending that evidence and human merge.
+
 ## Architecture migration gates
 
 #83 was accepted in PR #90 at `7c139e19bfbf0d829b31f8d09320e912e5561f6b`.
