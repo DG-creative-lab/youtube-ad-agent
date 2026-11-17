@@ -8,7 +8,8 @@ external adoption and #88 consolidation afterward.
 
 #85 closed under its revised scope after PR #97. This #87 slice adds core-owned
 planning/classifier contracts and a supplied planner model through the existing
-runtime constructor. It preserves default construction for compatibility; wider
+runtime constructor. Supplied planners are offline-only: foreground attachment
+and fresh web inference fail closed; received receipts remain recoverable. It preserves default construction for compatibility; wider
 provider inversion and consolidated startup composition remain later #87/#88 work.
 The supplied-model path is checked through native draft writes, denial and receipt
 recovery. #86 preparation can inspect those transactions in parallel; its runtime

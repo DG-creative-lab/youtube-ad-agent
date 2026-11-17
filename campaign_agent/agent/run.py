@@ -122,6 +122,7 @@ class AgentRuntime:
                                       simulator=planner_simulator, classifier=placement_classifier)
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.
+        self.planner.web_disabled = web
         self.openrouter.web_disabled = self.openrouter_drafts.web_disabled = self.planner.remote.web_disabled = web
 
     def require(self, capability):

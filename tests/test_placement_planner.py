@@ -13,6 +13,9 @@ from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR, Operator
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
 from campaign_agent.agent.run import AgentRuntime
 from campaign_agent.agent.planning_models import SimulatedPlanner
+from campaign_agent.foreground_inference import ForegroundInference
+from campaign_agent.provider_sessions import ProviderContext, ProviderSessions
+from campaign_agent.ports.inference import ProviderError
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.placement_discovery import SimulatedClassifier
 from campaign_agent.handoff import package_fingerprint, sample_package
@@ -200,6 +203,51 @@ class PlacementPlannerTests(unittest.TestCase):
                 runtime.resume(run_id, max_steps=1)
         self.assertEqual(self.reopen().drafts.read()['revision'], 1)
         self.assertEqual(self.persisted(run_id)['turns'][0][1:3], ('failed', None))
+
+    def test_supplied_model_cannot_bypass_web_gate_with_permissive_preflight(self):
+        model = AuthoredPlanner()
+        model.require_available = lambda settings: None
+        web_runtime = self.reopen(planner_model=model, web=True)
+        with self.assertRaises(ReviewInferenceError):
+            self.start(runtime=web_runtime, model=MODEL)
+        self.assertEqual(model.calls, 0)
+        self.assertNotIn(MODEL, [item['id'] for item in web_runtime.planner.options()['models']])
+        local_runtime = self.reopen(planner_model=model)
+        run_id = self.start(runtime=local_runtime, model=MODEL)
+        reopened = self.reopen(planner_model=model, web=True)
+        # The application gate must also survive a dependency changing its own flag.
+        model.web_disabled = False
+        with self.assertRaises(ReviewInferenceError):
+            reopened.resume(run_id, max_steps=1)
+        self.assertEqual(self.persisted(run_id)['turns'], [])
+        self.assertEqual(model.calls, 0)
+
+    def test_foreground_rejects_supplied_model_before_binding_access_or_credentials(self):
+        class SlottedPlanner:
+            __slots__ = ('web_disabled',)
+            models = AuthoredPlanner.models
+            prompt_version = AuthoredPlanner.prompt_version
+            settings = AuthoredPlanner.settings
+            require_available = AuthoredPlanner.require_available
+            validate_turn = AuthoredPlanner.validate_turn
+
+            def next_turn(self, context, history, settings):
+                raise AssertionError('No supplied-model inference during foreground attachment')
+
+        runtime = self.reopen(planner_model=SlottedPlanner())
+        access = runtime.drafts.access
+        providers = ProviderSessions(self.path)
+        context = ProviderContext(LOCAL_OPERATOR.id, runtime.drafts.context,
+                                  runtime.drafts.campaign_id, 'a' * 64, 2**40, {}, lambda: None)
+        foreground = ForegroundInference(providers, context, access, ['authored-key'])
+        with self.assertRaises(ProviderError) as caught:
+            foreground.attach(runtime)
+        self.assertEqual(caught.exception.code, 'route_unqualified')
+        self.assertIsNone(runtime.foreground)
+        self.assertIs(runtime.drafts.access, access)
+        self.assertIsNone(foreground.credential)
+        self.assertIsNone(foreground.runtime)
+        self.assertFalse(hasattr(runtime.planner.remote, 'foreground'))
 
     def test_models_choose_different_orders_and_catalogs_change_the_saved_proposal(self):
         first = self.finish(self.start())

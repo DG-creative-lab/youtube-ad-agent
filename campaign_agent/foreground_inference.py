@@ -53,6 +53,9 @@ class ForegroundInference:
             raise ProviderError('route_unqualified')
 
     def attach(self,runtime):
+        if not runtime.planner.foreground_compatible:
+            self.close()
+            raise ProviderError('route_unqualified')
         self.runtime=runtime
         runtime.foreground=self
         runtime.drafts.access=self.policy
