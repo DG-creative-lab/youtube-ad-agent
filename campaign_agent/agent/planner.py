@@ -5,9 +5,10 @@ import re
 import sqlite3
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
@@ -81,6 +82,7 @@ class PlacementAgent:
                     run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
                     PRIMARY KEY(run_id,position));
             ''')
+        self.read_storage: PlannerReadStorage = SQLitePlannerReadStorage(self.path)
         self.conversation_storage = SQLiteConversationStorage(self.path)
         self.conversations = CampaignConversations(self)
 
@@ -189,9 +191,9 @@ class PlacementAgent:
             raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
         return source
 
-    def _history(self, db, run_id):
+    def _history(self, records: PlannerHistoryReader, run_id):
         history = []
-        for tool, result, receipt in SQLitePlannerStore(db).history_rows(run_id):
+        for tool, result, receipt in records.history_rows(run_id):
             result, receipt = json.loads(result), json.loads(receipt)
             reply_status = {'respond': 'answered', 'ask_clarification': 'needs_input'}.get(tool)
             if reply_status and 'error' not in result:
@@ -243,7 +245,7 @@ class PlacementAgent:
                 if status != 'running':
                     return self.read(run_id)
                 source = self._context(db, run_id)
-                history = self._history(db, run_id)
+                history = self._history(SQLitePlannerStore(db), run_id)
                 try:
                     self.review_tools.check_progress(db, source, history)
                 except PackageConflict:
@@ -323,7 +325,7 @@ class PlacementAgent:
             source = self._context(db, run_id)
             if SQLiteRunStore(db).step_exists_row(run_id, position):
                 return True
-            history = self._history(db, run_id)
+            history = self._history(SQLitePlannerStore(db), run_id)
             self.owner.require("youtube:agent.run")
             db.execute('SAVEPOINT planner_tool')
             try:
@@ -462,13 +464,19 @@ class PlacementAgent:
 
     def read(self, run_id):
         self.owner.require("youtube:campaign.read")
-        with closing(sqlite3.connect(self.path)) as db:
-            request, status = self.owner._owned_run(db, run_id)
-            snapshot, outcome = SQLitePlannerStore(db).job_result_row(run_id)
+        with self.read_storage.read() as records:
+            self.owner.require("youtube:campaign.read")
+            scope = PlannerRunScope(self.owner.scope.client_id, self.owner.scope.brand_id,
+                                    self.owner.operator.id, self.owner.drafts.campaign_id)
+            row = records.scoped_run_row(run_id, scope)
+            if row is None:
+                raise PermissionError("The run is unavailable to this operator.")
+            request, status = row
+            snapshot, outcome = records.job_result_row(run_id)
             source = json.loads(snapshot)
             turns = [{'position': position, 'state': state, 'inference': json.loads(receipt).get('inference') if receipt else None}
-                     for position, state, receipt in SQLitePlannerStore(db).turn_rows(run_id)]
-            return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(db, run_id),
+                     for position, state, receipt in records.turn_rows(run_id)]
+            return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(records, run_id),
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
                                 'draft_permission': source.get('draft_permission', 'none'),
