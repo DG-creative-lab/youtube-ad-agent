@@ -419,3 +419,31 @@ class MixedReviewJourneyTests(unittest.TestCase):
         self.assertEqual(result['result']['revision'], 3)
         self.assertEqual(result['result']['performance_review']['proposal']['correction'], correction)
         self.assertEqual(simulator.next_turn.call_count, 3)
+
+    def test_new_placement_after_review_reads_real_correction_and_started_experiment(self):
+        from test_chat_experiment_review import ChatExperimentReviewTests
+        case = ChatExperimentReviewTests()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        experiment = case.case.start()
+        review_run = case.start('Review campaign performance only.')
+        reviewed = case.finish(review_run)
+        self.assertEqual(reviewed['status'], 'answered')
+        self.assertIn('review_performance', [step['tool'] for step in reviewed['steps']])
+        runtime = create_local_planner(case.case.path, media_dir=case.case.media)
+        latest = runtime.planner.conversations.read(case.session)['latest_message']
+        followup = uuid4().hex
+        with patch.object(runtime.planner.legacy, 'start', side_effect=AssertionError('Placement must use typed start')), \
+             patch.object(runtime.planner.legacy, 'resume', side_effect=AssertionError('Placement must use typed unit')):
+            runtime.planner.start('Find placements for the saved campaign.', 'simulated', case.session,
+                                  followup, case.catalog, after_message=latest, draft_permission='placements')
+            result = runtime.resume(followup, max_steps=1)
+        observed = result['steps'][0]['result']
+        self.assertEqual(observed['instruction_test_id'], experiment['id'])
+        self.assertEqual(observed['reporting_scenario'], 'balanced')
+        self.assertEqual(observed['buyer_corrections'][0]['note'], 'Preserve these readings.')
+        with closing(sqlite3.connect(case.case.path)) as db:
+            source = json.loads(db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (followup,)).fetchone()[0])
+        self.assertEqual(source['fingerprint'], case.case.fingerprint)
+        self.assertTrue(any(item.get('review_id') == reviewed['result']['performance_review']['id']
+                            for item in source['conversation']))
