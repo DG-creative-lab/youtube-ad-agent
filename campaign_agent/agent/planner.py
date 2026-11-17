@@ -393,6 +393,8 @@ class PlacementAgent:
             try:
                 with unit.tool_attempt():
                     result, status = self._save_placement_tool(unit, source, history, receipt)
+            except PackageConflict:
+                raise
             except (ValueError, TypeError):
                 result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
             unit.runs.append_step(run_id, position, receipt['tool'], json.dumps(result))

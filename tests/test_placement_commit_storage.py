@@ -4,6 +4,7 @@ import sqlite3
 import unittest
 from unittest.mock import Mock, patch
 
+from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.agent.planning_models import SimulatedPlanner
 from campaign_agent.placement_discovery import SimulatedClassifier
 import test_placement_planner as fixtures
@@ -59,6 +60,26 @@ class PlacementCommitTests(unittest.TestCase):
         self.assertEqual([row[3] for row in committed['messages']], ['user', 'assistant'])
         self.assertEqual(reopened.resume(run), result)
         self.assertEqual(self.case.persisted(run), committed)
+
+    def test_package_conflict_aborts_turn_instead_of_recording_invalid_arguments(self):
+        runtime = self.case.runtime
+        run = self.case.start()
+        runtime.resume(run, max_steps=2)
+        before = self.case.persisted(run)
+        save = runtime.planner.catalogs.save
+
+        def conflict_after_write(*args, **kwargs):
+            save(*args, **kwargs)
+            raise PackageConflict('Authored placement conflict')
+
+        with patch.object(runtime.planner.catalogs, 'save', side_effect=conflict_after_write):
+            with self.assertRaisesRegex(PackageConflict, 'Authored placement conflict'):
+                runtime.resume(run, max_steps=1)
+        failed = self.case.persisted(run)
+        for key in ('revisions', 'steps', 'status', 'job', 'messages'):
+            self.assertEqual(failed[key], before[key], key)
+        self.assertEqual(failed['turns'][-1][1], 'received')
+        self.assertEqual(runtime.resume(run, max_steps=1)['result']['revision'], 2)
 
     def test_lost_commit_acknowledgement_replays_committed_result_without_writing_again(self):
         from campaign_agent.adapters.sqlite_planner import _PlacementCommitUnit
