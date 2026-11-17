@@ -256,7 +256,8 @@ def dispatch_agent(runtime,path,data):
     """Both HTTP surfaces use the same strict additive foreground field contract."""
     if not isinstance(data,dict): raise ProviderError('invalid_request')
     foreground=runtime.foreground
-    foreground.guard_data(data)
+    if foreground is not None:
+        foreground.guard_data(data)
     if path=='/api/agent/run':
         if set(data)!={'run_id'} or not isinstance(data['run_id'],str) or not re.fullmatch('[0-9a-f]{32}',data['run_id']): raise ProviderError('invalid_request')
         return runtime.resume(data['run_id'],max_steps=1)
@@ -265,7 +266,7 @@ def dispatch_agent(runtime,path,data):
         if not required<=data.keys() or data.keys()-required-{'after_message','draft_permission','provider_selection_id'}:
             raise ProviderError('invalid_request')
         remote=data['model'] not in ('simulated','simulated-inspect')
-        if remote!=(data.get('provider_selection_id') is not None) or not remote and foreground.credential:
+        if remote!=(data.get('provider_selection_id') is not None) or not remote and foreground is not None and foreground.credential:
             raise ProviderError('invalid_request')
         return runtime.read(runtime.planner.start(**data))
     commands={
@@ -279,6 +280,6 @@ def dispatch_agent(runtime,path,data):
     mode=data.get('mode','offline')
     if mode not in ('offline','openrouter'): raise ProviderError('invalid_request')
     if mode=='offline':
-        if data.keys()&{'model','provider_selection_id'} or foreground.credential: raise ProviderError('invalid_request')
+        if data.keys()&{'model','provider_selection_id'} or foreground is not None and foreground.credential: raise ProviderError('invalid_request')
     elif not {'operation_id','provider_selection_id'}<=data.keys(): raise ProviderError('invalid_request')
     return runtime.read(command(**data))

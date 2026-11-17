@@ -44,10 +44,12 @@ def recorded_assessment(context):
 
 
 class InstructionTests:
-    def __init__(self, drafts, viewer, performance):
+    def __init__(self, drafts, viewer, performance, *, initialize=True):
         self.drafts = drafts
         self.viewer = viewer
         self.performance = performance
+        if not initialize:
+            return
         with closing(viewer.connect()) as db, db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS instruction_tests (

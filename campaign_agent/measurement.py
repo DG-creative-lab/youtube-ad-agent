@@ -15,12 +15,14 @@ class ViewerNotFound(LookupError):
 
 
 class ViewerMeasurement:
-    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample"):
+    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample", initialize=True):
         self.path = path
         # Server composition selects the campaign. Public payloads cannot override it.
         self.campaign_id = campaign_id
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
+        if not initialize:
+            return
         with closing(self.connect()) as db, db:
             db.executescript("""
                 BEGIN IMMEDIATE;

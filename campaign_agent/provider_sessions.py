@@ -82,10 +82,11 @@ def parse_command(raw):
 
 
 class ProviderSessions:
-    def __init__(self,path,*,metadata=None,profiles=(),clock=time):
+    def __init__(self,path,*,metadata=None,profiles=(),clock=time,initialize=True):
         self.path=Path(path);self.metadata=metadata;self.profiles=tuple(profiles);self.clock=clock
         self.cache=CatalogueCache()
-        migrate_path(self.path)
+        if initialize:
+            migrate_path(self.path)
 
     def _requests(self, context):
         c=context.native

@@ -39,11 +39,13 @@ def viewer_window(report):
 
 
 class CampaignDelivery:
-    def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None, *, demo_scenario=None):
+    def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None, *, demo_scenario=None, initialize=True):
         if demo_scenario is not None and (demo_scenario not in demo_delivery.SCENARIOS or reporting is not None):
             raise ValueError('Choose a portable demo scenario without live reporting.')
         self.drafts, self.simulated_setup = drafts, simulated_setup
         self.performance, self.reporting, self.demo_scenario = performance, reporting, demo_scenario
+        if not initialize:
+            return
         with closing(sqlite3.connect(drafts.path)) as db, db:
             db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_reports (
                 id TEXT PRIMARY KEY, setup_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')

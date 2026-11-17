@@ -32,10 +32,12 @@ def _comparison_key(group, baseline):
 
 
 class InstructionFindings:
-    def __init__(self, tests):
+    def __init__(self, tests, *, initialize=True):
         self.tests = tests
         self.drafts = tests.drafts
         self.connect = tests.viewer.connect
+        if not initialize:
+            return
         with closing(self.connect()) as db, db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS instruction_findings (

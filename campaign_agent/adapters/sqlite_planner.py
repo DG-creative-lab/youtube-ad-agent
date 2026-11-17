@@ -9,6 +9,8 @@ snapshot and placement commit adapters own their adopted transactions.
 import sqlite3
 from .sqlite_runs import SQLiteRunStore
 from .sqlite_drafts import SQLiteDraftRepository
+from .sqlite_planner_context import SQLitePlannerContext
+from campaign_agent.ports.storage_errors import StorageError, StorageClosed
 from campaign_agent.ports.planner_records import PlannerRunScope
 from .sqlite_conversations import SQLiteConversationStore, SQLiteConversationStorage
 from contextlib import closing, contextmanager
@@ -248,6 +250,10 @@ class _PlacementRuns:
     def __init__(self, db):
         self._store = SQLiteRunStore(db)
 
+    def create_run(self, run_id, scope, request, status):
+        self._store.create_run(run_id, scope.client_id, scope.brand_id, scope.actor_id,
+                               request, status, scope.campaign_id)
+
     def scoped_run_row(self, run_id, scope):
         return self._store.scoped_run_row(run_id, scope.client_id, scope.brand_id, scope.actor_id, scope.campaign_id)
 
@@ -265,6 +271,33 @@ class _PlacementPlanner:
     def __init__(self, db):
         self._store = SQLitePlannerStore(db)
 
+    def default_row(self, client_id, brand_id, actor_id):
+        return self._store.default_row(client_id, brand_id, actor_id)
+
+    def create_job(self, run_id, session_id, snapshot):
+        self._store.create_job(run_id, session_id, snapshot)
+
+    def upsert_default(self, client_id, brand_id, actor_id, model):
+        self._store.upsert_default(client_id, brand_id, actor_id, model)
+
+    def job_result_row(self, run_id):
+        return self._store.job_result_row(run_id)
+
+    def turn_rows(self, run_id):
+        return self._store.turn_rows(run_id)
+
+    def turn_row(self, run_id, position):
+        return self._store.turn_row(run_id, position)
+
+    def request_turn(self, run_id, position):
+        self._store.request_turn(run_id, position)
+
+    def classification_row(self, run_id):
+        return self._store.classification_row(run_id)
+
+    def request_classification(self, run_id):
+        self._store.request_classification(run_id)
+
     def job_snapshot_row(self, run_id):
         return self._store.job_snapshot_row(run_id)
 
@@ -278,6 +311,7 @@ class _PlacementPlanner:
 class SQLitePlacementRepositories:
     def __init__(self, db):
         self._db, self._active = db, True
+        self.context = SQLitePlannerContext(db)
         self.runs = _PlacementRuns(db)
         self.planner = _PlacementPlanner(db)
         self.drafts = SQLiteDraftRepository(db)
@@ -362,3 +396,129 @@ class SQLitePlannerLifecycleStorage:
     def receive_turn(self, run_id, position, receipt):
         with closing(sqlite3.connect(self._path)) as db, db:
             SQLitePlannerStore(db).receive_turn(run_id, position, receipt)
+
+
+def _storage_failure(error, *, committing=False):
+    if committing:
+        return StorageError('commit_unknown', 'The placement commit could not be confirmed. Read the saved run before retrying.')
+    if isinstance(error, sqlite3.IntegrityError):
+        return StorageError('conflict', 'Placement storage rejected conflicting records.')
+    if isinstance(error, sqlite3.OperationalError) and ('locked' in str(error).lower() or 'busy' in str(error).lower()):
+        return StorageError('busy', 'Placement storage is busy. Retry the original command.')
+    return StorageError('invalid', 'Placement storage is unavailable or contains invalid records.')
+
+
+class _SafePlacementUnit(_PlacementCommitUnit):
+    @contextmanager
+    def tool_attempt(self):
+        try:
+            with super().tool_attempt():
+                yield
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+    def _connection(self, *, write=False):
+        if not self._active:
+            raise StorageClosed()
+        return self._db
+
+    def commit(self):
+        try:
+            super().commit()
+        except sqlite3.Error as error:
+            raise _storage_failure(error, committing=True) from None
+
+
+class SQLitePlacementStorage:
+    """A single selected native store for the entire bounded placement journey."""
+    def __init__(self, path):
+        self._path = path
+
+    @contextmanager
+    def _open(self, *, write):
+        try:
+            with closing(sqlite3.connect(self._path)) as db:
+                unit = _scope_unit(_SafePlacementUnit(db))
+                try:
+                    if not write:
+                        db.execute('PRAGMA query_only=ON')
+                    db.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
+                    yield unit
+                finally:
+                    unit._active = False
+                    db.rollback()
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+    def write(self):
+        return self._open(write=True)
+
+    def read(self):
+        return self._open(write=False)
+
+
+class SafePlannerReceipts:
+    def __init__(self, path):
+        self._native = SQLitePlannerLifecycleStorage(path)
+
+    def fail_classification(self, run_id):
+        try:
+            self._native.fail_classification(run_id)
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+    def receive_classification(self, run_id, classification):
+        try:
+            self._native.receive_classification(run_id, classification)
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+    def fail_turn(self, run_id, position, error):
+        try:
+            self._native.fail_turn(run_id, position, error)
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+    def receive_turn(self, run_id, position, receipt):
+        try:
+            self._native.receive_turn(run_id, position, receipt)
+        except sqlite3.Error as error:
+            raise _storage_failure(error) from None
+
+
+class _ScopedRecords:
+    """Adapter-only lifetime guard exposing a closed set of record operations."""
+    def __init__(self, records, unit, methods):
+        self._records, self._unit, self._methods = records, unit, frozenset(methods)
+
+    def __getattr__(self, name):
+        if name not in self._methods:
+            raise AttributeError(name)
+
+        def invoke(*args, **kwargs):
+            self._unit._connection()
+            try:
+                return getattr(self._records, name)(*args, **kwargs)
+            except sqlite3.Error as error:
+                raise _storage_failure(error) from None
+            except TypeError:
+                raise StorageError('invalid', 'Placement storage contains invalid records.') from None
+        return invoke
+
+
+def _scope_unit(unit):
+    methods = {
+        'runs': ('create_run', 'scoped_run_row', 'step_exists_row', 'append_step', 'update_status'),
+        'planner': ('default_row', 'create_job', 'upsert_default', 'job_result_row', 'turn_rows', 'turn_row',
+                    'request_turn', 'classification_row', 'request_classification', 'job_snapshot_row',
+                    'history_rows', 'update_outcome'),
+        'drafts': ('owner_row', 'latest_revision_row', 'read_snapshot', 'append_snapshot', 'live_catalog_entry', 'placement_catalog_entry'),
+        'catalogs': ('read_snapshot', 'list_catalogs', 'add_catalog', 'add_entry'),
+        'conversations': ('session_row', 'message_rows', 'append_message', 'job_context_row', 'latest_message_id',
+                          'message_count', 'create_session', 'update_settings', 'list_rows', 'running_runs',
+                          'supersede', 'legacy_transcripts'),
+        'context': ('approval_row', 'saved_review_row', 'started_test_exists', 'correction_row'),
+    }
+    for field, allowed in methods.items():
+        setattr(unit, field, _ScopedRecords(getattr(unit, field), unit, allowed))
+    return unit

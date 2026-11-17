@@ -23,6 +23,7 @@ if not __package__:
 
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
 from campaign_agent.ports.catalogs import CatalogStorageError
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.domain.inference_errors import ReviewInferenceError
@@ -81,7 +82,8 @@ def youtube_search(key, query, page):
 
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
           openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
-          provider_metadata=None, provider_profiles=(),provider_completion_transport=None):
+          provider_metadata=None, provider_profiles=(),provider_completion_transport=None,
+          runtime_factory=None, initialize=True, media_dir=None):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -96,17 +98,22 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 raise ValueError("Missing key")
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
-    drafts = CampaignDrafts(draft_path, live, media_dir=DEMO_MEDIA_DIR if demo_scenario else None)
-    agent = None if live else AgentRuntime(draft_path, media_dir=drafts.media_dir,
+    supplied_factory = runtime_factory is not None
+    runtime_factory = runtime_factory or AgentRuntime
+    drafts = CampaignDrafts(draft_path, live, media_dir=media_dir if media_dir is not None else (DEMO_MEDIA_DIR if demo_scenario else None),
+                            initialize=initialize)
+    agent = None if live else runtime_factory(draft_path, media_dir=drafts.media_dir,
                                           openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
                                           openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
-                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,web=True)
-    providers=ProviderSessions(draft_path,metadata=provider_metadata,profiles=provider_profiles) if agent else None
+                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,web=True, initialize=initialize)
+    if agent and supplied_factory:
+        drafts = agent.drafts
+    providers=ProviderSessions(draft_path,metadata=provider_metadata,profiles=provider_profiles,initialize=initialize) if agent else None
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
-    viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id)
-    performance = None if live else CampaignPerformance(drafts, viewer)
+    viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id, initialize=initialize)
+    performance = None if live else CampaignPerformance(drafts, viewer, initialize=initialize)
     instruction_tests = agent.instruction_tests if agent else None
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
                        '/api/campaign/setup/create': agent.setup.create,
@@ -210,7 +217,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Send a valid JSON draft."})
             except ValueError as exc:
                 self.send(400, {"error": str(exc)})
-            except sqlite3.Error:
+            except (sqlite3.Error, StorageError):
                 self.send(503, {"error": "Could not save the draft. Try again."})
             else:
                 self.send(200, saved)
@@ -293,7 +300,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(403, {"error": "The package is unavailable to this operator."})
             except ViewerNotFound as exc:
                 self.send(404, {"error": str(exc)})
-            except (sqlite3.Error, OSError):
+            except (sqlite3.Error, StorageError, OSError):
                 self.send(503, {"error": "Could not complete this action. Try again."})
             else:
                 self.send(200, result)
@@ -346,7 +353,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(200, {"id": catalog_id, "catalogs": agent.planner.catalogs.list()})
             except (ValueError, TypeError, RecursionError):
                 self.send(400, {"error": "Use a named catalog of 1–200 permitted rows with source references."})
-            except (sqlite3.Error, CatalogStorageError):
+            except (sqlite3.Error, StorageError, CatalogStorageError):
                 self.send(503, {"error": "Could not save the catalog."})
 
         def post_agent(self):
@@ -366,20 +373,30 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             try:
                 data=parse_command(self.rfile.read(int(length)))
                 from campaign_agent.foreground_inference import ForegroundInference,dispatch_agent
-                runtime=AgentRuntime(draft_path,media_dir=drafts.media_dir,reporting=reporting,demo_scenario=demo_scenario,web=True)
+                runtime=runtime_factory(draft_path,media_dir=drafts.media_dir,reporting=reporting,demo_scenario=demo_scenario,web=True,initialize=initialize)
                 command={'method':'POST','path':self.path,'query':{},'body':data}
                 context=ProviderContext(runtime.operator.id,runtime.drafts.context,runtime.drafts.campaign_id,
                     hashlib.sha256(operator_token.encode()).hexdigest(),time()+3600,command,
                     lambda:runtime.operator.require_brand(runtime.drafts.context.scope))
                 values=self.headers.get_all('X-OpenRouter-Key',[]) if hasattr(self.headers,'get_all') else ([self.headers['X-OpenRouter-Key']] if 'X-OpenRouter-Key' in self.headers else [])
-                foreground=ForegroundInference(providers,context,runtime.drafts.access,values,completion_transport=provider_completion_transport)
-                foreground.attach(runtime)
-                if set(data)=={'run_id','request'} and self.path=='/api/agent/run':
-                    if foreground.credential: raise ProviderError('invalid_request')
-                    runtime.start(data['request'],run_id=data['run_id']);result=runtime.read(data['run_id'])
+                if not values and hasattr(runtime.planner, 'can_dispatch_local'):
+                    access = runtime.planner.placement.access
+                    access.session_digest, access.expires_at = context.session_digest, context.expires_at
+                    access.request_command, access.local_validate = context.command, context.local_validate
+                    local_dispatch = runtime.planner.can_dispatch_local(self.path, data)
                 else:
-                    try: result=dispatch_agent(runtime,self.path,data)
-                    finally: foreground.close()
+                    local_dispatch = False
+                if local_dispatch:
+                    result = dispatch_agent(runtime, self.path, data)
+                else:
+                    foreground=ForegroundInference(providers,context,runtime.drafts.access,values,completion_transport=provider_completion_transport)
+                    foreground.attach(runtime)
+                    if set(data)=={'run_id','request'} and self.path=='/api/agent/run':
+                        if foreground.credential: raise ProviderError('invalid_request')
+                        runtime.start(data['request'],run_id=data['run_id']);result=runtime.read(data['run_id'])
+                    else:
+                        try: result=dispatch_agent(runtime,self.path,data)
+                        finally: foreground.close()
             except ProviderError as exc:
                 self.send(exc.status,exc.response())
             except PackageConflict as exc:
@@ -394,7 +411,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(403, {"error": str(exc)})
             except (ValueError, RecursionError) as exc:
                 self.send(400, {"error": str(exc)})
-            except (sqlite3.Error, OSError):
+            except (sqlite3.Error, StorageError, OSError):
                 self.send(503, {"error": "Could not complete this step. Try resuming the run."})
             else:
                 self.send(200, result)
@@ -437,7 +454,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(400, {"error": "Send valid comparison JSON."})
             except ValueError as exc:
                 self.send(400, {"error": str(exc)})
-            except (sqlite3.Error, OSError):
+            except (sqlite3.Error, StorageError, OSError):
                 self.send(503, {"error": "Could not save comparison activity. Try again."})
             else:
                 self.send(200, result)
@@ -589,7 +606,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     self.send(404, {'error': 'Capabilities are unavailable in this mode.'})
                 except ValueError:
                     self.send(400, {'error': 'The capability catalogue accepts no query fields.'})
-                except sqlite3.Error:
+                except (sqlite3.Error, StorageError):
                     self.send(503, {'error': 'Could not load capabilities. Try again.'})
                 else:
                     self.send(200, result)
@@ -609,7 +626,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         result = agent.planner.conversations.read(session_id)
                 except (LookupError, PermissionError):
                     self.send(404, {"error": "Conversation unavailable."})
-                except sqlite3.Error:
+                except (sqlite3.Error, StorageError):
                     self.send(503, {"error": "Could not load the conversation. Try again."})
                 else:
                     self.send(200, result)
@@ -625,7 +642,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     result = agent.read(run_id)
                 except PermissionError:
                     self.send(404, {"error": "Run unavailable."})
-                except sqlite3.Error:
+                except (sqlite3.Error, StorageError):
                     self.send(503, {"error": "Could not load run progress. Try again."})
                 else:
                     self.send(200, result)
@@ -731,7 +748,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(409, {"error": str(exc)})
             except PermissionError:
                 self.send(403, {"error": "The package is unavailable to this operator."})
-            except sqlite3.Error:
+            except (sqlite3.Error, StorageError):
                 self.send(503, {"error": "Could not load the package record. Try again."})
             else:
                 self.send(200, result)
@@ -767,7 +784,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     draft = drafts.read(int(requested[0]) if requested else None)
             except ValueError as exc:
                 self.send(400, {"error": str(exc)})
-            except (sqlite3.Error, OSError):
+            except (sqlite3.Error, StorageError, OSError):
                 self.send(503, {"error": "Could not load the draft. Try again."})
                 return
             if draft is None:
@@ -910,7 +927,7 @@ def main():
                   demo_scenario=args.portable_demo)
         else:
             assign(args.catalog, args.paid_jev_limit, args.register_catalog)
-    except sqlite3.Error:
+    except (sqlite3.Error, StorageError):
         print("Could not open the local campaign database.", file=sys.stderr)
         return 1
     except (ValueError, OSError) as exc:

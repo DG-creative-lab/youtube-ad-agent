@@ -4,7 +4,25 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 planner storage lifecycle
+## Current architecture milestone · #86 completion candidate
+
+The next build targets the whole accepted local authored simulated-placement pilot,
+not another single participant. `bootstrap/planner.py:create_local_planner` performs
+explicit native startup/admission and constructs the existing runtime without
+constructor DDL. Its router selects typed placement start/follow-up, read,
+classification/reservation, commit and receipt recovery through the actual local UI
+and shared dispatcher. The context participant reads real approvals, saved reviews,
+corrections and started tests; logical media facts and original command permits
+retain their full scope and preimage checks. Other tools and foreground workflows
+remain supported on the original native store through their retained paths.
+
+#86 is a completion candidate, pending final independent source review, exact-commit
+verification, current CI and human merge. It is not marked complete by this plan.
+The [residual native graph](native-storage-migration.md) assigns the remaining
+families to #37/#87/#88 and records the compatibility schema copies. No backend
+switch, PostgreSQL acceptance, provider activation or hosted release follows.
+
+### Delivered planner storage lifecycle
 
 Catalogue read/save now require typed repositories throughout; the application
 module has no remaining SQL or native connection path. All planner catalogue
