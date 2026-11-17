@@ -4,7 +4,7 @@ from decimal import Decimal
 import json
 from time import time
 
-from .model_catalogue import fingerprint, price
+from .application.catalogue_policy import fingerprint, price
 from .ports.inference import ProviderError
 
 NANOS=1_000_000_000

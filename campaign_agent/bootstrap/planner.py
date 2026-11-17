@@ -16,20 +16,26 @@ from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.application.access import PlacementAccess, PlacementCommandState
 from campaign_agent.application.campaigns import BRIEF, POLICY, DEFAULT_DRAFT_PATH
 from campaign_agent.application.planner_runtime import PlacementRuntime
-from campaign_agent.agent.planning_models import SimulatedPlanner
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.agent.planning_models import SimulatedPlanner, planner_request_body
+from campaign_agent.agent.run import AgentRuntime, RuntimeProviderFactories
 from campaign_agent.access import require_access
 from campaign_agent.bootstrap.placement_router import PlacementRouter
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import MEDIA_DIR, DEMO_MEDIA_DIR
 from campaign_agent.placement_discovery import SimulatedClassifier
+from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.adapters.local_media import LocalMedia
+from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
+from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
+from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.adapters.local_placement_authority import LocalPlacementAuthority
 from campaign_agent.adapters.sqlite_planner import SQLitePlacementStorage, SafePlannerReceipts, _storage_failure
 from campaign_agent.adapters.sqlite_planner_startup import SQLiteLocalPlannerStartup
 from campaign_agent.ports.planner_startup import LocalPlannerStartup
 from campaign_agent.adapters.sqlite_schema import SchemaConflict
 from campaign_agent.ports.storage_errors import StorageError
+from campaign_agent.model_catalogue import CatalogueCache
+from campaign_agent.provider_sessions import ProviderSessions
 
 
 class _CommandScope:
@@ -46,6 +52,22 @@ class _CommandScope:
 
     def set(self, state):
         self._state.set(state)
+
+
+def _create_runtime(path, *, openrouter_models=(), review_transport=None, openrouter_draft_models=(),
+                    draft_transport=None, main_models=(), main_transport=None, **options):
+    providers = RuntimeProviderFactories(
+        setup=lambda: SimulatedCampaignSetup(path, initialize=False),
+        planner=lambda: OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body),
+        reviewer=lambda: OpenRouterReviews(openrouter_models, transport=review_transport),
+        drafter=lambda: OpenRouterInstructions(openrouter_draft_models, transport=draft_transport),
+    )
+    # The local root has already checked its demo identity and initialized the store.
+    return AgentRuntime(path, provider_factories=providers, initialize=False, **options)
+
+
+def _provider_sessions(path, **options):
+    return ProviderSessions(path, cache=CatalogueCache(), **options)
 
 
 def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, media_dir=None, examples=EXAMPLES,
@@ -82,9 +104,10 @@ def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, me
     classifier = classifier if classifier is not None else options.pop('placement_classifier', None)
     simulator = simulator if simulator is not None else SimulatedPlanner()
     classifier = classifier if classifier is not None else SimulatedClassifier()
-    runtime = AgentRuntime(path, operator=operator, media_dir=media_dir, examples=examples, context=context,
-                           campaign_id=campaign_id, planner_simulator=simulator, placement_classifier=classifier,
-                           initialize=False, **options)
+    options.pop('access', None)
+    runtime = _create_runtime(path, operator=operator, media_dir=media_dir, examples=examples, context=context,
+                              campaign_id=campaign_id, planner_simulator=simulator, placement_classifier=classifier,
+                              access=LocalDemoAccess(), **options)
     access = PlacementAccess(authority, context, operator.id, campaign_id,
                              clock=clock, monotonic_clock=monotonic_clock, command_scope=_CommandScope(),
                              local_validate=lambda: operator.require_brand(context.scope))
@@ -124,7 +147,8 @@ def main(argv=None):
         if args.command == 'serve':
             from scripts.placement_review import serve
             serve(args.port, False, args.store, viewer_port=args.viewer_port,
-                  runtime_factory=create_local_planner, initialize=False, media_dir=args.media_dir)
+                  runtime_factory=create_local_planner, provider_sessions_factory=_provider_sessions,
+                  initialize=False, media_dir=args.media_dir)
             return 0
         if args.command == 'demo':
             catalog = runtime.planner.catalogs.register('Authored local catalogue', json.loads(args.catalog.read_text()))

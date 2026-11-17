@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from campaign_agent.domain.scope import WorkspaceContext
+
 
 @dataclass(frozen=True)
 class AccessRequest:
@@ -39,3 +41,15 @@ class CommandPermit:
     decision_id: str
     valid_until: float
     wall_expires_at: float
+
+
+
+class StaffAuthority(AccessPolicy, Protocol):
+    """Resolve current staff context before constructing a campaign runtime."""
+
+    def principal(self, campaign_id: str) -> tuple[object, WorkspaceContext, dict]: ...
+
+
+class StaffAuthorityFactory(Protocol):
+    def __call__(self, path, sessions, token: str, client: GateplaneClient, *,
+                 application_id: str, command: dict) -> StaffAuthority: ...

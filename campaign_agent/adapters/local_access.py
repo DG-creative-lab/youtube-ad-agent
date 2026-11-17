@@ -1,6 +1,7 @@
 """Explicit local demo access; never a hosted authentication fallback."""
-from campaign_agent.access import CAPABILITIES, LOCAL_CONTEXT
-from campaign_agent.access import LOCAL_OPERATOR, command_hash, validate_permit
+from campaign_agent.domain.access_binding import CAPABILITIES, LOCAL_CONTEXT
+from campaign_agent.domain.access_binding import LOCAL_OPERATOR, command_hash
+from .sqlite_access import validate_permit
 from campaign_agent.ports.access import CommandPermit
 from time import time, monotonic
 from uuid import uuid4

@@ -1,12 +1,13 @@
 """An offline campaign preparation run using recorded tool decisions."""
 from contextlib import closing
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 import re
 import sqlite3
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
@@ -26,6 +27,7 @@ from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup
+from campaign_agent.ports.campaign_effects import SetupProvider
 from campaign_agent.delivery import CampaignDelivery
 from .planner import PlacementAgent
 from .planning_models import planner_request_body
@@ -68,6 +70,16 @@ class RecordedInference:
         return recorded_assessment(context)
 
 
+@dataclass(frozen=True)
+class RuntimeProviderFactories:
+    """Providers prepared by the trusted startup path, using the configured store."""
+
+    setup: Callable[[], SetupProvider]
+    planner: Callable[[], PlannerModel]
+    reviewer: Callable[[], InstructionReviewer]
+    drafter: Callable[[], InstructionDrafter]
+
+
 class AgentRuntime:
     def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                  openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
@@ -76,7 +88,7 @@ class AgentRuntime:
                  instruction_reviewer: InstructionReviewer | None = None,
                  instruction_drafter: InstructionDrafter | None = None,
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
-                 web=False, initialize=True):
+                 web=False, initialize=True, provider_factories: RuntimeProviderFactories | None = None):
         operator.require_brand(context.scope)
         self.foreground = None
         self.web = web
@@ -87,7 +99,9 @@ class AgentRuntime:
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
                                      context=context, campaign_id=campaign_id, access=access, examples=examples,
                                      initialize=initialize)
-        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path, initialize=initialize),
+        setup_provider = (SimulatedCampaignSetup(self.path, initialize=initialize)
+                          if provider_factories is None else provider_factories.setup())
+        self.setup = CampaignSetup(self.drafts, setup_provider,
                                    viewer_links=viewer_links, initialize=initialize)
         self.performance = CampaignPerformance(
             self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
@@ -99,10 +113,21 @@ class AgentRuntime:
                                                   initialize=initialize)
         self.instruction_findings = InstructionFindings(self.instruction_tests, initialize=initialize)
         self.model = model or RecordedInference()
-        self.openrouter: InstructionReviewer = (instruction_reviewer if instruction_reviewer is not None
-                                               else OpenRouterReviews(openrouter_models, transport=review_transport))
-        self.openrouter_drafts: InstructionDrafter = (instruction_drafter if instruction_drafter is not None
-                                                     else OpenRouterInstructions(openrouter_draft_models, transport=draft_transport))
+        self.openrouter: InstructionReviewer
+        if instruction_reviewer is not None:
+            self.openrouter = instruction_reviewer
+        elif provider_factories is not None:
+            self.openrouter = provider_factories.reviewer()
+        else:
+            self.openrouter = OpenRouterReviews(openrouter_models, transport=review_transport)
+
+        self.openrouter_drafts: InstructionDrafter
+        if instruction_drafter is not None:
+            self.openrouter_drafts = instruction_drafter
+        elif provider_factories is not None:
+            self.openrouter_drafts = provider_factories.drafter()
+        else:
+            self.openrouter_drafts = OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
         if initialize:
             SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
                                         legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
@@ -110,11 +135,19 @@ class AgentRuntime:
         def make_main_model():
             if planner_model is not None:
                 return planner_model
+            if provider_factories is not None:
+                return provider_factories.planner()
             return OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body)
 
         self.planner = PlacementAgent(self, make_main_model=make_main_model,
                                       foreground_compatible=planner_model is None,
                                       simulator=planner_simulator, classifier=placement_classifier, initialize=initialize)
+        if provider_factories is not None:
+            # A replacement factory cannot qualify a supplied service for foreground dispatch.
+            self.planner.foreground_compatible &= type(self.planner.remote) is OpenRouterPlanner
+            self.structured_foreground_compatible &= (
+                type(self.openrouter) is OpenRouterReviews and type(self.openrouter_drafts) is OpenRouterInstructions
+            )
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.
         self.planner.web_disabled = web

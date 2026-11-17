@@ -83,7 +83,7 @@ def youtube_search(key, query, page):
 def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
           openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
           provider_metadata=None, provider_profiles=(),provider_completion_transport=None,
-          runtime_factory=None, initialize=True, media_dir=None):
+          runtime_factory=None, provider_sessions_factory=ProviderSessions, initialize=True, media_dir=None):
     if not 1 <= viewer_port <= 65535:
         raise ValueError("Choose a fixed viewer port from 1 to 65535.")
     if viewer_port == port:
@@ -108,7 +108,8 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                                           main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,web=True, initialize=initialize)
     if agent and supplied_factory:
         drafts = agent.drafts
-    providers=ProviderSessions(draft_path,metadata=provider_metadata,profiles=provider_profiles,initialize=initialize) if agent else None
+    providers = (provider_sessions_factory(draft_path, metadata=provider_metadata, profiles=provider_profiles,
+                                          initialize=initialize) if agent else None)
     if agent:
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
