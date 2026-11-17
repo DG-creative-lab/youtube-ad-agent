@@ -29,7 +29,7 @@ class SQLiteConversationStore:
                WHERE m.session_id=? ORDER BY m.id DESC LIMIT ?''',
             (session_id, limit),
         ).fetchall()
-        return tuple(MessageRecord(*row) for row in rows)
+        return [MessageRecord(*row) for row in rows]
 
     def append_message(self, session_id, run_id, role, content, revision, catalog_id, kind):
         self._connection.execute(
@@ -65,12 +65,12 @@ class SQLiteConversationStore:
         self._connection.execute('UPDATE planner_sessions SET settings=? WHERE id=?', (settings, session_id))
 
     def list_rows(self, client_id, brand_id, actor_id, campaign_id):
-        return tuple(self._connection.execute(
+        return self._connection.execute(
             '''SELECT s.id,s.settings,(SELECT content FROM planner_messages WHERE session_id=s.id ORDER BY id LIMIT 1)
                FROM planner_sessions s WHERE client_id=? AND brand_id=? AND actor_id=? AND campaign_id=?
                ORDER BY (SELECT MAX(id) FROM planner_messages WHERE session_id=s.id) DESC''',
             (client_id, brand_id, actor_id, campaign_id),
-        ).fetchall())
+        ).fetchall()
 
     def running_runs(self, session_id):
         return tuple(row[0] for row in self._connection.execute(

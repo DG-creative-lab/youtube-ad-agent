@@ -6,7 +6,7 @@ class SessionRecord(NamedTuple):
     client_id: str
     brand_id: str
     actor_id: str
-    settings: str
+    settings: str | None
     campaign_id: str
 
 
@@ -24,13 +24,13 @@ class MessageRecord(NamedTuple):
 
 class JobContext(NamedTuple):
     session_id: str
-    snapshot: str
+    snapshot: str | None
 
 
 class LegacyTranscript(NamedTuple):
     run_id: str
     session_id: str
-    snapshot: str
+    snapshot: str | None
     outcome: str | None
     status: str
 
@@ -38,7 +38,7 @@ class LegacyTranscript(NamedTuple):
 class ConversationRepository(Protocol):
     """Borrowed operations share their caller's transaction; text stays serialized."""
     def session_row(self, session_id: str) -> SessionRecord | None: ...
-    def message_rows(self, session_id: str, limit: int = -1) -> tuple[MessageRecord, ...]: ...
+    def message_rows(self, session_id: str, limit: int = -1) -> list[MessageRecord]: ...
     def append_message(self, session_id: str, run_id: str, role: str, content: str,
                        revision: int, catalog_id: str, kind: str) -> None: ...
     def job_context_row(self, run_id: str) -> JobContext | None: ...
@@ -48,7 +48,7 @@ class ConversationRepository(Protocol):
                        settings: str, campaign_id: str) -> None: ...
     def update_settings(self, session_id: str, settings: str) -> None: ...
     def list_rows(self, client_id: str, brand_id: str, actor_id: str,
-                  campaign_id: str) -> tuple[tuple[str, str, str | None], ...]: ...
+                  campaign_id: str) -> list[tuple[str, str, str | None]]: ...
     def running_runs(self, session_id: str) -> tuple[str, ...]: ...
     def supersede(self, run_id: str, outcome: str) -> None: ...
     def legacy_transcripts(self) -> Iterable[LegacyTranscript]: ...
