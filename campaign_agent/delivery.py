@@ -3,23 +3,15 @@ from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
 import json
 import sqlite3
-from typing import Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from campaign_agent.domain.errors import PackageConflict
 from .adapters import demo_delivery
 from .campaign_setup import CampaignSetup
 from .domain.delivery_next_test import next_action, respect_correction
-from .handoff import package_fingerprint
+from .domain.fingerprints import package_fingerprint
+from .ports.campaign_effects import CampaignReporting as CampaignReporting, DeliveryBinding, DeliveryGroup
 from .measurement import ViewerMeasurement
-
-
-class CampaignReporting(Protocol):
-    provider: str
-    manager_id: str
-    account_id: str
-
-    def snapshot(self, binding: dict) -> dict: ...
 
 
 def viewer_window(report):
@@ -52,7 +44,7 @@ class CampaignDelivery:
             db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_recommendations (
                 id TEXT PRIMARY KEY, report_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')
 
-    def binding(self, db, campaign_id, revision, fingerprint):
+    def binding(self, db, campaign_id, revision, fingerprint) -> DeliveryBinding | None:
         scope = self.drafts._package_scope(campaign_id, revision)
         package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
         if self.reporting is None:
@@ -70,7 +62,7 @@ class CampaignDelivery:
         configuration = observed['configuration']
         groups = {group['context']: group for group in configuration['groups']}
         approved = {group['context']: group for group in package['groups']}
-        bound_groups = []
+        bound_groups: list[DeliveryGroup] = []
         for row in observed['groups']:
             context = row['context']
             group, config = approved[context], groups[context]

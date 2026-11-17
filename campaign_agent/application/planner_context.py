@@ -1,9 +1,9 @@
 """Package identity and placement context policy over typed scoped facts."""
 from copy import deepcopy
-import hashlib
 import json
 from urllib.parse import urlencode
 
+from campaign_agent.domain.fingerprints import package_fingerprint
 from campaign_agent.ports.drafts import DraftRepository
 from campaign_agent.ports.planner_context import ComparisonMedia, PlannerContextRepository
 
@@ -12,11 +12,6 @@ CORRECTION_CHOICES = {
     'keep_takes': 'Keep both takes unchanged',
     'keep_comparison': 'Keep the entire comparison unchanged',
 }
-
-
-def package_fingerprint(package):
-    encoded = json.dumps(package, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def comparison_identity(group, *, keep_takes=False):

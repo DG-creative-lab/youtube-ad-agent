@@ -130,6 +130,12 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         self.manager_currency = 'USD'
         preview = self.setup.validate(*self.reference)
         self.assertEqual(preview['validation_request_id'], 'validate-fixture')
+        # Fixed from the pre-migration implementation. The operation must still
+        # match an existing approval and the campaign name used for read-back.
+        self.assertEqual(self.reference[2], '4d448a38a639a8c4de81df79c705cf51e0d6f45b0f1e23da5a13c6c378debf47')
+        self.assertEqual(preview['id'], '14f29acc4a432f8cea76cf27712eae558057e20be7560b6d9f2ac3cb69ed31c9')
+        self.assertEqual(preview['plan']['expected_readback']['name'],
+                         'Campaign Agent Sandbox 96dca84f8921b42119f0c080')
         self.assertIsNone(self.case.runtime.setup.read(*self.reference))
         self.assertIsNone(preview['approval'])
         self.assertIsNone(self.native_campaign)
