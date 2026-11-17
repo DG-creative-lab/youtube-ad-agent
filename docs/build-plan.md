@@ -22,7 +22,7 @@ source validation, receipt phases and application-owned output/budget checks rem
 #87 stays open for request-policy/transport separation, remaining model/provider,
 access and effect consumer inversion. Legacy concrete construction stays explicit
 #87/#88 debt; this build introduces no service registry or alternative command path.
-Independent source review, exact-head verification and human merge remain required.
+Application ceilings also validate saved non-foreground settings, and accepted receipts must match the saved model, prompt, evidence identity and declared limits. Models receive copies of request data. Independent source review, exact-head verification and human merge remain required.
 
 ### Delivered #86 local placement pilot
 

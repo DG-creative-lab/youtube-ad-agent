@@ -310,3 +310,114 @@ class StructuredModelTests(unittest.TestCase):
                     intruder.resume(run)
                 self.assertEqual(self.inference(fixture, run)[0], 'pending')
                 self.assertEqual(model.calls, 0)
+
+    def test_supplied_settings_cannot_expand_the_application_budget_or_request_profile(self):
+        changes = [
+            {'max_output_tokens': 9999}, {'max_output_tokens': 0}, {'max_output_tokens': '512'},
+            {'max_output_tokens': True}, {'max_calls': 2}, {'max_cost_usd': 1},
+            {'max_cost_usd': -1}, {'max_cost_usd': float('nan')}, {'max_cost_usd': '0'},
+            {'foreground': True}, {'mode': 'offline'}, {'model': 'unrelated-model'},
+            {'prompt_version': 'unrelated-prompt'},
+        ]
+        for kind in KINDS:
+            fixture = self.prepare(kind)
+            for change in changes:
+                with self.subTest(kind=kind, change=change):
+                    model = AuthoredStructuredModel()
+                    original = model.settings
+                    model.settings = lambda selected, change=change: {**original(selected), **change}
+                    runtime = self.runtime(fixture, model)
+                    with closing(sqlite3.connect(fixture.path)) as db:
+                        before = [db.execute('SELECT count(*) FROM ' + table).fetchone()[0]
+                                  for table in ('agent_runs', 'agent_test_sources', 'agent_review_inference')]
+                    with self.assertRaises(ReviewInferenceError):
+                        fixture.start(runtime)
+                    with closing(sqlite3.connect(fixture.path)) as db:
+                        after = [db.execute('SELECT count(*) FROM ' + table).fetchone()[0]
+                                 for table in ('agent_runs', 'agent_test_sources', 'agent_review_inference')]
+                    self.assertEqual(after, before)
+                    self.assertEqual(model.calls, 0)
+
+    def test_receipt_provenance_is_bound_even_when_reopened_without_the_supplied_service(self):
+        changes = {'mode': 'offline', 'model': 'unrelated-model', 'prompt_version': 'unrelated-prompt',
+                   'evidence_id': 'unrelated-evidence', 'max_calls': 2, 'max_output_tokens': 9999,
+                   'max_cost_usd': 1}
+        for kind in KINDS:
+            for field, value in changes.items():
+                with self.subTest(kind=kind, field=field):
+                    fixture, model = self.prepare(kind), AuthoredStructuredModel()
+                    original = model.receipt
+                    def forged(context, settings, output_field, output):
+                        receipt = original(context, settings, output_field, output)
+                        receipt['inference'][field] = value
+                        return receipt
+                    model.receipt = forged
+                    runtime = self.runtime(fixture, model)
+                    run = fixture.start(runtime)
+                    runtime.resume(run, max_steps=1)
+                    before = self.revisions(fixture)
+                    with self.assertRaises(ReviewInferenceError):
+                        runtime.resume(run, max_steps=1)
+                    received = self.inference(fixture, run)
+                    self.assertEqual(received[0], 'received')
+                    self.assertEqual(json.loads(received[1])['inference'][field], value)
+                    reopened = create_local_planner(fixture.path, media_dir=fixture.media)
+                    with self.assertRaises(ReviewInferenceError):
+                        reopened.resume(run, max_steps=1)
+                    self.assertEqual(self.inference(fixture, run), received)
+                    self.assertEqual(self.revisions(fixture), before)
+                    self.assertEqual(len(reopened.read(run)['steps']), 1)
+                    self.assertEqual(model.calls, 1)
+
+    def test_service_cannot_mutate_the_accepted_context_or_budget_during_dispatch(self):
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                fixture, model = self.prepare(kind), AuthoredStructuredModel()
+                original = model.receipt
+                def mutate(context, settings, field, output):
+                    context.clear()
+                    settings['max_output_tokens'] = 9999
+                    return original(context, settings, field, output)
+                model.receipt = mutate
+                runtime = self.runtime(fixture, model)
+                run = fixture.start(runtime)
+                runtime.resume(run, max_steps=1)
+                source = runtime.read(run)['steps'][0]['result']
+                with self.assertRaises(ReviewInferenceError):
+                    runtime.resume(run, max_steps=1)
+                self.assertEqual(runtime.read(run)['steps'][0]['result'], source)
+                with closing(sqlite3.connect(fixture.path)) as db:
+                    settings = json.loads(db.execute('SELECT settings FROM agent_review_inference WHERE run_id=?', (run,)).fetchone()[0])
+                self.assertEqual(settings['max_output_tokens'], 512)
+                self.assertEqual(self.inference(fixture, run)[0], 'received')
+                self.assertEqual(model.calls, 1)
+
+    def test_persisted_expanded_budget_cannot_dispatch_or_be_accepted_on_recovery(self):
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                fixture, model = self.prepare(kind), AuthoredStructuredModel()
+                runtime = self.runtime(fixture, model)
+                run = fixture.start(runtime)
+                runtime.resume(run, max_steps=1)
+                settings = {**model.settings(MODEL), 'max_output_tokens': 9999}
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute('UPDATE agent_review_inference SET settings=? WHERE run_id=?', (json.dumps(settings), run))
+                with self.assertRaises(ReviewInferenceError):
+                    runtime.resume(run, max_steps=1)
+                self.assertEqual(model.calls, 0)
+                self.assertEqual(self.inference(fixture, run)[0], 'pending')
+                # Authored received history from a pre-fix implementation must also fail closed.
+                context = runtime.read(run)['steps'][0]['result']
+                output_field = 'assessment' if kind == 'review' else 'draft'
+                output = {'reason_code': 'insufficient_visits'} if kind == 'review' else CHOICES
+                receipt = model.receipt(context, settings, output_field, output)
+                receipt['inference']['run_id'] = run
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute("UPDATE agent_review_inference SET state='received',receipt=? WHERE run_id=?",
+                               (json.dumps(receipt), run))
+                before = self.inference(fixture, run)
+                reopened = create_local_planner(fixture.path, media_dir=fixture.media)
+                with self.assertRaises(ReviewInferenceError):
+                    reopened.resume(run, max_steps=1)
+                self.assertEqual(self.inference(fixture, run), before)
+                self.assertEqual(len(reopened.read(run)['steps']), 1)

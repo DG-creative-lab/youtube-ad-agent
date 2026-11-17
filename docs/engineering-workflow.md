@@ -44,7 +44,7 @@ exercise successful application commands, denied preflight, received-receipt
 reopen, failed receipt persistence, stale source, invalid output and over-budget
 usage. Check a permissive supplied service in web mode and foreground attachment:
 application-owned qualification must deny it before a new request is reserved.
-The tests use authored service objects and temporary native stores, without keys,
+Exercise expanded supplied/saved budgets, forged receipt provenance and input mutation as well. The tests use authored service objects and temporary native stores, without keys,
 network calls or live model-quality claims. Existing native provider/foreground
 checks remain part of the full suite. No client source or wire schema changes are
 required for these constructor seams.

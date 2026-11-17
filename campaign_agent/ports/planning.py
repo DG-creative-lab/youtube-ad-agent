@@ -1,6 +1,8 @@
 """Model and classifier operations consumed by the placement application."""
 from typing import Protocol, TypedDict, Required
 
+STRUCTURED_MAX_OUTPUT_TOKENS = 512
+
 
 class MainModel(Protocol):
     def next_turn(self, context: dict, history: list[dict], settings: dict) -> dict: ...
