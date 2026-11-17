@@ -20,7 +20,7 @@ if not __package__:
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
-from campaign_agent.instruction_policy import (
+from campaign_agent.domain.instruction_policy import (
     ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP, recommend_instruction_action,
 )
 from campaign_agent.instruction_tests import (
@@ -181,7 +181,7 @@ def compare(spec):
             runs.append({"scenario": scenario["id"], "seed": seed, "stream_sha256": package_fingerprint(visits),
                          "winner": winner, **policies, "native": native_trace(spec, visits)})
     sources = ("scripts/compare_instruction_policies.py", "campaign_agent/instruction_policy.py",
-               "campaign_agent/instruction_tests.py")
+               "campaign_agent/domain/instruction_policy.py", "campaign_agent/instruction_tests.py")
     return {"specification": spec, "specification_sha256": package_fingerprint(spec),
             "source_sha256": {source: sha256((ROOT / source).read_bytes()).hexdigest() for source in sources},
             "assessment_version": ASSESSMENT_VERSION, "runs": runs}

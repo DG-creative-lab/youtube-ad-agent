@@ -18,6 +18,8 @@ from 88 to 86 module edges, with no new exceptions. No SQL, transaction, provide
 identity-default or wire behavior moves in this slice. Relocated classes acquire
 new Python module metadata; application JSON/error/fingerprint semantics remain.
 
+The subsequent #85 policy slice moves the unchanged instruction-test decision calculations into the domain package. The old module remains a compatibility reexport; monkeypatches of globals on that wrapper do not change the implementation globals.
+
 #85 remains open: CampaignDrafts orchestration, other domain policies and remaining
 core DTO ownership need later small slices. After #85 foundation work, #87
 foundation contracts/offline injection precede #86 whole pilot-native UOW; #87
