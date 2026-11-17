@@ -4,7 +4,21 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 planner read snapshot
+## Current architecture milestone · #86 complete local placement commit
+
+The non-foreground placement save now uses a typed write unit. Scoped run/session
+and revision checks, catalogue/provenance reads, draft append, step, run outcome
+and assistant reply share one transaction. The adapter owns BEGIN, savepoint,
+commit, rollback and close. Model receipts remain separately durable before tool
+commit, so interrupted saves recover without repeating inference/classification.
+One application placement-save policy serves both the adopted and legacy paths.
+
+Foreground-origin commits (including detached receipt recovery), other tools,
+startup/reservation phases and existing access/permit coupling retain their legacy
+outer boundaries. Native failure mappings are preserved. This is the complete local
+placement *commit*, not acceptance of the whole #86 pilot or a backend switch.
+
+### Delivered planner read snapshot
 
 The planner run projection now uses a typed scoped reader and an adapter-owned
 snapshot. Run status, saved outcome, turns and joined tool history observe the same

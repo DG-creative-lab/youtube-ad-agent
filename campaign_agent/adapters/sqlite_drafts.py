@@ -52,3 +52,28 @@ class SQLiteDraftStore:
             "WHERE ref=? AND client_id=? AND brand_id=? AND campaign_id=?",
             (ref, client_id, brand_id, campaign_id),
         ).fetchone()
+
+
+class SQLiteDraftRepository:
+    """Borrow a draft participant without exposing a connection to application policy."""
+    def __init__(self, db):
+        self._store = SQLiteDraftStore(db)
+
+    def owner_row(self, campaign_id):
+        return self._store.connection.execute(
+            'SELECT b.client_id,b.brand_id,b.workspace_id,b.installation_id '
+            'FROM campaign_owners c JOIN brand_workspaces b '
+            'ON c.client_id=b.client_id AND c.brand_id=b.brand_id WHERE c.campaign_id=?',
+            (campaign_id,)).fetchone()
+
+    def read_snapshot(self, campaign_id, revision=None):
+        return self._store.read_snapshot(campaign_id, revision)
+
+    def append_snapshot(self, campaign_id, revision, snapshot):
+        self._store.append_snapshot(campaign_id, revision, snapshot)
+
+    def live_catalog_entry(self, client_id, brand_id, campaign_id, ref):
+        return self._store.live_catalog_entry(client_id, brand_id, campaign_id, ref)
+
+    def placement_catalog_entry(self, client_id, brand_id, campaign_id, ref):
+        return self._store.placement_catalog_entry(client_id, brand_id, campaign_id, ref)

@@ -38,6 +38,7 @@ class CatalogUnitClosed(CatalogStorageError):
 
 
 class CatalogReader(Protocol):
+    def read_snapshot(self, scope: CatalogScope, catalog_id: str) -> tuple[str | None] | None: ...
     def list_catalogs(self, scope: CatalogScope) -> tuple[CatalogRecord, ...]: ...
 
 

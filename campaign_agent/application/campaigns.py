@@ -8,11 +8,12 @@ import re
 import sqlite3
 from uuid import uuid4
 
+from campaign_agent.ports.drafts import DraftRepository
 from campaign_agent.domain.errors import StaleDraft, PackageConflict
 from campaign_agent.domain.placements import VIDEO_ID
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, require_access
 from campaign_agent.adapters.local_access import LocalDemoAccess
-from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore, SQLiteDraftRepository
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.workspaces import initialize, verify, admit_demo_campaign
 from campaign_agent import handoff
@@ -168,9 +169,15 @@ class CampaignDrafts:
                 SQLiteDraftStore(db).append_snapshot(self.campaign_id, 1, json.dumps(seed))
 
     def _read(self, db, revision=None):
+        return self.read_from(SQLiteDraftRepository(db), revision)
+
+    def read_from(self, repository: DraftRepository, revision=None):
         self.require("youtube:campaign.read")
-        verify(db, self.context, self.campaign_id)
-        snapshot = SQLiteDraftStore(db).read_snapshot(self.campaign_id, revision)
+        context = self.context
+        if repository.owner_row(self.campaign_id) != (context.scope.client_id, context.scope.brand_id,
+                                                     context.workspace_id, context.installation_id):
+            raise PermissionError("The campaign is unavailable in this workspace.")
+        snapshot = repository.read_snapshot(self.campaign_id, revision)
         return json.loads(snapshot) if snapshot is not None else None
 
     def read(self, revision=None):
@@ -414,7 +421,9 @@ class CampaignDrafts:
             db.execute("BEGIN IMMEDIATE")
             yield db
 
-    def save(self, payload, *, connection=None):
+    def save(self, payload, *, connection=None, repository: DraftRepository | None = None):
+        if connection is not None and repository is not None:
+            raise ValueError("Choose one draft transaction source.")
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:
             raise ValueError("Send a campaign ID, expected revision and placements.")
         expected = payload["revision"]
@@ -425,15 +434,20 @@ class CampaignDrafts:
         if not isinstance(rows, list) or len(rows) > MAX_PLACEMENTS:
             raise ValueError(f"Save up to {MAX_PLACEMENTS} placements at a time.")
 
+        if repository is not None:
+            return self._save_from(repository, expected, rows)
         if connection is not None:
             return self._save(db=connection, expected=expected, rows=rows)
         with self.write_unit() as db:
             return self._save(db, expected, rows)
 
     def _save(self, db, expected, rows):
+        return self._save_from(SQLiteDraftRepository(db), expected, rows)
+
+    def _save_from(self, repository: DraftRepository, expected, rows):
         self.require("youtube:campaign.draft")
-        current = self._read(db)
-        placements = self._validate_placements(db, rows, current["brief"]["contexts"])
+        current = self.read_from(repository)
+        placements = self._validate_from(repository, rows, current["brief"]["contexts"])
         revision = current["revision"]
         if expected != revision:
             if expected == revision - 1 and placements == current["placements"]:
@@ -443,7 +457,7 @@ class CampaignDrafts:
             return current
         saved = {**current, "revision": revision + 1, "placements": placements}
         self.require("youtube:campaign.draft")
-        SQLiteDraftStore(db).append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
+        repository.append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
         return saved
 
     def require(self, capability):
@@ -454,6 +468,9 @@ class CampaignDrafts:
         return handoff.EXAMPLES if self._examples is None else self._examples
 
     def _validate_placements(self, db, rows, contexts):
+        return self._validate_from(SQLiteDraftRepository(db), rows, contexts)
+
+    def _validate_from(self, repository: DraftRepository, rows, contexts):
         seen, result = set(), []
         for row in rows:
             fields = ("id", "title", "creative", "source")
@@ -474,10 +491,10 @@ class CampaignDrafts:
                 ref, entry = row["catalog_ref"], None
                 if isinstance(ref, str) and re.fullmatch(r"[0-9a-f]{32}", ref):
                     if self.live:
-                        entry = SQLiteDraftStore(db).live_catalog_entry(
+                        entry = repository.live_catalog_entry(
                             self.scope.client_id, self.scope.brand_id, self.campaign_id, ref)
                     else:
-                        entry = SQLiteDraftStore(db).placement_catalog_entry(
+                        entry = repository.placement_catalog_entry(
                             self.scope.client_id, self.scope.brand_id, self.campaign_id, ref)
                 if (entry is None or entry[:3] != (video_id, title, source)
                         or not isinstance(entry[3], str) or not entry[3].strip()
