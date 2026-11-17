@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ast
 import json
 from pathlib import Path
@@ -39,6 +40,15 @@ CORE_EXTERNAL = {
     'unicodedata', 'urllib.parse',
 }
 INBOUND_DENIED = {'sqlite3'}
+
+# One reviewed relocation. The base remains responsible for authorizing debt.
+CAMPAIGN_OLD = 'scripts/campaign_drafts.py'
+CAMPAIGN_NEW = 'campaign_agent/application/campaigns.py'
+CAMPAIGN_SOURCE_SHA256 = '4b04b7b29ad01f3d48156df252d3bec30fff75864e1a159a8024a3ccd79d1be3'
+CAMPAIGN_EDGES = {('direction', 'campaign_agent/adapters/local_access.py'),
+                  ('direction', 'campaign_agent/adapters/sqlite_drafts.py'),
+                  ('external', 'pathlib'), ('external', 'sqlite3'), ('external', 'uuid')}
+CAMPAIGN_DEFAULT = 'DEFAULT_DRAFT_PATH = Path(__file__).resolve().parents[1] / ".local/campaign-drafts.sqlite3"'
 
 
 class ArchitectureError(Exception):
@@ -280,6 +290,39 @@ def initial_seed_guard(current, base):
     require(changed <= OWNED, 'initial seed changes protected paths: ' + ','.join(sorted(changed - OWNED)))
 
 
+def check_campaign_transfer(base, current, old_policy, policy, old_rows, rows, added):
+    """Allow this exact source move; all other new exception keys remain forbidden."""
+    old_keys = {(rule, CAMPAIGN_OLD, target) for rule, target in CAMPAIGN_EDGES}
+    new_keys = {(rule, CAMPAIGN_NEW, target) for rule, target in CAMPAIGN_EDGES}
+    require(added == new_keys and old_keys <= old_rows.keys() and not old_keys & rows.keys(),
+            'baseline exception growth: invalid campaign transfer')
+    require(old_policy['roles'].get(CAMPAIGN_OLD) == 'application'
+            and policy['roles'].get(CAMPAIGN_OLD) == 'application'
+            and policy['roles'].get(CAMPAIGN_NEW) == 'application'
+            and CAMPAIGN_NEW not in base.paths, 'invalid campaign transfer roles')
+    base.text(CAMPAIGN_OLD)  # Validate the trusted source is a regular Git blob.
+    original = subprocess.run(['git', '-C', str(base.root), 'show', base.ref + ':' + CAMPAIGN_OLD],
+                              capture_output=True, check=True).stdout
+    anchor = CAMPAIGN_DEFAULT.encode('utf-8')
+    require(hashlib.sha256(original).hexdigest() == CAMPAIGN_SOURCE_SHA256
+            and original.count(anchor) == 1, 'invalid trusted campaign source')
+    expected = original.replace(anchor, anchor.replace(b'parents[1]', b'parents[2]'), 1)
+    current.text(CAMPAIGN_NEW)  # Validate the destination is a regular, non-symlink file.
+    require((current.root / CAMPAIGN_NEW).read_bytes() == expected,
+            'campaign transfer must preserve implementation bytes')
+    mode = git(current.root, 'ls-files', '--stage', '--', CAMPAIGN_NEW).split()
+    require(mode and mode[0] == '100644' and not (current.root / CAMPAIGN_NEW).stat().st_mode & 0o111,
+            'invalid campaign transfer file mode')
+    staged = subprocess.run(['git', '-C', str(current.root), 'show', ':' + CAMPAIGN_NEW],
+                            capture_output=True, check=True).stdout
+    require(staged == expected, 'staged campaign transfer bytes differ')
+    for rule, target in CAMPAIGN_EDGES:
+        old_key, new_key = (rule, CAMPAIGN_OLD, target), (rule, CAMPAIGN_NEW, target)
+        require(rows[new_key] == {**old_rows[old_key], 'source': CAMPAIGN_NEW},
+                'campaign transfer metadata changed')
+    return old_keys, new_keys
+
+
 def check(root, base_ref, strict=False, details=False):
     require(re.fullmatch(r'[0-9a-f]{40}', base_ref or '') is not None, '--base-ref requires a full commit SHA')
     require(git(root, 'cat-file', '-t', base_ref) == 'commit\n', 'base is not a commit')
@@ -289,6 +332,7 @@ def check(root, base_ref, strict=False, details=False):
     current, base = Tree(root), Tree(root, base_ref)
     policy, exceptions = read_pair(current)
     base_has = {name for name in (POLICY, BASELINE) if name in base.paths}
+    transferred = None
     if not base_has:
         initial_seed_guard(current, base)
     else:
@@ -297,9 +341,15 @@ def check(root, base_ref, strict=False, details=False):
         for path, role in old_policy['roles'].items():
             if path in current.paths:
                 require(policy['roles'].get(path) == role, 'surviving source role changed: ' + path)
-        require(exceptions.keys() <= old_exceptions.keys(), 'baseline exception growth')
-        require(all(row == old_exceptions[key] for key, row in exceptions.items()), 'exception metadata changed')
+        added = exceptions.keys() - old_exceptions.keys()
+        if added:
+            transferred = check_campaign_transfer(base, current, old_policy, policy, old_exceptions, exceptions, added)
+        require(all(row == old_exceptions[key] for key, row in exceptions.items() if key in old_exceptions),
+                'exception metadata changed')
     facts, edges = analyze(current, policy)
+    if transferred:
+        old_keys, new_keys = transferred
+        require(not old_keys & facts.keys() and new_keys <= facts.keys(), 'campaign transfer edges do not match source')
     stale = exceptions.keys() - facts.keys()
     require(not stale, 'stale exceptions must be removed: ' + str(sorted(stale)))
     violations = facts.keys() if strict else facts.keys() - exceptions.keys()
