@@ -24,7 +24,7 @@ if not __package__:
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
 from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
-from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, package_fingerprint
@@ -35,7 +35,8 @@ from campaign_agent.performance import CampaignPerformance
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, parse_command
 from campaign_agent.ports.inference import ProviderError
-from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS, PackageConflict, StaleDraft
+from scripts.campaign_drafts import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
+from campaign_agent.domain.errors import PackageConflict, StaleDraft
 from scripts.google_ads_sandbox import google_transport
 
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"

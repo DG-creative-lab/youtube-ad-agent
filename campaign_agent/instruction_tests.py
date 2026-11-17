@@ -11,7 +11,7 @@ from .access import LOCAL_BRAND
 from .handoff import package_fingerprint
 from .instruction_policy import ADDITIONAL_BATCH_SIZE, POLICY_V1, SAMPLE_CAP, recommend_instruction_action
 from .measurement import ViewerNotFound
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 
 
 MIN_TEST_ARRIVALS = 20

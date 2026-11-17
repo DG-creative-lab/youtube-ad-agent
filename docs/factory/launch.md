@@ -4,20 +4,19 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Initial #84 ratchet · current architecture stage
+## Current architecture stage · #85 first foundation slice
 
-#83 H83-boundary-v2 was human-merged in PR #90 at
-`7c139e19bfbf0d829b31f8d09320e912e5561f6b`; its [ADR](../hexagonal-architecture.md)
-and [module map](../hexagonal-module-map.json) are accepted. Initial #84 owns
-exactly12 checker/test/policy/baseline/workflow/status-document paths. It adds the
-offline shrinking gate, not runtime inversion. The user-approved H84-simple-v5 scope replaces the unpublished broad analyzer
-with static Python import directions/cycles and 88 reviewed module-edge exceptions.
-Runtime-effect inference, occurrence identities and compact origin profiles are
-out of scope; original migration/use obligations remain review/test criteria.
-Exact-head full/canonical/native verification, current Python/unchanged Planner
-CI, protected bytes and human merge remain acceptance gates.
+Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`; the user-approved small import
+checker is accepted. The first bounded #85 slice moves shared scope values,
+campaign/inference errors and video-ID syntax into domain modules, retains old
+imports as same-object compatibility reexports and redirects current consumers.
+The baseline shrinks 88 → 86; existing authority/default/SQL/provider behavior
+and the historical map remain. #85 stays open for remaining orchestration and
+policy placement. Exact-head independent review/verification, current Python and
+Planner CI and human merge apply; no storage/provider/wiring dispatch follows.
 
-After this initial delivery is human-merged, #85 relocation is next. #87 foundation
+After the remaining #85 foundation slices, #87 foundation
 contracts/offline injection precede #86 whole pilot-native UOW and minimal factory;
 #87 external adoption and #88 composition follow serially. The initial baseline
 is deliberately nonempty: #84 remains open until #37's named native graph is done

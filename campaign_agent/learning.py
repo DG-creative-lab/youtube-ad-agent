@@ -4,7 +4,8 @@ from contextlib import closing
 import json
 import re
 
-from scripts.campaign_drafts import POLICY, PackageConflict
+from scripts.campaign_drafts import POLICY
+from campaign_agent.domain.errors import PackageConflict
 from .agent.draft_permissions import permits
 from .handoff import package_fingerprint
 from .instruction_tests import EVIDENCE_PROTOCOL

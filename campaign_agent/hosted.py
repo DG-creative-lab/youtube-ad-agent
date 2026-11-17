@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from campaign_agent.access import Operator
+from campaign_agent.domain.scope import Operator
 from campaign_agent.assets import AssetUnavailable
 from campaign_agent.adapters.gateplane import GateplaneAccess
 from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
@@ -26,7 +26,7 @@ from campaign_agent.publications import Publications
 from campaign_agent.staff import SignInRequired
 from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, validate_fields
 from campaign_agent.ports.inference import ProviderError
-from scripts.campaign_drafts import PackageConflict, StaleDraft
+from campaign_agent.domain.errors import PackageConflict, StaleDraft
 
 ROOT = Path(__file__).resolve().parents[1]
 

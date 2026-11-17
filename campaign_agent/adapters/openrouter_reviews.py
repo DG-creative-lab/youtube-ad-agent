@@ -8,6 +8,7 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.instruction_tests import ASSESSMENT_REASONS
 
@@ -25,10 +26,6 @@ ASSESSMENT_SCHEMA = {
     },
     "required": ["reason_code"],
 }
-
-
-class ReviewInferenceError(RuntimeError):
-    """A sanitized provider failure that is safe to show in the planner."""
 
 
 class NoRedirects(HTTPRedirectHandler):

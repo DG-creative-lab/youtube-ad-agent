@@ -7,7 +7,7 @@ from time import time
 
 from .handoff import caption_bytes, example_content, media_sha256, package_fingerprint, read_media
 from .measurement import ViewerMeasurement, ViewerNotFound
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 
 
 _REPUBLICATION_REQUIRED = (

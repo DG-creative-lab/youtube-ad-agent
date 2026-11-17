@@ -8,7 +8,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from .handoff import package_fingerprint
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 
 
 def _valid_resource_id(value: object) -> bool:
