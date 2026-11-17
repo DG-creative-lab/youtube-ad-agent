@@ -12,17 +12,6 @@ from .inference_ledger import InferenceLedger, actual_cost
 from .model_catalogue import compatible_model, fingerprint, select_endpoint
 from .ports.inference import ForegroundCredential, ProviderError
 
-INTERNAL={'selection_id','connection_id','catalogue_revision','max_run_cost_usd','prices','routing','endpoint_hash',
-          'charging_profile','charging_profile_expires_at','privacy','policy_version','max_input_tokens','max_request_bytes','profile','output_cap_parameter','foreground'}
-
-
-def model_context(value):
-    """Internal billing/binding metadata is not dialogue or task context."""
-    if isinstance(value,dict): return {k:model_context(v) for k,v in value.items() if k not in INTERNAL}
-    if isinstance(value,list): return [model_context(v) for v in value]
-    return value
-
-
 class ForegroundInference:
     def __init__(self,providers,context,access,key_values,*,completion_transport=None):
         self.providers,self.path,self.context,self.access=providers,providers.path,context,access

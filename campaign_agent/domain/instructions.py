@@ -17,6 +17,12 @@ INSTRUCTION_COMPONENTS = {
 }
 
 
+ASSESSMENT_REASONS = {
+    "insufficient_visits": ("insufficient_evidence", "Insufficient evidence"),
+    "continue_observation": ("keep_collecting", "Keep collecting evidence"),
+    "revised_not_higher": ("prepare_another_test", "Consider another instruction test"),
+}
+
 INSTRUCTION_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {key: {"type": "string", "enum": list(options)}

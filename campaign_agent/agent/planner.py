@@ -3,6 +3,7 @@ from contextlib import closing
 import json
 import re
 import sqlite3
+from typing import Callable
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage, SQLitePlacementCommitStorage, SQLitePlannerLifecycleStorage
@@ -16,7 +17,7 @@ from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
 from campaign_agent.domain.errors import PackageConflict
-from .planning_models import OpenRouterPlanner, SimulatedPlanner
+from .planning_models import SimulatedPlanner
 from .conversations import CampaignConversations
 from .replies import REPLY_VERSION, clarification, reply, verified_result
 from .review_tools import CampaignReviewTools
@@ -56,16 +57,16 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 
 class PlacementAgent:
-    def __init__(self, owner, models=(), *, transport=None, main_model: PlannerModel | None = None,
+    def __init__(self, owner, *, make_main_model: Callable[[], PlannerModel], foreground_compatible: bool,
                  simulator: MainModel | None = None, classifier: PlacementClassifier | None = None, initialize=True):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
-        self.foreground_compatible = main_model is None
+        self.foreground_compatible = foreground_compatible
         self.web_disabled = False
         catalog_storage = SQLiteCatalogStorage(self.path)
         if initialize:
             catalog_storage.initialize()
         self.catalogs = PlacementDiscovery(self.drafts, catalog_storage)
-        self.remote: PlannerModel = main_model if main_model is not None else OpenRouterPlanner(models, transport=transport)
+        self.remote = make_main_model()
         self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
         self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
         self.review_tools = CampaignReviewTools(self)
