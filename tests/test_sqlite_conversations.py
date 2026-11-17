@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore
+from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore, SQLiteConversationStorage
 from campaign_agent.agent.conversations import CampaignConversations
 
 
@@ -33,6 +33,7 @@ class SQLiteConversationStoreTests(unittest.TestCase):
         self.app.planner = SimpleNamespace(drafts=drafts)
         self.app.operator = SimpleNamespace(id='actor')
         self.app.path = self.path
+        self.app.storage = SQLiteConversationStorage(self.path)
 
     def job(self, run_id, session_id='session', snapshot=' { "revision": 4, "catalog_id": "Catalog" } ', outcome=None):
         self.db.execute('INSERT INTO planner_jobs VALUES(?,?,?,?)', (run_id, session_id, snapshot, outcome))
@@ -43,9 +44,9 @@ class SQLiteConversationStoreTests(unittest.TestCase):
     def test_raw_session_and_job_rows_preserve_missing_malformed_and_null(self):
         self.assertIsNone(self.store.session_row('missing'))
         self.assertIsNone(self.store.job_context_row('missing'))
-        self.assertIsNone(self.app.session(self.db, 'missing'))
+        self.assertIsNone(self.app.session(self.store, 'missing'))
         with self.assertRaises(TypeError):
-            self.app.finish(self.db, 'missing', {}, 'answered')
+            self.app.finish(self.store, 'missing', {}, 'answered')
         for index, (raw, error) in enumerate([(' { "model": "simulated", "label": "語" } ', None),
                                                ('{bad json', json.JSONDecodeError), (None, TypeError), ('null', None)]):
             with self.subTest(raw=raw):
@@ -56,11 +57,11 @@ class SQLiteConversationStoreTests(unittest.TestCase):
                 self.assertEqual(self.store.job_context_row(run_id), (session_id, raw))
                 if error:
                     with self.assertRaises(error):
-                        self.app.session(self.db, session_id)
+                        self.app.session(self.store, session_id)
                     with self.assertRaises(error):
-                        self.app.finish(self.db, run_id, {}, 'answered')
+                        self.app.finish(self.store, run_id, {}, 'answered')
                 else:
-                    self.assertEqual(self.app.session(self.db, session_id), json.loads(raw))
+                    self.assertEqual(self.app.session(self.store, session_id), json.loads(raw))
         self.session(settings='original')
         self.session(settings='replacement', scope=('foreign', 'brand', 'actor', 'campaign'))
         self.assertEqual(self.store.session_row('session'), ('client', 'brand', 'actor', 'original', 'campaign'))
@@ -95,9 +96,9 @@ class SQLiteConversationStoreTests(unittest.TestCase):
         self.assertEqual(self.store.message_rows('session', 0), [])
         # Normalization remains in the application.
         for limit in (None, 0, -1, -5, 100):
-            self.assertEqual([item['id'] for item in self.app.messages(self.db, 'session', limit)],
+            self.assertEqual([item['id'] for item in self.app.messages(self.store, 'session', limit)],
                              [row[0] for row in reversed(rows)])
-        self.assertEqual([item['id'] for item in self.app.messages(self.db, 'session', 1)], [rows[0][0]])
+        self.assertEqual([item['id'] for item in self.app.messages(self.store, 'session', 1)], [rows[0][0]])
         self.assertEqual(self.store.message_rows('session', 1), rows[:1])
         self.assertEqual(self.store.message_rows('session', 2), rows[:2])
         self.assertEqual(self.store.message_rows('missing'), [])
@@ -118,9 +119,9 @@ class SQLiteConversationStoreTests(unittest.TestCase):
                 self.assertEqual(self.store.message_rows(session_id)[0][8], raw)
                 if raw:
                     with self.assertRaises(json.JSONDecodeError):
-                        self.app.messages(self.db, session_id)
+                        self.app.messages(self.store, session_id)
                 else:
-                    message, = self.app.messages(self.db, session_id)
+                    message, = self.app.messages(self.store, session_id)
                     self.assertEqual(message['kind'], 'needs_verification')
                     self.assertNotIn('Unverified historical claim', message['content'])
 

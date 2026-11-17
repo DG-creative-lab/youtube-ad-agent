@@ -4,7 +4,20 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #86 catalogue transaction foundation
+## Current architecture milestone · #86 conversation transaction participant
+
+Following PR #99's catalogue foundation, conversation commands now consume typed
+repositories. Planner begin/session/finish borrow that repository from the exact
+existing planner transaction, including running-run reads and superseded
+status/outcome/reply writes. Conversation schema initialization and transcript
+adoption remain atomic in the SQLite adapter; application code retains dialogue,
+access and reply policy. Standalone transcript reads use adapter-owned snapshots.
+
+This adopts one participant, not the full placement UOW. The planner/draft/access
+transaction owners and native error mapping remain legacy boundaries until the
+whole unit is adopted. No alternate runtime backend is selected. #86 stays open.
+
+### Delivered catalogue foundation
 
 #85 closed under its revised scope after PR #97. PR #98 supplied the first #87
 planning/classifier contracts and supplied-model seam; broader provider inversion
