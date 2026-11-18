@@ -291,6 +291,35 @@ class ArchitectureBoundaries(unittest.TestCase):
         forged = r.git('commit-tree', changed_tree, '-p', seed_base, '-p', first, '-m', 'changed merge tree')
         r.git('reset', '--hard', forged); invoke(2)
 
+    def test_only_named_provider_launchers_can_transition_to_bootstrap(self):
+        launchers = {
+            'campaign_agent/agent/__main__.py': 'inbound',
+            'campaign_agent/hosted.py': 'application',
+            'scripts/placement_review.py': 'inbound',
+        }
+        for path, role in launchers.items():
+            with self.subTest(path=path):
+                r = self.repo({path: 'pass\n', 'wire.py': 'pass\n'}, {path: role, 'wire.py': 'bootstrap'})
+                r.policy['roles'][path] = 'bootstrap'
+                r.write(path, 'import wire\n')
+                r.save()
+                self.assert_cli(r, 0, '--strict')
+
+    def test_launcher_transition_does_not_allow_core_to_import_bootstrap(self):
+        launcher = 'campaign_agent/hosted.py'
+        r = self.repo({launcher: 'pass\n', 'app.py': 'import campaign_agent.hosted\n'},
+                      {launcher: 'application', 'app.py': 'application'})
+        r.policy['roles'][launcher] = 'bootstrap'
+        r.save()
+        self.assert_cli(r, 1)
+
+    def test_launcher_permission_cannot_be_used_from_a_different_role(self):
+        launcher = 'scripts/placement_review.py'
+        r = self.repo({launcher: 'pass\n'}, {launcher: 'application'})
+        r.policy['roles'][launcher] = 'bootstrap'
+        r.save()
+        self.assertIn('role changed', self.assert_cli(r, 2)['error'])
+
     def test_campaign_debt_transfer_is_exact_and_one_time(self):
         import hashlib
         old = 'scripts/campaign_drafts.py'

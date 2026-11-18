@@ -41,6 +41,15 @@ CORE_EXTERNAL = {
 }
 INBOUND_DENIED = {'sqlite3'}
 
+# These existing public entrypoints assemble dependencies during the #87 migration.
+# Their paths remain stable. Ordinary import and baseline checks still apply.
+PROVIDER_LAUNCHERS = {
+    'campaign_agent/agent/__main__.py': 'inbound',
+    'campaign_agent/hosted.py': 'application',
+    'scripts/placement_review.py': 'inbound',
+}
+
+
 # One reviewed relocation. The base remains responsible for authorizing debt.
 CAMPAIGN_OLD = 'scripts/campaign_drafts.py'
 CAMPAIGN_NEW = 'campaign_agent/application/campaigns.py'
@@ -340,7 +349,9 @@ def check(root, base_ref, strict=False, details=False):
         old_policy, old_exceptions = read_pair(base)
         for path, role in old_policy['roles'].items():
             if path in current.paths:
-                require(policy['roles'].get(path) == role, 'surviving source role changed: ' + path)
+                next_role = policy['roles'].get(path)
+                launcher_transition = PROVIDER_LAUNCHERS.get(path) == role and next_role == 'bootstrap'
+                require(next_role == role or launcher_transition, 'surviving source role changed: ' + path)
         added = exceptions.keys() - old_exceptions.keys()
         if added:
             transferred = check_campaign_transfer(base, current, old_policy, policy, old_exceptions, exceptions, added)

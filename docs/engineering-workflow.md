@@ -90,8 +90,11 @@ Core external imports outside the listed stdlib families and inbound sqlite3
 imports are forbidden without a named existing exception. These permissions concern
 imports: allowing datetime does not prove a call to datetime.now is deterministic.
 Every edge within a cyclic strongly connected component is checked separately.
-New/moved Python files need explicit classification; surviving roles cannot change
-under the ordinary shrink gate.
+New or moved Python files need explicit classification. The ordinary shrink gate
+preserves surviving roles. The named #87 provider launchers can move from their
+recorded application or inbound roles to bootstrap while keeping their existing
+paths. The checker still rejects application imports of those launchers and still
+requires the reviewed baseline to shrink.
 
 The readable [baseline](architecture-baseline.json) has **86 module-edge exceptions** after the first #85 slice:
 58 external imports and 28 direction violations (initial #84 seeded 88). Each has source, target, rule,
