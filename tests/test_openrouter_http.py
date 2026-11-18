@@ -242,7 +242,7 @@ class OpenRouterHttpTests(unittest.TestCase):
 
 
     def test_saved_selection_replays_after_cache_eviction_and_service_reopen(self):
-        from campaign_agent.provider_sessions import ProviderSessions
+        from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
         connection=self.connect()['connection_id'];catalogue=self.models(connection)
         data=self.selection(connection,catalogue['catalogue_revision'])
         selected=self.post('select',data)
@@ -426,7 +426,7 @@ class OpenRouterLocalTests(unittest.TestCase):
         from contextlib import ExitStack,redirect_stdout
         from email.message import Message
         from scripts import placement_review
-        from campaign_agent.agent.run import AgentRuntime
+        from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
         with TemporaryDirectory() as d,ExitStack() as stack:
             path=Path(d)/'local.sqlite3';servers=[];runtimes=[];metadata=AuthoredProviderMetadata()
             def server(address,handler):

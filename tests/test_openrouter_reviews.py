@@ -10,7 +10,8 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.adapters.openrouter_reviews import ENDPOINT, ReviewInferenceError
-from campaign_agent.agent.run import AgentRuntime, REVIEW_TEST_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import REVIEW_TEST_REQUEST
 from campaign_agent.handoff import package_fingerprint
 from scripts.campaign_drafts import PackageConflict
 import test_instruction_tests as fixtures

@@ -3,10 +3,10 @@ from contextlib import closing
 from datetime import date, datetime, time, timedelta, timezone
 import json
 import sqlite3
+from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from campaign_agent.domain.errors import PackageConflict
-from .adapters import demo_delivery
 from .campaign_setup import CampaignSetup
 from .domain.delivery_next_test import next_action, respect_correction
 from .domain.fingerprints import package_fingerprint
@@ -31,11 +31,13 @@ def viewer_window(report):
 
 
 class CampaignDelivery:
-    def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None, *, demo_scenario=None, initialize=True):
-        if demo_scenario is not None and (demo_scenario not in demo_delivery.SCENARIOS or reporting is not None):
+    def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None, *,
+                 demo_scenario=None, demo_report: Callable[[DeliveryBinding], dict] | None = None, initialize=True):
+        if (demo_scenario is None) != (demo_report is None) or (demo_report is not None and reporting is not None):
             raise ValueError('Choose a portable demo scenario without live reporting.')
         self.drafts, self.simulated_setup = drafts, simulated_setup
         self.performance, self.reporting, self.demo_scenario = performance, reporting, demo_scenario
+        self.demo_report = demo_report
         if not initialize:
             return
         with closing(sqlite3.connect(drafts.path)) as db, db:
@@ -114,8 +116,8 @@ class CampaignDelivery:
         if binding is None or (setup_id is not None and (binding['setup_id'] != setup_id
                                                         or binding.get('demo_scenario') != demo_scenario)):
             raise PackageConflict('Verify the Google Ads setup for this approved package before reviewing delivery.')
-        if self.demo_scenario:
-            report = demo_delivery.snapshot(binding, self.demo_scenario)
+        if self.demo_report is not None:
+            report = self.demo_report(binding)
         elif self.reporting is not None:
             report = self.reporting.snapshot(binding)
         else:

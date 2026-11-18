@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 
 

@@ -19,7 +19,7 @@ if not __package__:
 
 from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.domain.scope import Operator
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.placement_discovery import SimulatedClassifier
 from campaign_agent.domain.errors import PackageConflict
