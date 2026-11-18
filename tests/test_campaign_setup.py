@@ -1,8 +1,11 @@
+import sqlite3
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.adapters.sqlite_setup_delivery import _SetupDeliveryUnit
 from campaign_agent.campaign_setup import SetupProviderError
+from campaign_agent.ports.storage_errors import StorageError
 from scripts.campaign_drafts import PackageConflict
 import test_placement_planner as fixtures
 
@@ -57,6 +60,43 @@ class CampaignSetupTests(unittest.TestCase):
         with patch.object(reopened.provider, 'create_paused') as create:
             self.assertEqual(reopened.create(*self.reference, plan['id']), verified)
             create.assert_not_called()
+
+    def test_setup_reservation_failure_rolls_back_before_dispatch(self):
+        class RefuseCommit(sqlite3.Connection):
+            def commit(self):
+                raise sqlite3.OperationalError('Reservation could not be committed')
+
+        plan = self.validate()
+        native_connect = sqlite3.connect
+        with patch('campaign_agent.adapters.sqlite_drafts.sqlite3.connect',
+                   side_effect=lambda path: native_connect(path, factory=RefuseCommit)), \
+                patch.object(self.setup.provider, 'create_paused') as dispatch:
+            with self.assertRaises(StorageError) as error:
+                self.setup.create(*self.reference, plan['id'])
+            self.assertEqual(error.exception.kind, 'commit_unknown')
+            dispatch.assert_not_called()
+        reopened = self.case.reopen().setup
+        self.assertEqual(reopened.read(*self.reference), plan)
+        self.assertEqual(reopened.create(*self.reference, plan['id'])['status'], 'verified')
+
+    def test_delivery_report_failure_rolls_back_before_recommendation(self):
+        plan = self.validate()
+        self.setup.create(*self.reference, plan['id'])
+        delivery = self.case.reopen(demo_scenario='propose').delivery
+        insert = _SetupDeliveryUnit.add_report
+
+        def interrupt_after_insert(unit, *args):
+            insert(unit, *args)
+            raise sqlite3.OperationalError('Delivery report interrupted')
+
+        with patch.object(_SetupDeliveryUnit, 'add_report', interrupt_after_insert):
+            with self.assertRaises(StorageError):
+                delivery.review(*self.reference)
+        reopened = self.case.reopen(demo_scenario='propose').delivery
+        self.assertIsNone(reopened.read(*self.reference)['report'])
+        report = reopened.review(*self.reference)
+        self.assertEqual(reopened.read(*self.reference)['report'], report)
+        self.assertEqual(reopened.recommend(*self.reference, report['id'])['report_id'], report['id'])
 
     def test_changed_package_or_setup_cannot_reach_provider(self):
         plan = self.validate()

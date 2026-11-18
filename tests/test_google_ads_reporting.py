@@ -9,7 +9,8 @@ from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox
 from campaign_agent.agent.conversations import bounded_context
 from campaign_agent.bootstrap.runtime import create_setup
-from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
+from campaign_agent.adapters.sqlite_setup_delivery import verified_viewer_link
+from campaign_agent.campaign_setup import SetupProviderError
 from campaign_agent.measurement import ViewerNotFound
 from scripts.campaign_drafts import PackageConflict
 import test_google_ads_sandbox as fixtures
@@ -168,7 +169,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.assertEqual(edit_link['destination'], 'https://viewer.example.com' + edit_link['path'])
         viewer = offline.performance.viewer
         with closing(viewer.connect()) as db:
-            self.assertIsNone(CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, edit_link['id']))
+            self.assertIsNone(verified_viewer_link(db, LOCAL_BRAND, edit_link['id']))
 
         offline.setup.create(*self.reference, simulated_plan['id'])
         verified = google.create(*self.reference, google_plan['id'])
@@ -178,7 +179,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         def open_link(link, visit_id=None):
             with closing(viewer.connect()) as db, db:
                 db.execute('BEGIN IMMEDIATE')
-                self.assertEqual(CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, link['id']), link)
+                self.assertEqual(verified_viewer_link(db, LOCAL_BRAND, link['id']), link)
                 return viewer.open_example(link['creative_ref'], link['comparison_ref'], visit_id,
                                            content_fingerprint=link['content_fingerprint'],
                                            ad_link_id=link['id'], connection=db)['visit_id']

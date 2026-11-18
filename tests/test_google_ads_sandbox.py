@@ -7,7 +7,8 @@ from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox
 from campaign_agent.bootstrap.runtime import create_simulated_setup as SimulatedCampaignSetup
 from campaign_agent.bootstrap.runtime import create_setup
-from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
+from campaign_agent.adapters.sqlite_setup_delivery import verified_viewer_link
+from campaign_agent.campaign_setup import SetupProviderError
 from scripts.campaign_drafts import PackageConflict
 import test_placement_planner as fixtures
 
@@ -174,7 +175,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
             result = self.setup.create(*self.reference, preview['id'])
         self.assertEqual(result['status'], 'mismatch')
         with closing(sqlite3.connect(self.drafts.path)) as db:
-            self.assertIsNone(CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, link['id']))
+            self.assertIsNone(verified_viewer_link(db, LOCAL_BRAND, link['id']))
 
     def test_migrates_existing_setup_and_keeps_provider_accounts_separate(self):
         simulator = self.case.runtime.setup

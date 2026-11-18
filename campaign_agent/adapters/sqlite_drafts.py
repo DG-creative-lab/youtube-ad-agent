@@ -173,8 +173,11 @@ class SQLiteDraftRepository:
 class _DraftUnit:
     def __init__(self, db, *, writable):
         self.drafts = SQLiteDraftRepository(db, writable=writable)
+        self._borrowed = writable is None
 
     def commit(self):
+        if self._borrowed:
+            raise StorageError('borrowed', 'Only the owning transaction can commit these records.')
         with self.drafts._use(write=True) as store:
             try:
                 store.connection.commit()
@@ -184,34 +187,35 @@ class _DraftUnit:
                 self.drafts._close()
 
 
+@contextmanager
+def open_sqlite_unit(path, unit_type, *, write):
+    try:
+        with closing(sqlite3.connect(path)) as db:
+            if not write:
+                db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            unit = unit_type(db, writable=write)
+            try:
+                yield unit
+            finally:
+                unit.drafts._close()
+                if db.in_transaction:
+                    db.rollback()
+    except sqlite3.Error:
+        raise StorageError('unavailable', 'Campaign draft storage is unavailable.') from None
+
+
 class SQLiteDraftStorage:
     def __init__(self, path):
         self._path = path
 
     @contextmanager
-    def _unit(self, *, write):
-        try:
-            with closing(sqlite3.connect(self._path)) as db:
-                if not write:
-                    db.execute("PRAGMA query_only=ON")
-                db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-                unit = _DraftUnit(db, writable=write)
-                try:
-                    yield unit
-                finally:
-                    unit.drafts._close()
-                    if db.in_transaction:
-                        db.rollback()
-        except sqlite3.Error:
-            raise StorageError('unavailable', 'Campaign draft storage is unavailable.') from None
-
-    @contextmanager
     def read(self):
-        with self._unit(write=False) as unit:
+        with open_sqlite_unit(self._path, _DraftUnit, write=False) as unit:
             yield unit.drafts
 
     def write(self):
-        return self._unit(write=True)
+        return open_sqlite_unit(self._path, _DraftUnit, write=True)
 
     @contextmanager
     def legacy_write(self):

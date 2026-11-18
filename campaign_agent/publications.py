@@ -89,11 +89,7 @@ class Publications:
         result['example']['captions'] = f'/published/{token}/captions'
         return result
 
-    def approved_links(self, package, fingerprint):
-        with closing(sqlite3.connect(self.path)) as db:
-            rows = db.execute('SELECT id,creative_ref,snapshot,active,expires_at FROM public_comparisons WHERE campaign_id=? '
-                              'AND revision=? AND fingerprint=?',
-                              (package['campaign_id'], package['revision'], fingerprint)).fetchall()
+    def approved_links(self, package, rows):
         if any(not active or expires_at <= self.clock() for _, _, _, active, expires_at in rows):
             raise PackageConflict(_REPUBLICATION_REQUIRED)
         published = {creative: (token, json.loads(snapshot)) for token, creative, snapshot, _, _ in rows}
