@@ -79,13 +79,13 @@ class OpenRouterInstructionTests(unittest.TestCase):
         self.assertEqual(len(self.runtime.read(run_id)["steps"]), 1)
         reopened = self.reopen(models=())
         reopened.resume(run_id, max_steps=1)
-        save = reopened.drafts.save_instruction_test
+        save = reopened.drafts.save_instruction_test_from
 
         def interrupted(*args, **kwargs):
             save(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted save")
 
-        with patch.object(reopened.drafts, "save_instruction_test", side_effect=interrupted):
+        with patch.object(reopened.drafts, "save_instruction_test_from", side_effect=interrupted):
             with self.assertRaises(sqlite3.OperationalError):
                 reopened.resume(run_id, max_steps=1)
         self.assertIsNone(self.case.drafts.read(3))

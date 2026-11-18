@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.run import DEMO_REQUEST, RecordedInference
@@ -510,14 +511,14 @@ class InstructionTestTests(unittest.TestCase):
 
     def test_assignment_and_viewer_arrival_roll_back_together(self):
         self.start()
-        open_example = self.viewer.open_example
+        open_example = self.viewer.open_from
 
         def interrupted(*args, **kwargs):
             open_example(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted assignment")
 
-        with patch.object(self.viewer, "open_example", side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(self.viewer, "open_from", side_effect=interrupted):
+            with self.assertRaises(StorageError):
                 self.open("original")
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM instruction_test_assignments").fetchone()[0], 0)

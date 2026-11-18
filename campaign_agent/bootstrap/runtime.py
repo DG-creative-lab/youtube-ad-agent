@@ -11,7 +11,6 @@ from campaign_agent.adapters.catalogue_cache import CatalogueCache
 from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
-from campaign_agent.adapters.sample_reporting import SampleCampaignReporting
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository, SQLiteDraftStorage
 from campaign_agent.adapters.sqlite_planner import (
@@ -26,14 +25,13 @@ from campaign_agent.agent.planning_models import SimulatedPlanner, planner_reque
 from campaign_agent.agent.run import AgentRuntime, RecordedInference
 from campaign_agent.application.campaigns import BRIEF, POLICY, DEFAULT_DRAFT_PATH, CampaignDrafts
 from campaign_agent.assets import AssetStore
+from campaign_agent.bootstrap.evidence import create_experiments, create_performance as create_performance
 from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.delivery import CampaignDelivery
-from campaign_agent.instruction_tests import InstructionTests
 from campaign_agent.learning import InstructionFindings
 from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
-from campaign_agent.performance import CampaignPerformance
 from campaign_agent.provider_sessions import ProviderSessions
 from campaign_agent.staff import StaffSessions
 
@@ -66,10 +64,6 @@ class _NativeCampaignDrafts(CampaignDrafts):
 
     def require_approved_package(self, db, campaign_id, revision, fingerprint):
         return self.require_approved_from(self._repository(db), campaign_id, revision, fingerprint)
-
-    def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
-        return self.save_instruction_test_from(self._repository(db), package, review, correction, instruction,
-                                               inference=inference)
 
     def _save_instruction_revision(self, db, current, group, instruction, provenance):
         return self._save_instruction_revision_from(self._repository(db), current, group, instruction, provenance)
@@ -141,11 +135,6 @@ class _NativeViewerMeasurement(ViewerMeasurement):
             return self.open_from(self.storage.borrow(connection), creative_ref, example_ref, visit_id, **options)
         return super().open_example(creative_ref, example_ref, visit_id, **options)
 
-    def summarize(self, scope, comparisons, *, connection=None):
-        if connection is not None:
-            return self.summarize_from(self.storage.borrow(connection), scope, comparisons)
-        return super().summarize(scope, comparisons)
-
     def record(self, creative_ref, visit_id, example_ref, event_id, kind, take, *, connection=None):
         if connection is not None:
             return self.record_from(self.storage.borrow(connection), creative_ref, visit_id, example_ref,
@@ -175,10 +164,10 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
     setup = _NativeCampaignSetup(drafts, SimulatedCampaignSetup(path) if setup_provider is None else setup_provider,
                                  setup_storage, viewer_links=viewer_links)
     viewer = _NativeViewerMeasurement(path, drafts.examples, campaign_id=drafts.campaign_id)
-    performance = CampaignPerformance(drafts, viewer, SampleCampaignReporting())
+    performance = create_performance(drafts, viewer, initialize=False)
     delivery = _NativeCampaignDelivery(drafts, setup, performance, setup_storage, reporting,
                                        demo_scenario=demo_scenario, demo_report=demo_report)
-    tests = InstructionTests(drafts, viewer, performance)
+    tests = create_experiments(drafts, viewer, performance)
     reviewer = (OpenRouterReviews(openrouter_models, transport=review_transport)
                 if instruction_reviewer is None else instruction_reviewer)
     drafter = (OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
@@ -211,13 +200,6 @@ def create_viewer(path, examples=EXAMPLES, *, campaign_id='tts-sample', initiali
     if initialize:
         startup.initialize_viewer(path)
     return _NativeViewerMeasurement(path, examples, campaign_id=campaign_id)
-
-
-def create_performance(drafts, viewer, *, initialize=True) -> CampaignPerformance:
-    performance = CampaignPerformance(drafts, viewer, SampleCampaignReporting())
-    if initialize:
-        startup.initialize_performance(drafts.path)
-    return performance
 
 
 def create_setup(drafts, provider, *, viewer_links=None):

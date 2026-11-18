@@ -124,11 +124,18 @@ class CampaignDrafts:
     def read_approved_package(self, campaign_id, revision, fingerprint):
         scope = self._package_scope(campaign_id, revision)
         with self._storage.read() as records:
-            self._require_owner(records)
-            row = records.approval_snapshot_row((*scope, revision, fingerprint))
+            return self._approved_snapshot(records, (*scope, revision, fingerprint))
+
+    def read_approved_from(self, records: CampaignDraftReader, campaign_id, revision, fingerprint):
+        scope = self._package_scope(campaign_id, revision)
+        return self._approved_snapshot(records, (*scope, revision, fingerprint))
+
+    def _approved_snapshot(self, records: CampaignDraftReader, key):
+        self._require_owner(records)
+        row = records.approval_snapshot_row(key)
         if row is None or row[2] is None:
             return None
-        return {"fingerprint": fingerprint, "approval": {"actor_id": row[0], "approved_at": row[1]},
+        return {"fingerprint": key[4], "approval": {"actor_id": row[0], "approved_at": row[1]},
                 "package": json.loads(row[2])}
 
     def review_package(self, campaign_id, revision):
