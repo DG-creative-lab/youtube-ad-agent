@@ -8,7 +8,7 @@ import unittest
 from uuid import uuid4
 
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 
 

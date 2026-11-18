@@ -40,3 +40,11 @@ class CampaignReporting(Protocol):
     account_id: str
 
     def snapshot(self, binding: DeliveryBinding) -> dict: ...
+
+
+
+class SampleReporting(Protocol):
+    """Authored comparison evidence used by the offline performance workflow."""
+
+    def scenarios(self) -> list[dict]: ...
+    def snapshot(self, scenario: str, creatives: list[str]) -> dict: ...

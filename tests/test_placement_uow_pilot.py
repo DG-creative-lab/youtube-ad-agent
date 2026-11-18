@@ -17,7 +17,8 @@ from uuid import uuid4
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.adapters.local_placement_authority import LocalPlacementAuthority
 from campaign_agent.agent.planning_models import SimulatedPlanner
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.agent.run import AgentRuntime as Runtime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.bootstrap.planner import create_local_planner
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.domain.errors import PackageConflict
@@ -262,7 +263,7 @@ class PlacementPilotTests(unittest.TestCase):
 
     def test_existing_runtime_public_commands_and_typed_draft_read(self):
         runtime = create_local_planner(self.path, media_dir=self.media)
-        self.assertIsInstance(runtime, AgentRuntime)
+        self.assertIsInstance(runtime, Runtime)
         with patch('campaign_agent.agent.planner.PlacementAgent.start', side_effect=AssertionError('Legacy placement start')), \
              patch('campaign_agent.agent.planner.PlacementAgent.resume', side_effect=AssertionError('Legacy placement resume')):
             catalog = runtime.planner.catalogs.register('Authored catalogue', fixtures.CATALOG)

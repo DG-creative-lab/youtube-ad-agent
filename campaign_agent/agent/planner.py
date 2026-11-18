@@ -15,9 +15,8 @@ from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClas
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
-from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
+from campaign_agent.placement_discovery import PlacementDiscovery
 from campaign_agent.domain.errors import PackageConflict
-from .planning_models import SimulatedPlanner
 from .conversations import CampaignConversations
 from .replies import REPLY_VERSION, clarification, reply, verified_result
 from .review_tools import CampaignReviewTools
@@ -58,7 +57,7 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 class PlacementAgent:
     def __init__(self, owner, *, make_main_model: Callable[[], PlannerModel], foreground_compatible: bool,
-                 simulator: MainModel | None = None, classifier: PlacementClassifier | None = None, initialize=True):
+                 simulator: MainModel, classifier: PlacementClassifier, initialize=True):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
         self.foreground_compatible = foreground_compatible
         self.web_disabled = False
@@ -67,8 +66,8 @@ class PlacementAgent:
             catalog_storage.initialize()
         self.catalogs = PlacementDiscovery(self.drafts, catalog_storage)
         self.remote = make_main_model()
-        self.simulator: MainModel = simulator if simulator is not None else SimulatedPlanner()
-        self.classifier: PlacementClassifier = classifier if classifier is not None else SimulatedClassifier()
+        self.simulator = simulator
+        self.classifier = classifier
         self.review_tools = CampaignReviewTools(self)
         if initialize:
             SQLitePlannerLifecycleStorage.initialize(self.path)

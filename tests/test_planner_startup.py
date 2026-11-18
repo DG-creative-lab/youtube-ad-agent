@@ -10,7 +10,7 @@ import unittest
 
 from campaign_agent.access import LOCAL_CONTEXT
 from campaign_agent.adapters.sqlite_planner_startup import initialize_local_planner
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.application.campaigns import BRIEF, POLICY
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.migrations import migrate

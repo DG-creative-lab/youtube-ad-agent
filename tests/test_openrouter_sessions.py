@@ -6,8 +6,9 @@ import unittest
 from unittest.mock import Mock,patch
 from uuid import uuid4
 
-from campaign_agent.agent.run import AgentRuntime
-from campaign_agent.provider_sessions import ProviderSessions,ProviderContext
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
+from campaign_agent.provider_sessions import ProviderContext
 from campaign_agent.recovery import backup_store,restore_store
 from campaign_agent.adapters.fixture_access import offline_fixture,AuthoredProviderMetadata
 from campaign_agent.adapters.local_access import LocalDemoAccess

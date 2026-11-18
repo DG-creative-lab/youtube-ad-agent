@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if not __package__:
     sys.path.insert(0, str(ROOT))
 
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RUN_ID
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST, RUN_ID
 from campaign_agent.ports.catalogs import CatalogStorageError
 from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.adapters.demo_delivery import SCENARIOS
@@ -33,9 +34,9 @@ from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, 
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from campaign_agent.performance import CampaignPerformance
+from campaign_agent.bootstrap.runtime import create_performance, create_provider_sessions as ProviderSessions
 from campaign_agent.ports.access import AccessUnavailable
-from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, parse_command
+from campaign_agent.provider_sessions import ProviderContext, parse_command
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
 from campaign_agent.domain.errors import PackageConflict, StaleDraft
@@ -114,7 +115,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
     viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id, initialize=initialize)
-    performance = None if live else CampaignPerformance(drafts, viewer, initialize=initialize)
+    performance = None if live else create_performance(drafts, viewer, initialize=initialize)
     instruction_tests = agent.instruction_tests if agent else None
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
                        '/api/campaign/setup/create': agent.setup.create,

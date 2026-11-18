@@ -528,7 +528,7 @@ class LocalForegroundTests(unittest.TestCase):
         from unittest.mock import Mock
         from scripts import placement_review
         from campaign_agent.adapters.fixture_access import AuthoredProviderMetadata
-        from campaign_agent.agent.run import AgentRuntime
+        from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
         from campaign_agent.bootstrap.planner import create_local_planner, _provider_sessions
         from campaign_agent.handoff import package_fingerprint
         with TemporaryDirectory() as directory,ExitStack() as stack:

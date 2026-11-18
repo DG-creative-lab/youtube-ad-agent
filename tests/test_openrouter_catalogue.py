@@ -70,7 +70,7 @@ class OpenRouterMetadataTests(unittest.TestCase):
         rows=[base,{**base,'id':'fixture/conditional','pricing':{'prompt':'0.000001','completion':'0.000002','overrides':[{'utc_start':1,'prompt':'0.1'}]}},
               {**base,'id':'fixture/reasoning','pricing':{'prompt':'0','completion':'0','internal_reasoning':'0.1'}},
               {**base,'id':'fixture/new-unit','pricing':{'prompt':'0','completion':'0','unknown_unit':'0.1'}}]
-        result={r['id']:r for r in normalize(rows,self.fixture.profiles)}
+        result={r['id']:r for r in normalize(rows,self.fixture.profiles,now=0)}
         self.assertEqual(result['fixture/tool-model']['state'],'eligible')
         for ident in ('fixture/conditional','fixture/reasoning','fixture/new-unit'):
             self.assertEqual(result[ident]['state'],'blocked')

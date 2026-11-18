@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if not __package__:
     sys.path.insert(0, str(ROOT))
 
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
 from campaign_agent.domain.instruction_policy import (
