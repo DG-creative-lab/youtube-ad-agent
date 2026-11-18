@@ -1,5 +1,6 @@
 """Foreground provider inputs and qualified metadata contracts, independent of transport."""
 from dataclasses import dataclass, field
+import re
 from typing import Protocol
 
 
@@ -50,6 +51,16 @@ class ForegroundCredential:
         return cls(values[0])
 
 
+_MODEL_ID = re.compile(r'[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.:-]{1,100}')
+
+
+def model_id(value):
+    if (not isinstance(value,str) or not _MODEL_ID.fullmatch(value) or value.startswith('openrouter/')
+            or value.endswith((':auto',':floor',':nitro')) or any(part in ('.','..') for part in value.split('/'))):
+        raise ProviderError('invalid_request')
+    return value
+
+
 class ProviderMetadata(Protocol):
     def validate_key(self, credential: ForegroundCredential) -> None: ...
     def models(self, credential: ForegroundCredential) -> list[dict]: ...
@@ -72,3 +83,14 @@ class ChargingProfile:
     max_output_tokens: int = 512
     output_cap_parameter: str = 'max_completion_tokens'
     evidence: str = ''
+
+
+
+class CatalogueState(Protocol):
+    """Per-process advisory entries. Callers prove authority before access."""
+
+    def invalidate(self, connection: str) -> None: ...
+    def get(self, connection: str, now: float) -> dict | None: ...
+    def begin(self, connection: str) -> None: ...
+    def finish(self, connection: str, entry: dict | None = None) -> None: ...
+    def page(self, entry: dict, search: str, cursor: str | None) -> tuple[list[dict], str | None]: ...

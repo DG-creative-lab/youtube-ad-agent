@@ -23,13 +23,17 @@ from campaign_agent.bootstrap.placement_router import PlacementRouter
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import MEDIA_DIR, DEMO_MEDIA_DIR
 from campaign_agent.placement_discovery import SimulatedClassifier
+from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.adapters.local_media import LocalMedia
+from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.adapters.local_placement_authority import LocalPlacementAuthority
 from campaign_agent.adapters.sqlite_planner import SQLitePlacementStorage, SafePlannerReceipts, _storage_failure
 from campaign_agent.adapters.sqlite_planner_startup import SQLiteLocalPlannerStartup
 from campaign_agent.ports.planner_startup import LocalPlannerStartup
 from campaign_agent.adapters.sqlite_schema import SchemaConflict
 from campaign_agent.ports.storage_errors import StorageError
+from campaign_agent.model_catalogue import CatalogueCache
+from campaign_agent.provider_sessions import ProviderSessions
 
 
 class _CommandScope:
@@ -46,6 +50,10 @@ class _CommandScope:
 
     def set(self, state):
         self._state.set(state)
+
+
+def _provider_sessions(path, **options):
+    return ProviderSessions(path, cache=CatalogueCache(), **options)
 
 
 def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, media_dir=None, examples=EXAMPLES,
@@ -82,9 +90,11 @@ def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, me
     classifier = classifier if classifier is not None else options.pop('placement_classifier', None)
     simulator = simulator if simulator is not None else SimulatedPlanner()
     classifier = classifier if classifier is not None else SimulatedClassifier()
+    options.pop('access', None)
     runtime = AgentRuntime(path, operator=operator, media_dir=media_dir, examples=examples, context=context,
                            campaign_id=campaign_id, planner_simulator=simulator, placement_classifier=classifier,
-                           initialize=False, **options)
+                           setup_provider=SimulatedCampaignSetup(path, initialize=False),
+                           access=LocalDemoAccess(), initialize=False, **options)
     access = PlacementAccess(authority, context, operator.id, campaign_id,
                              clock=clock, monotonic_clock=monotonic_clock, command_scope=_CommandScope(),
                              local_validate=lambda: operator.require_brand(context.scope))
@@ -124,7 +134,8 @@ def main(argv=None):
         if args.command == 'serve':
             from scripts.placement_review import serve
             serve(args.port, False, args.store, viewer_port=args.viewer_port,
-                  runtime_factory=create_local_planner, initialize=False, media_dir=args.media_dir)
+                  runtime_factory=create_local_planner, provider_sessions_factory=_provider_sessions,
+                  initialize=False, media_dir=args.media_dir)
             return 0
         if args.command == 'demo':
             catalog = runtime.planner.catalogs.register('Authored local catalogue', json.loads(args.catalog.read_text()))

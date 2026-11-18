@@ -21,7 +21,7 @@ from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
 from campaign_agent.handoff import caption_bytes, media_sha256, read_media
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
-from campaign_agent.ports.access import AccessUnavailable
+from campaign_agent.ports.access import AccessUnavailable, StaffAuthorityFactory
 from campaign_agent.publications import Publications
 from campaign_agent.staff import SignInRequired
 from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, validate_fields
@@ -52,10 +52,12 @@ def fields(data, required, optional=()):
 
 class HostedApplication:
     def __init__(self, path, sessions, client, assets, *, staff_origin, viewer_origin,
-                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=(), provider_completion_transport=None):
+                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=(),
+                 provider_completion_transport=None, authority_factory: StaffAuthorityFactory = GateplaneAccess):
         self.path, self.sessions, self.client, self.assets = path, sessions, client, assets
         self.staff_origin, self.viewer_origin, self.application_id = staff_origin, viewer_origin, application_id
         self.provider_completion_transport=provider_completion_transport
+        self.authority_factory = authority_factory
         self.fixture_login = fixture_login
         self.fixture = fixture_login is not None
         if self.fixture and provider_metadata is not None and not getattr(provider_metadata,'synthetic',False):
@@ -143,8 +145,8 @@ class HostedApplication:
         return Starlette(routes=[Route('/{path:path}', endpoint, methods=['GET', 'HEAD', 'POST'])])
 
     def runtime(self, token, campaign, command):
-        access = GateplaneAccess(self.path, self.sessions, token, self.client,
-                                 application_id=self.application_id, command=command)
+        access = self.authority_factory(self.path, self.sessions, token, self.client,
+                                        application_id=self.application_id, command=command)
         _, context, principal = access.principal(campaign)
         examples, media_dir = self.assets(context.scope.client_id, context.scope.brand_id)
         runtime = AgentRuntime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),

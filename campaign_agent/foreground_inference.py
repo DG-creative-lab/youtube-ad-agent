@@ -9,7 +9,7 @@ import sqlite3
 from .access import CommandAccess
 from .adapters.sqlite_runs import SQLiteRunStore
 from .inference_ledger import InferenceLedger, actual_cost
-from .model_catalogue import compatible_model, fingerprint, select_endpoint
+from .application.catalogue_policy import compatible_model, fingerprint, select_endpoint
 from .ports.inference import ForegroundCredential, ProviderError
 
 class ForegroundInference:

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
 from campaign_agent.assets import AssetStore
-from campaign_agent.adapters.gateplane import timestamp, validate_record
+from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp, validate_record
 from campaign_agent.agent.run import AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR
@@ -189,4 +189,5 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
         db.execute('DELETE FROM staff_sessions')
     metadata=AuthoredProviderMetadata()
     return HostedApplication(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
-                             fixture_login=authority,provider_metadata=metadata,provider_profiles=metadata.profiles)
+                             fixture_login=authority, provider_metadata=metadata, provider_profiles=metadata.profiles,
+                             authority_factory=GateplaneAccess)

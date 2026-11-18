@@ -16,9 +16,9 @@ from jsonschema import Draft202012Validator, FormatChecker
 from rfc3986_validator import validate_rfc3986
 
 from campaign_agent.domain.scope import BrandScope, WorkspaceContext
-from campaign_agent.access import CAPABILITIES
+from campaign_agent.domain.access_binding import CAPABILITIES
 from campaign_agent.ports.access import AccessUnavailable, GateplaneClient, CommandPermit
-from campaign_agent.access import validate_permit
+from .sqlite_access import validate_permit
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'contracts/gateplane-v1.json'
 SCHEMA = json.loads(SCHEMA_PATH.read_text())

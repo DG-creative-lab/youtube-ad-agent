@@ -12,9 +12,10 @@ from time import time
 
 from campaign_agent.domain.scope import WorkspaceContext
 from .migrations import migrate_path
-from .model_catalogue import CatalogueCache, fingerprint, normalize, select_endpoint, compatible_model, model_id, price
+from .application.catalogue_policy import fingerprint, normalize, select_endpoint, compatible_model, model_id, price
+from .model_catalogue import CatalogueCache
 from .ports.access import AccessRequest, AccessUnavailable
-from .ports.inference import ForegroundCredential, ProviderError
+from .ports.inference import CatalogueState, ForegroundCredential, ProviderError
 
 SHORT_ID=re.compile(r'[0-9a-f]{32}')
 LONG_ID=re.compile(r'[0-9a-f]{64}')
@@ -82,9 +83,9 @@ def parse_command(raw):
 
 
 class ProviderSessions:
-    def __init__(self,path,*,metadata=None,profiles=(),clock=time,initialize=True):
+    def __init__(self,path,*,metadata=None,profiles=(),clock=time,initialize=True, cache: CatalogueState | None = None):
         self.path=Path(path);self.metadata=metadata;self.profiles=tuple(profiles);self.clock=clock
-        self.cache=CatalogueCache()
+        self.cache = CatalogueCache() if cache is None else cache
         if initialize:
             migrate_path(self.path)
 

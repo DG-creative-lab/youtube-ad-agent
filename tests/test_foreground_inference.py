@@ -517,12 +517,19 @@ class ForegroundHttpTests(unittest.TestCase):
 
 class LocalForegroundTests(unittest.TestCase):
     def test_local_handler_uses_same_planner_and_three_structured_commands(self):
+        self.run_local_foreground_journey(bootstrapped=False)
+
+    def test_bootstrapped_handler_keeps_foreground_admission_and_cache(self):
+        self.run_local_foreground_journey(bootstrapped=True)
+
+    def run_local_foreground_journey(self, *, bootstrapped):
         from contextlib import ExitStack,redirect_stdout
         from email.message import Message
         from unittest.mock import Mock
         from scripts import placement_review
         from campaign_agent.adapters.fixture_access import AuthoredProviderMetadata
         from campaign_agent.agent.run import AgentRuntime
+        from campaign_agent.bootstrap.planner import create_local_planner, _provider_sessions
         from campaign_agent.handoff import package_fingerprint
         with TemporaryDirectory() as directory,ExitStack() as stack:
             path=Path(directory)/'local.sqlite';servers=[];runtimes=[];metadata=AuthoredProviderMetadata();calls=[]
@@ -533,13 +540,23 @@ class LocalForegroundTests(unittest.TestCase):
             def server(address,handler):
                 value=Mock(server_port=address[1]);value.__enter__=Mock(return_value=value);value.__exit__=Mock(return_value=False)
                 value.handler=handler;servers.append(value);return value
-            def runtime(*args,**kwargs):
-                value=AgentRuntime(*args,**kwargs);runtimes.append(value);return value
+            def runtime(*args, **kwargs):
+                create_runtime = create_local_planner if bootstrapped else AgentRuntime
+                value = create_runtime(*args, **kwargs)
+                runtimes.append(value)
+                return value
             stack.enter_context(patch.object(placement_review,'ThreadingHTTPServer',side_effect=server))
             stack.enter_context(patch.object(placement_review.Thread,'start'));stack.enter_context(patch.object(placement_review.Thread,'join'))
             stack.enter_context(patch.object(placement_review.secrets,'token_urlsafe',return_value='authored-local-operator'))
-            stack.enter_context(patch.object(placement_review,'AgentRuntime',side_effect=runtime));stack.enter_context(redirect_stdout(io.StringIO()))
-            placement_review.serve(18981,False,draft_path=path,viewer_port=18982,provider_metadata=metadata,provider_profiles=metadata.profiles,provider_completion_transport=complete)
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            options = {}
+            if bootstrapped:
+                create_local_planner(path)
+                options.update(runtime_factory=runtime, provider_sessions_factory=_provider_sessions, initialize=False)
+            else:
+                stack.enter_context(patch.object(placement_review, 'AgentRuntime', side_effect=runtime))
+            placement_review.serve(18981, False, draft_path=path, viewer_port=18982, provider_metadata=metadata,
+                                   provider_profiles=metadata.profiles, provider_completion_transport=complete, **options)
             handler=servers[0].handler.__new__(servers[0].handler);handler.server=servers[0];handler.send=Mock()
             def post(route,data,key=True,expected=200):
                 body=json.dumps(data).encode();headers=Message()

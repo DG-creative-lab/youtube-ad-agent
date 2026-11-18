@@ -4,7 +4,7 @@ from urllib.request import Request
 from urllib.error import HTTPError, URLError
 from time import monotonic, time
 
-from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.inference import ProviderError, model_id
 from .openrouter_reviews import parse_json, send_request
 
 MAX_BYTES = 2_000_000
@@ -67,7 +67,6 @@ class OpenRouterMetadata:
         return rows
 
     def endpoints(self, credential, model):
-        from campaign_agent.model_catalogue import model_id
         model_id(model)
         author,slug=model.split('/',1)
         data=self._get('/api/v1/models/'+quote(author,safe='')+'/'+quote(slug,safe='')+'/endpoints',credential)

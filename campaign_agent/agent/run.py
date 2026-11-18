@@ -26,6 +26,7 @@ from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup
+from campaign_agent.ports.campaign_effects import SetupProvider
 from campaign_agent.delivery import CampaignDelivery
 from .planner import PlacementAgent
 from .planning_models import planner_request_body
@@ -76,7 +77,7 @@ class AgentRuntime:
                  instruction_reviewer: InstructionReviewer | None = None,
                  instruction_drafter: InstructionDrafter | None = None,
                  demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
-                 web=False, initialize=True):
+                 web=False, initialize=True, setup_provider: SetupProvider | None = None):
         operator.require_brand(context.scope)
         self.foreground = None
         self.web = web
@@ -87,7 +88,9 @@ class AgentRuntime:
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
                                      context=context, campaign_id=campaign_id, access=access, examples=examples,
                                      initialize=initialize)
-        self.setup = CampaignSetup(self.drafts, SimulatedCampaignSetup(self.path, initialize=initialize),
+        if setup_provider is None:
+            setup_provider = SimulatedCampaignSetup(self.path, initialize=initialize)
+        self.setup = CampaignSetup(self.drafts, setup_provider,
                                    viewer_links=viewer_links, initialize=initialize)
         self.performance = CampaignPerformance(
             self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
