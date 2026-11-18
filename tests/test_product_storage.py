@@ -16,7 +16,8 @@ from starlette.testclient import TestClient
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, Operator, WorkspaceContext, BrandScope
 from campaign_agent.adapters.fixture_access import offline_fixture
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.assets import AssetStore, AssetUnavailable, owner_key
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint

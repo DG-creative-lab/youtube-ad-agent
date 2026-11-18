@@ -6,14 +6,14 @@ import math
 from pathlib import Path
 import re
 import sqlite3
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
-from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
-from campaign_agent.ports.planning import PlannerModel, InstructionReviewer, InstructionDrafter, STRUCTURED_MAX_OUTPUT_TOKENS
+from campaign_agent.access import LOCAL_CONTEXT
+from campaign_agent.ports.planning import MainModel, PlacementClassifier, PlannerModel, InstructionReviewer, InstructionDrafter, STRUCTURED_MAX_OUTPUT_TOKENS
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore, SQLiteRunStorage
 from campaign_agent.creatives import render_instruction_choices
-from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH
+from campaign_agent.application.campaigns import CampaignDrafts
 from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.handoff import package_fingerprint
@@ -21,15 +21,11 @@ from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.performance import CampaignPerformance
 from campaign_agent.instruction_tests import ASSESSMENT_VERSION, InstructionTests, recorded_assessment
 from campaign_agent.learning import InstructionFindings
-from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
-from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.campaign_setup import CampaignSetup
-from campaign_agent.ports.campaign_effects import SetupProvider
+from campaign_agent.ports.campaign_effects import DeliveryBinding, SampleReporting, SetupProvider
 from campaign_agent.delivery import CampaignDelivery
 from .planner import PlacementAgent
-from .planning_models import planner_request_body
 
 CATALOG = Path(__file__).resolve().parents[2] / "examples/placement-review/catalog.json"
 DEMO_REQUEST = "Prepare a YouTube test for ElevenLabs Text to Speech."
@@ -70,53 +66,44 @@ class RecordedInference:
 
 
 class AgentRuntime:
-    def __init__(self, path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
-                 openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
-                 main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None, reporting=None,
-                 planner_model: PlannerModel | None = None,
-                 instruction_reviewer: InstructionReviewer | None = None,
-                 instruction_drafter: InstructionDrafter | None = None,
-                 demo_scenario=None, context=LOCAL_CONTEXT, campaign_id=None, access=None, examples=None, viewer_links=None,
-                 web=False, initialize=True, setup_provider: SetupProvider | None = None):
+    def __init__(self, path, operator, model: ModelInference, *,
+                 make_setup_provider: Callable[[], SetupProvider], make_sample_reporting: Callable[[], SampleReporting],
+                 make_main_model: Callable[[], PlannerModel], make_reviewer: Callable[[], InstructionReviewer],
+                 make_drafter: Callable[[], InstructionDrafter], media_dir=None,
+                 planner_simulator: MainModel, placement_classifier: PlacementClassifier,
+                 reporting=None, demo_scenario=None,
+                 demo_report: Callable[[DeliveryBinding], dict] | None = None, context=LOCAL_CONTEXT,
+                 campaign_id=None, access=None, examples=None, viewer_links=None, web=False, initialize=True):
         operator.require_brand(context.scope)
         self.foreground = None
         self.web = web
-        self.structured_foreground_compatible = instruction_reviewer is None and instruction_drafter is None
+        self.structured_foreground_compatible = False
         self.operator = operator
         self.scope = context.scope
         self.path = Path(path)
         self.drafts = CampaignDrafts(self.path, live=False, operator=operator, media_dir=media_dir,
                                      context=context, campaign_id=campaign_id, access=access, examples=examples,
                                      initialize=initialize)
-        if setup_provider is None:
-            setup_provider = SimulatedCampaignSetup(self.path, initialize=initialize)
-        self.setup = CampaignSetup(self.drafts, setup_provider,
+        self.setup = CampaignSetup(self.drafts, make_setup_provider(),
                                    viewer_links=viewer_links, initialize=initialize)
         self.performance = CampaignPerformance(
             self.drafts, ViewerMeasurement(self.path, self.drafts.examples,
                                            campaign_id=self.drafts.campaign_id, initialize=initialize),
-            initialize=initialize)
+            make_sample_reporting(), initialize=initialize)
         self.delivery = CampaignDelivery(self.drafts, self.setup, self.performance, reporting,
-                                         demo_scenario=demo_scenario, initialize=initialize)
+                                         demo_scenario=demo_scenario, demo_report=demo_report, initialize=initialize)
         self.instruction_tests = InstructionTests(self.drafts, self.performance.viewer, self.performance,
                                                   initialize=initialize)
         self.instruction_findings = InstructionFindings(self.instruction_tests, initialize=initialize)
-        self.model = model or RecordedInference()
-        self.openrouter: InstructionReviewer = (instruction_reviewer if instruction_reviewer is not None
-                                               else OpenRouterReviews(openrouter_models, transport=review_transport))
-        self.openrouter_drafts: InstructionDrafter = (instruction_drafter if instruction_drafter is not None
-                                                     else OpenRouterInstructions(openrouter_draft_models, transport=draft_transport))
+        self.model = model
+        self.openrouter = make_reviewer()
+        self.openrouter_drafts = make_drafter()
         if initialize:
             SQLiteRunStorage.initialize(self.path, legacy_client_id=LOCAL_CONTEXT.scope.client_id,
                                         legacy_brand_id=LOCAL_CONTEXT.scope.brand_id)
 
-        def make_main_model():
-            if planner_model is not None:
-                return planner_model
-            return OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body)
-
         self.planner = PlacementAgent(self, make_main_model=make_main_model,
-                                      foreground_compatible=planner_model is None,
+                                      foreground_compatible=False,
                                       simulator=planner_simulator, classifier=placement_classifier, initialize=initialize)
         # Fresh web inference stays disabled until the shared A2b admission ledger exists.
         # Existing received receipts remain readable/recoverable without a new call.

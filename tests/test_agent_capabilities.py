@@ -16,7 +16,7 @@ from campaign_agent.access import LOCAL_OPERATOR, Operator
 from campaign_agent.adapters.fixture_access import offline_fixture
 from campaign_agent.agent.capabilities import CAPABILITIES
 from campaign_agent.agent.planning_models import TOOLS
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.ports.access import AccessUnavailable
 from scripts import placement_review
 

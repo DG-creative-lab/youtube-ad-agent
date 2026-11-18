@@ -23,23 +23,26 @@ application JSON/error/hash compatibility is preserved. CampaignDrafts now resid
 
 This map translates the [application architecture](architecture-plan.md) into code ownership and proposes where capabilities should grow.
 
-## Provider wiring and catalogue state · #87
+## Provider composition · #87
 
-The supported local bootstrap supplies its simulated setup provider and local access. The hosted fixture supplies the staff authority factory explicitly, and
-the hosted runtime still resolves the current principal before looking up assets
-or constructing commands. Local and Gateplane access adapters use the same native
-permit check against the caller's connection. Their command hashes and capability
-names have a shared pure owner.
+The recorded agent command, local planner launchers and hosted runtime use the
+native composition in `bootstrap/runtime.py`. It supplies the OpenRouter models,
+simulated setup, authored reporting and the request-local runtime configuration.
+The runtime starts with foreground compatibility disabled. The composition only
+qualifies adapters it builds itself. Explicitly supplied models retain the existing
+offline-only path.
 
 `application/catalogue_policy.py` owns advisory normalization and route selection
-with an explicit clock. The process cache remains scoped to the serving instance
-and is supplied to the provider-session commands via `CatalogueState`. The cache
-still stores advice, and sessions prove scope and key binding before using it.
+with an explicit clock. `adapters/catalogue_cache.py` owns the bounded process cache.
+Each provider-session service gets one cache, and sessions prove scope and key
+binding before using it. The hosted fixture still resolves current staff authority
+before runtime construction. Local and Gateplane access adapters use the shared
+native permit check against the caller's connection.
 
-The core runtime still constructs the native OpenRouter adapters used for foreground
-admission. Legacy defaults and process cache implementation retain their existing
-import exceptions. Their retirement requires an entrypoint transition that preserves
-foreground qualification and launcher compatibility. #87 remains open.
+Python callers that previously constructed a runtime with the implicit defaults
+now use `bootstrap.runtime.create_runtime`. The internal catalogue
+`normalize` helper takes an explicit `now`; the provider-session service supplies
+its configured clock. The CLI invocations and HTTP routes are the same.
 
 ## OpenRouter request policy · #87
 
@@ -48,8 +51,7 @@ projection. `agent/run.py` passes that request builder to the OpenRouter adapter
 which encodes the final request, fits the byte limit and parses response receipts.
 `domain/instruction_requests.py` owns the evidence projection, prompts and assessment
 schema for structured instruction requests. Existing commands still decide whether
-to admit inference and accept its results. Default provider assembly, catalogue
-state and remaining access wiring are separate #87 and #88 work.
+to admit inference and accept its results. The composition root supplies the native providers to application commands.
 
 ## Campaign setup and reporting contracts · #87
 

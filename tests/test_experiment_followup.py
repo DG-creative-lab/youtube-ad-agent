@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.handoff import package_fingerprint
 from scripts.campaign_drafts import PackageConflict

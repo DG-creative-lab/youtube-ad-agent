@@ -4,25 +4,18 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #87 structured model services
+## Current architecture milestone · #87 provider composition
 
-PR #104 merged at `6eb7f000f3c458fca3c4b433b4630a43e4190910` and closed #86.
-This build adopts both remaining structured model use cases together: instruction-
-test assessment and instruction drafting. Purpose-specific contracts in
-`ports/planning.py` are injected as `instruction_reviewer` and
-`instruction_drafter` into `AgentRuntime`, including the existing local bootstrap.
-Main-model/classifier injection from #87 foundation remains unchanged.
+The native composition in `bootstrap/runtime.py` supplies planning, assessment,
+drafting, simulated setup and authored reporting dependencies. The existing CLI and
+local and hosted launchers use that composition. Catalogue policy uses an explicit
+clock and the provider-session service receives a cache owned by its launcher.
 
-Supplied structured services are for offline application commands. The application
-blocks fresh use in web mode and foreground attachment regardless of a supplied
-service's own flags or preflight behavior. Previously received receipts remain
-recoverable without another call. Existing defaults, wire requests, model settings,
-source validation, receipt phases and application-owned output/budget checks remain.
-
-#87 stays open for request-policy/transport separation, remaining model/provider,
-access and effect consumer inversion. Legacy concrete construction stays explicit
-#87/#88 debt; this build introduces no service registry or alternative command path.
-Application ceilings also validate saved non-foreground settings, and accepted receipts must match the saved model, prompt, evidence identity and declared limits. Models receive copies of request data. Independent source review, exact-head verification and human merge remain required.
+Foreground compatibility follows the concrete native models selected by the
+composition. Explicitly supplied services retain their offline use and receipt
+recovery. Existing commands preserve request, reservation and receipt semantics.
+The remaining transport and startup consolidation stays with #88. GitHub #87
+closes when its completion PR merges into main.
 
 ### Delivered #86 local placement pilot
 

@@ -17,14 +17,16 @@ from starlette.routing import Route
 from campaign_agent.domain.scope import Operator
 from campaign_agent.assets import AssetUnavailable
 from campaign_agent.adapters.gateplane import GateplaneAccess
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.handoff import caption_bytes, media_sha256, read_media
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable, StaffAuthorityFactory
 from campaign_agent.publications import Publications
 from campaign_agent.staff import SignInRequired
-from campaign_agent.provider_sessions import ProviderSessions, ProviderContext, validate_fields
+from campaign_agent.bootstrap.runtime import create_provider_sessions
+from campaign_agent.provider_sessions import ProviderContext, validate_fields
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.domain.errors import PackageConflict, StaleDraft
 
@@ -74,7 +76,7 @@ class HostedApplication:
             raise ValueError('Staff and viewer origins must be separate.')
         self.cookie = 'gp_fixture_session' if self.fixture else '__Host-gp_session'
         self.publications = Publications(path, assets)
-        self.provider_sessions = ProviderSessions(path,metadata=provider_metadata,profiles=provider_profiles)
+        self.provider_sessions = create_provider_sessions(path,metadata=provider_metadata,profiles=provider_profiles)
         self.staff = self._app(False)
         self.viewer = self._app(True)
 
@@ -149,7 +151,7 @@ class HostedApplication:
                                         application_id=self.application_id, command=command)
         _, context, principal = access.principal(campaign)
         examples, media_dir = self.assets(context.scope.client_id, context.scope.brand_id)
-        runtime = AgentRuntime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
+        runtime = create_runtime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
                     context=context, campaign_id=campaign, access=access, examples=examples, media_dir=media_dir,
                     viewer_links=self.publications.approved_links,web=True)
         return runtime, principal

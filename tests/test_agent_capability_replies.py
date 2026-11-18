@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock
 from uuid import uuid4
 
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.ports.access import AccessUnavailable
 import test_placement_planner as fixtures
 
