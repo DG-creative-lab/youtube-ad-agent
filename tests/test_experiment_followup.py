@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.handoff import package_fingerprint
@@ -112,7 +113,7 @@ class ExperimentFollowupTests(unittest.TestCase):
             raise sqlite3.OperationalError('Interrupted follow-up commit')
 
         with patch.object(reopened.drafts, 'save_instruction_test_from', side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(StorageError):
                 reopened.resume(run_id, max_steps=1)
         self.assertIsNone(self.case.drafts.read(4))
         result = reopened.resume(run_id)
@@ -213,7 +214,7 @@ class ExperimentFollowupTests(unittest.TestCase):
         run_id = self.start(review, remote, mode='openrouter', model=MODEL, operation_id=operation)
         remote.resume(run_id, max_steps=1)
         with patch.object(remote.drafts, 'validate_instruction', side_effect=sqlite3.OperationalError('Interrupted acceptance')):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(StorageError):
                 remote.resume(run_id, max_steps=1)
         reopened = self.reopen()
         result = reopened.resume(run_id)

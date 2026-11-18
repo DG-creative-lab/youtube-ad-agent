@@ -11,11 +11,13 @@ from uuid import uuid4
 
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.bootstrap.planner import create_local_planner
+from campaign_agent.agent.run import DEMO_REQUEST, REVIEW_TEST_REQUEST
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.domain.errors import PackageConflict
 from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.ports.storage_errors import StorageError
 
 MODEL = 'authored/structured'
 CHOICES = {'playback': 'both_in_full', 'focus': 'delivery', 'choice': 'scene_fit'}
@@ -85,8 +87,9 @@ class StructuredModelTests(unittest.TestCase):
             self.addCleanup(case.doCleanups)
             case.start()
             path, media = case.path, case.media
-            start = lambda runtime: runtime.start_instruction_review(case.test['id'], mode='openrouter',
-                model=MODEL, operation_id=uuid4().hex)
+            def start(runtime, operation_id=None):
+                return runtime.start_instruction_review(case.test['id'], mode='openrouter',
+                    model=MODEL, operation_id=operation_id or uuid4().hex)
         else:
             from test_campaign_performance import CampaignPerformanceTests
             case = CampaignPerformanceTests()
@@ -94,8 +97,9 @@ class StructuredModelTests(unittest.TestCase):
             self.addCleanup(case.doCleanups)
             _, review, _ = case.instruction_run()
             path, media = case.drafts.path, case.drafts.media_dir
-            start = lambda runtime: runtime.start_next_test(case.campaign, 2, case.fingerprint, review['id'],
-                mode='openrouter', model=MODEL, operation_id=uuid4().hex)
+            def start(runtime, operation_id=None):
+                return runtime.start_next_test(case.campaign, 2, case.fingerprint, review['id'],
+                    mode='openrouter', model=MODEL, operation_id=operation_id or uuid4().hex)
         return SimpleNamespace(kind=kind, case=case, path=path, media=media, start=start)
 
     def runtime(self, fixture, model, **options):
@@ -152,13 +156,18 @@ class StructuredModelTests(unittest.TestCase):
                 runtime = self.runtime(fixture, model)
                 run = fixture.start(runtime)
                 runtime.resume(run, max_steps=1)
-                target = runtime.instruction_tests if kind == 'review' else runtime.drafts
-                method = 'validate_assessment' if kind == 'review' else 'validate_instruction'
-                with patch.object(target, method, side_effect=sqlite3.OperationalError('Interrupted local validation')):
-                    with self.assertRaises(sqlite3.OperationalError):
-                        runtime.resume(run, max_steps=1)
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute("""CREATE TRIGGER interrupt_semantic_step BEFORE INSERT ON agent_steps
+                                  WHEN NEW.position=1
+                                  BEGIN SELECT RAISE(ABORT,'authored fault'); END""")
+                with self.assertRaises(StorageError) as caught:
+                    runtime.resume(run, max_steps=1)
+                self.assertEqual(caught.exception.kind, 'conflict')
                 before = self.inference(fixture, run)
                 self.assertEqual(before[0], 'received')
+                self.assertEqual(len(runtime.read(run)['steps']), 1)
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute('DROP TRIGGER interrupt_semantic_step')
                 replacement = AuthoredStructuredModel()
                 replacement.deny = True
                 replacement.failure = AssertionError('No inference on received evidence')
@@ -288,12 +297,62 @@ class StructuredModelTests(unittest.TestCase):
                 with closing(sqlite3.connect(fixture.path)) as db, db:
                     db.execute("CREATE TRIGGER authored_receipt_failure BEFORE UPDATE OF receipt ON agent_review_inference "
                                "WHEN NEW.receipt IS NOT NULL BEGIN SELECT RAISE(ABORT,'authored fault'); END")
-                with self.assertRaises(sqlite3.IntegrityError):
+                with self.assertRaises(StorageError) as caught:
                     runtime.resume(run, max_steps=1)
+                self.assertEqual(caught.exception.kind, 'conflict')
                 self.assertEqual(self.inference(fixture, run)[0], 'requested')
                 with self.assertRaises(ReviewInferenceError):
                     runtime.resume(run, max_steps=1)
                 self.assertEqual(model.calls, 1)
+
+    def test_failed_structured_start_rolls_back_run_source_and_settings(self):
+        def stored(path):
+            with closing(sqlite3.connect(path)) as db:
+                return [db.execute('SELECT * FROM ' + table + ' ORDER BY 1').fetchall()
+                        for table in ('agent_runs', 'agent_test_sources', 'agent_review_inference')]
+
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                fixture, model = self.prepare(kind), AuthoredStructuredModel()
+                runtime = self.runtime(fixture, model)
+                before = stored(fixture.path)
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute("""CREATE TRIGGER interrupt_structured_start
+                                  BEFORE INSERT ON agent_review_inference
+                                  WHEN EXISTS (SELECT 1 FROM agent_test_sources WHERE run_id=NEW.run_id)
+                                  BEGIN SELECT RAISE(ABORT,'authored fault'); END""")
+                operation = 'b' * 32
+                with self.assertRaises(StorageError) as caught:
+                    fixture.start(runtime, operation)
+                self.assertEqual(caught.exception.kind, 'conflict')
+                self.assertEqual(stored(fixture.path), before)
+                with closing(sqlite3.connect(fixture.path)) as db, db:
+                    db.execute('DROP TRIGGER interrupt_structured_start')
+                reopened = self.runtime(fixture, model)
+                run = fixture.start(reopened, operation)
+                self.assertEqual(fixture.start(reopened, operation), run)
+                self.assertEqual(reopened.read(run)['inference']['state'], 'pending')
+                self.assertEqual([len(rows) for rows in stored(fixture.path)], [len(rows) + 1 for rows in before])
+                self.assertEqual(model.calls, 0)
+
+    def test_recorded_run_id_cannot_alias_a_structured_review(self):
+        fixture, model = self.prepare('review'), AuthoredStructuredModel()
+        runtime = self.runtime(fixture, model)
+        operation = 'd' * 32
+        run_id = package_fingerprint({'scope': vars(runtime.scope), 'actor': runtime.operator.id,
+                                      'request': REVIEW_TEST_REQUEST, 'operation_id': operation})[:32]
+        runtime.start(DEMO_REQUEST, run_id=run_id)
+        recorded = runtime.read(run_id)
+        with self.assertRaisesRegex(ValueError, 'different request'):
+            fixture.start(runtime, operation)
+        self.assertEqual(runtime.read(run_id), recorded)
+        self.assertIsNone(self.inference(fixture, run_id))
+        self.assertEqual(model.calls, 0)
+
+        structured = fixture.start(runtime)
+        with self.assertRaisesRegex(ValueError, 'different request'):
+            runtime.start(DEMO_REQUEST, run_id=structured)
+        self.assertEqual(runtime.read(structured)['request'], REVIEW_TEST_REQUEST)
 
     def test_a_different_actor_cannot_dispatch_a_saved_run(self):
         from campaign_agent.access import LOCAL_BRAND, Operator

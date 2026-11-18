@@ -90,8 +90,9 @@ class CampaignPerformanceTests(unittest.TestCase):
             raise sqlite3.OperationalError("Simulated lost transaction")
 
         with patch.object(reopened.drafts, "save_instruction_test_from", side_effect=fail_after_save):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(StorageError) as caught:
                 reopened.resume(run_id, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         self.assertIsNone(self.drafts.read(3))
         self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
         with closing(sqlite3.connect(self.drafts.path)) as db, db:

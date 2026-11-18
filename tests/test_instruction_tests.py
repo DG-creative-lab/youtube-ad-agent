@@ -587,15 +587,16 @@ class InstructionTestTests(unittest.TestCase):
         self.runtime.resume(run_id, max_steps=2)
         self.open("original")
         reopened = AgentRuntime(self.path, media_dir=self.media)
-        save_review = reopened.instruction_tests.save_review
+        save_review = reopened.instruction_tests.save_review_from
 
         def interrupted(*args, **kwargs):
             save_review(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted review commit")
 
-        with patch.object(reopened.instruction_tests, "save_review", side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(reopened.instruction_tests, "save_review_from", side_effect=interrupted):
+            with self.assertRaises(StorageError) as caught:
                 reopened.resume(run_id, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         self.assertIsNone(self.read()["review"])
         self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
         result = reopened.resume(run_id)

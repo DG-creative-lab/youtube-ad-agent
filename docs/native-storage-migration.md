@@ -105,6 +105,21 @@ reader on their existing write transaction, so an uncommitted change is visible
 to the permit check. Permit expiry, command and staff-session binding still apply.
 The provider-session and foreground transactions still use their native adapters.
 
+## Recorded and structured agent runs · #37
+
+Recorded preparation, instruction-test assessments and next-test drafts use the
+[agent run storage contract](../campaign_agent/ports/agent_runs.py). The run,
+source and model settings commit together at start. Later tool writes borrow
+draft and evidence repositories from the same unit as run status and step history.
+Replaying an operation checks the original run owner and request type.
+
+The runtime commits the request reservation before dispatch and saves the response
+in its own unit before applying it. A failed semantic step can resume from the
+exact stored receipt. A failed receipt write leaves the request in its original
+requested phase. The foreground path borrows the typed run and evidence records
+from its existing selection and accounting transaction. Its outer storage and
+ledger are still native.
+
 ## Residual native graph
 
 Every row below stays on the original store until its own adoption. #37 owns the
@@ -114,7 +129,7 @@ entrypoints. These owners do not authorize provider activation or a backend swit
 
 | Current code family | Remaining work and owner | Required preservation |
 | --- | --- | --- |
-| `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: nonpilot recorded preparation, review/structured/experiment/delivery command reads and writes. Remaining callers still own the native transactions that combine draft writes with their records. Pilot draft/provenance and run lifecycle are not deferred here. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
+| `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: retained planner and chat review/experiment/delivery paths still own native transactions that combine draft writes with their records. Recorded preparation and dedicated structured runs use the run unit above. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
 | `agent/conversations.py` and borrowed native store APIs in `adapters/sqlite_{drafts,planner,runs,conversations}.py` | #37: remaining nonpilot consumers of caller-owned native connections. #88: converge composition without deleting the supported compatibility path prematurely. Pilot follow-up selection, supersession, messages and transcript adoption already belong to the selected unit. | Session/operator/campaign/settings scope, stale message checks, exact ordering and malformed-history behavior. |
 | `measurement.py`, `performance.py`, `instruction_tests.py`, `learning.py` | Viewer, review, experiment and finding commands use scoped units. Retained agent workflows borrow evidence records on their native transaction. Their named pilot context reads and required startup/adoption are in #86, not postponed. | Attribution and denominators, exact comparison/takes identities, current corrections, source versions, scoped evidence and reviewed reuse. |
 | `campaign_setup.py`, `delivery.py`, `adapters/simulated_setup.py` | #37: setup, delivery and recommendation units are adopted. The simulated provider's resource store is a separate provider effect boundary. | Exact approved package/account/action, zero dispatch on denial, received versus unknown outcomes, no repeated uncertain effects, report grain/tagged attribution. |

@@ -160,10 +160,10 @@ The browser calls the loopback API, which delegates to the owning application co
 PR #74's write unit, PR #75's draft store and PR #77's merged conversation store
 (#76 closed) are bounded #37 seams. PR #79 merged the native planner record seam
 and closed #78; #80 now adds the shared common run/step record seam.
-Eager DDL/initializers and legacy campaign backfill, joined planner history,
-conversation legacy backfill and running-run supersession selection/outcome SQL,
-structured test-source/inference records, access, media, foreground sessions/ledger/
-semantic receipts and permit reads still need their complete same-store port.
+Recorded preparation and structured review and drafting use typed run, source,
+inference and evidence records. The retained planner and conversation paths
+still borrow native transactions. Private media, recovery, and foreground
+session and ledger transactions still require migration.
 Actual Postgres repositories and conformance,
 DB/blob recovery and all-campaign restore admission remain pending; no hosted
 composition or new project authority is enabled.

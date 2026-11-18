@@ -9,6 +9,7 @@ from uuid import uuid4
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
 from campaign_agent.provider_sessions import ProviderContext
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.recovery import backup_store,restore_store
 from campaign_agent.adapters.fixture_access import offline_fixture,AuthoredProviderMetadata
 from campaign_agent.adapters.local_access import LocalDemoAccess
@@ -82,7 +83,9 @@ class CapturedReceiptCompatibilityTests(unittest.TestCase):
         case=review_fixtures.OpenRouterReviewTests();case.setUp();self.addCleanup(case.doCleanups)
         op=uuid4().hex;run=case.start(op);case.runtime.resume(run,max_steps=1)
         with patch.object(case.runtime.instruction_tests,'validate_assessment',side_effect=sqlite3.OperationalError('Authored interrupted receipt')):
-            with self.assertRaises(sqlite3.OperationalError):case.runtime.resume(run,max_steps=1)
+            with self.assertRaises(StorageError) as caught:
+                case.runtime.resume(run, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         self.assertEqual(case.runtime.read(run)['inference']['state'],'received')
         blocked=Mock(side_effect=AssertionError('No new completion'))
         reopened=AgentRuntime(case.case.path,media_dir=case.case.media,openrouter_models=(review_fixtures.MODEL,),review_transport=blocked,web=True)
@@ -93,7 +96,9 @@ class CapturedReceiptCompatibilityTests(unittest.TestCase):
         case=draft_fixtures.OpenRouterInstructionTests();case.setUp();self.addCleanup(case.doCleanups)
         op=uuid4().hex;run=case.start(op);case.runtime.resume(run,max_steps=1)
         with patch.object(case.runtime.drafts,'validate_instruction',side_effect=sqlite3.OperationalError('Authored interrupted receipt')):
-            with self.assertRaises(sqlite3.OperationalError):case.runtime.resume(run,max_steps=1)
+            with self.assertRaises(StorageError) as caught:
+                case.runtime.resume(run, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         blocked=Mock(side_effect=AssertionError('No new completion'))
         reopened=AgentRuntime(case.case.drafts.path,media_dir=case.case.drafts.media_dir,
             openrouter_draft_models=(draft_fixtures.MODEL,),draft_transport=blocked,web=True)

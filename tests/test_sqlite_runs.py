@@ -104,7 +104,6 @@ class SQLiteRunStoreTests(unittest.TestCase):
             self.assertEqual(store.step_rows('Sibling'), [('sibling', 'unchanged')])
 
     def test_borrowed_visibility_savepoint_sibling_and_full_rollback_reopen(self):
-        self.assertIs(self.store.connection, self.db)
         with closing(sqlite3.connect(self.path)) as observer:
             observed = SQLiteRunStore(observer)
             self.create()

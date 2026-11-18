@@ -14,6 +14,7 @@ from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructio
 from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
 from campaign_agent.adapters.sqlite_access import SQLiteCampaignAccessReader
+from campaign_agent.adapters.sqlite_agent_runs import SQLiteAgentRunStorage
 from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository, SQLiteDraftStorage
 from campaign_agent.adapters.sqlite_planner import (
     SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlacementCommitStorage,
@@ -144,6 +145,19 @@ class _NativeViewerMeasurement(ViewerMeasurement):
         return super().record(creative_ref, visit_id, example_ref, event_id, kind, take)
 
 
+class _NativeAgentRuntime(AgentRuntime):
+    @property
+    def path(self):
+        return self.drafts.path
+
+    @staticmethod
+    def borrow_run_unit(db):
+        return SQLiteAgentRunStorage.borrow(db)
+
+    def _owned_run(self, db, run_id):
+        return self._owned_run_from(self.borrow_run_unit(db).runs, run_id)
+
+
 def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                    openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                    main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None,
@@ -174,9 +188,12 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
                 if instruction_reviewer is None else instruction_reviewer)
     drafter = (OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
                if instruction_drafter is None else instruction_drafter)
-    runtime = AgentRuntime(drafts, model or RecordedInference(), setup=setup, performance=performance,
-                           delivery=delivery, instruction_tests=tests, instruction_findings=InstructionFindings(tests, tests.storage),
-                           reviewer=reviewer, drafter=drafter, demo_catalog=DEMO_CATALOG, web=web)
+    runtime = _NativeAgentRuntime(
+        drafts, model or RecordedInference(), setup=setup, performance=performance, delivery=delivery,
+        instruction_tests=tests, instruction_findings=InstructionFindings(tests, tests.storage),
+        reviewer=reviewer, drafter=drafter, demo_catalog=DEMO_CATALOG, web=web,
+        run_storage=SQLiteAgentRunStorage(path), new_run_id=lambda: uuid4().hex,
+    )
     remote = (OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body)
               if planner_model is None else planner_model)
     runtime.planner = PlacementAgent(
