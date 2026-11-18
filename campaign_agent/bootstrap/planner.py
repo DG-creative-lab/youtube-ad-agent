@@ -17,7 +17,7 @@ from campaign_agent.application.access import PlacementAccess, PlacementCommandS
 from campaign_agent.application.campaigns import BRIEF, POLICY, DEFAULT_DRAFT_PATH
 from campaign_agent.application.planner_runtime import PlacementRuntime
 from campaign_agent.agent.planning_models import SimulatedPlanner
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_provider_sessions as _provider_sessions, create_runtime
 from campaign_agent.access import require_access
 from campaign_agent.bootstrap.placement_router import PlacementRouter
 from campaign_agent.creatives import EXAMPLES
@@ -32,8 +32,6 @@ from campaign_agent.adapters.sqlite_planner_startup import SQLiteLocalPlannerSta
 from campaign_agent.ports.planner_startup import LocalPlannerStartup
 from campaign_agent.adapters.sqlite_schema import SchemaConflict
 from campaign_agent.ports.storage_errors import StorageError
-from campaign_agent.model_catalogue import CatalogueCache
-from campaign_agent.provider_sessions import ProviderSessions
 
 
 class _CommandScope:
@@ -50,10 +48,6 @@ class _CommandScope:
 
     def set(self, state):
         self._state.set(state)
-
-
-def _provider_sessions(path, **options):
-    return ProviderSessions(path, cache=CatalogueCache(), **options)
 
 
 def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, media_dir=None, examples=EXAMPLES,
@@ -91,7 +85,7 @@ def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, me
     simulator = simulator if simulator is not None else SimulatedPlanner()
     classifier = classifier if classifier is not None else SimulatedClassifier()
     options.pop('access', None)
-    runtime = AgentRuntime(path, operator=operator, media_dir=media_dir, examples=examples, context=context,
+    runtime = create_runtime(path, operator=operator, media_dir=media_dir, examples=examples, context=context,
                            campaign_id=campaign_id, planner_simulator=simulator, placement_classifier=classifier,
                            setup_provider=SimulatedCampaignSetup(path, initialize=False),
                            access=LocalDemoAccess(), initialize=False, **options)

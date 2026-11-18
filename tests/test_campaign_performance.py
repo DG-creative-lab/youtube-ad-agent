@@ -11,8 +11,9 @@ from campaign_agent.access import BrandScope
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from campaign_agent.performance import CampaignPerformance
-from campaign_agent.agent.run import AgentRuntime, RecordedInference
+from campaign_agent.bootstrap.runtime import create_performance as CampaignPerformance
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import RecordedInference
 from scripts.campaign_drafts import CampaignDrafts, PackageConflict
 
 

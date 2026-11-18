@@ -12,7 +12,8 @@ from uuid import uuid4
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 
 from campaign_agent.access import BrandScope, LOCAL_BRAND, LOCAL_CONTEXT, LOCAL_OPERATOR, Operator, WorkspaceContext
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound

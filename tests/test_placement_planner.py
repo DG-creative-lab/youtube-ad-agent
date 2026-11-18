@@ -11,10 +11,11 @@ from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, LOCAL_OPERATOR, Operator
 from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.planning_models import SimulatedPlanner
 from campaign_agent.foreground_inference import ForegroundInference
-from campaign_agent.provider_sessions import ProviderContext, ProviderSessions
+from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
+from campaign_agent.provider_sessions import ProviderContext
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.placement_discovery import SimulatedClassifier
@@ -131,9 +132,9 @@ class PlacementPlannerTests(unittest.TestCase):
             def __bool__(self):
                 return False
 
-        with patch('campaign_agent.agent.run.OpenRouterPlanner', side_effect=AssertionError('Default model constructed')), \
-             patch('campaign_agent.agent.planner.SimulatedPlanner', side_effect=AssertionError('Default simulator constructed')), \
-             patch('campaign_agent.agent.planner.SimulatedClassifier', side_effect=AssertionError('Default classifier constructed')):
+        with patch('campaign_agent.bootstrap.runtime.OpenRouterPlanner', side_effect=AssertionError('Default model constructed')), \
+             patch('campaign_agent.bootstrap.runtime.SimulatedPlanner', side_effect=AssertionError('Default simulator constructed')), \
+             patch('campaign_agent.bootstrap.runtime.SimulatedClassifier', side_effect=AssertionError('Default classifier constructed')):
             runtime = self.reopen(planner_model=AuthoredPlanner(), planner_simulator=OfflinePlanner(),
                                   placement_classifier=AuthoredClassifier())
             self.assertIn(MODEL, [item['id'] for item in runtime.planner.options()['models']])
@@ -248,6 +249,31 @@ class PlacementPlannerTests(unittest.TestCase):
         self.assertIsNone(foreground.credential)
         self.assertIsNone(foreground.runtime)
         self.assertFalse(hasattr(runtime.planner.remote, 'foreground'))
+
+    def test_explicit_native_instances_remain_unqualified_for_foreground(self):
+        from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
+
+        transport = Mock(side_effect=AssertionError('No supplied-model dispatch'))
+        replacements = {
+            'planner_model': OpenRouterPlanner((), request_body=lambda *_: {}, transport=transport),
+            'instruction_reviewer': OpenRouterReviews(transport=transport),
+            'instruction_drafter': OpenRouterInstructions(transport=transport),
+        }
+        for name, replacement in replacements.items():
+            with self.subTest(name=name):
+                runtime = self.reopen(**{name: replacement})
+                access = runtime.drafts.access
+                context = ProviderContext(LOCAL_OPERATOR.id, runtime.drafts.context,
+                                          runtime.drafts.campaign_id, 'a' * 64, 2**40, {}, lambda: None)
+                foreground = ForegroundInference(ProviderSessions(self.path), context, access, ['authored-key'])
+                with self.assertRaises(ProviderError) as caught:
+                    foreground.attach(runtime)
+                self.assertEqual(caught.exception.code, 'route_unqualified')
+                self.assertIs(runtime.drafts.access, access)
+                self.assertIsNone(foreground.credential)
+                self.assertIsNone(replacement.foreground)
+        transport.assert_not_called()
 
     def test_models_choose_different_orders_and_catalogs_change_the_saved_proposal(self):
         first = self.finish(self.start())

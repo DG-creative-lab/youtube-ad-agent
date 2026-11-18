@@ -7,7 +7,8 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_BRAND, Operator
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RecordedInference
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST, RecordedInference
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerNotFound

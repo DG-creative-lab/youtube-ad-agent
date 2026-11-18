@@ -3,16 +3,15 @@
 from contextlib import closing
 from datetime import datetime, timezone
 import json
-from pathlib import Path
 import re
 import sqlite3
 
 from .domain.performance import LOW_COMPLETION_RATE, MIN_LOCAL_ARRIVALS, apply_correction
 from .handoff import package_fingerprint
+from .ports.campaign_effects import SampleReporting
 from campaign_agent.domain.errors import PackageConflict
 
 
-DELIVERY_FIXTURE = Path(__file__).resolve().parents[1] / "examples/tts-performance/delivery.json"
 MIN_SAMPLE_IMPRESSIONS = 100
 VIEWER_ATTRIBUTION = "campaign_comparison_content_v1"
 CORRECTION_CHOICES = {
@@ -31,31 +30,6 @@ def comparison_identity(group, *, keep_takes=False):
         excluded.add("instruction")
     content = {key: value for key, value in group["content"].items() if key not in excluded}
     return package_fingerprint({"comparison_version": group["comparison_version"], "content": content})
-
-
-
-
-class SampleCampaignReporting:
-    def __init__(self):
-        self.fixture = json.loads(DELIVERY_FIXTURE.read_text())
-
-    def scenarios(self):
-        return [{"id": key, "label": value["label"]} for key, value in self.fixture["scenarios"].items()]
-
-    def snapshot(self, scenario, creatives):
-        selected = self.fixture["scenarios"].get(scenario)
-        if selected is None:
-            raise ValueError("Choose a sample delivery scenario.")
-        rows = [
-            {"creative_version": creative, "metrics": selected["rows"].get(creative)}
-            for creative in creatives
-        ]
-        return {
-            "fixture_id": self.fixture["id"], "source": self.fixture["source"], "grain": self.fixture["grain"],
-            "window": self.fixture["window"], "scenario": scenario, "label": selected["label"],
-            "coverage": "complete" if all(row["metrics"] is not None for row in rows) else "partial",
-            "rows": rows,
-        }
 
 
 def propose_next_test(delivery, activity):
@@ -108,12 +82,12 @@ def propose_next_test(delivery, activity):
 
 
 class CampaignPerformance:
-    def __init__(self, drafts, viewer, reporting=None, *, initialize=True):
+    def __init__(self, drafts, viewer, reporting: SampleReporting, *, initialize=True):
         if viewer.campaign_id != drafts.campaign_id:
             raise ValueError("Bind measurement to this campaign before reviewing activity.")
         self.drafts = drafts
         self.viewer = viewer
-        self.reporting = reporting if reporting is not None else SampleCampaignReporting()
+        self.reporting = reporting
         if not initialize:
             return
         with closing(sqlite3.connect(drafts.path)) as db, db:

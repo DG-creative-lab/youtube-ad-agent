@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.bootstrap.planner import create_local_planner
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.domain.errors import PackageConflict
@@ -115,7 +115,7 @@ class StructuredModelTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 fixture, model = self.prepare(kind), AuthoredStructuredModel()
                 default = 'OpenRouterReviews' if kind == 'review' else 'OpenRouterInstructions'
-                with patch('campaign_agent.agent.run.' + default, side_effect=AssertionError('Default model constructed')):
+                with patch('campaign_agent.bootstrap.runtime.' + default, side_effect=AssertionError('Default model constructed')):
                     runtime = self.runtime(fixture, model)
                 self.assertIs(runtime.openrouter if kind == 'review' else runtime.openrouter_drafts, model)
                 def unlocked():

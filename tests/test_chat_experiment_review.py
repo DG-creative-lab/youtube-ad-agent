@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from campaign_agent.agent.planning_models import SimulatedPlanner
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 import test_instruction_tests as experiment_fixtures
 import test_placement_planner as planner_fixtures
 

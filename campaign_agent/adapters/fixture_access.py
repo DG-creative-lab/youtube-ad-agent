@@ -9,7 +9,7 @@ from uuid import uuid4
 from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
 from campaign_agent.assets import AssetStore
 from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp, validate_record
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import DEMO_MEDIA_DIR
 from campaign_agent.hosted import HostedApplication
@@ -177,7 +177,7 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
                                (context.scope.client_id, context.scope.brand_id, catalog))
                 catalogs[context.scope] = catalog
         examples, media_dir = assets(context.scope.client_id, context.scope.brand_id)
-        r = AgentRuntime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
+        r = create_runtime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
         r.planner.catalogs.register('Authored fixture catalog', [
             {'video_id': 'SAMPLE00001', 'description': 'Video editing tutorial', 'source': 'synthetic'},
             {'video_id': 'SAMPLE00002', 'description': 'Audiobook narration tutorial', 'source': 'synthetic'}])
