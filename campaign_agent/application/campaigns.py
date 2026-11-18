@@ -202,16 +202,19 @@ class CampaignDrafts:
             unit.commit()
             return references
 
-    def comparison_content(self, example, fingerprint):
+    def comparison_content(self, example, fingerprint, *, records: CampaignDraftReader | None = None):
         """Verify a content reference using current media and immutable instruction versions."""
         if example.scope != self.scope or example not in self.examples:
             raise PermissionError("The comparison is unavailable in this workspace.")
         content = example_content(example, self.media_dir)
         if self.live or package_fingerprint(content) == fingerprint:
             return content
-        with self._storage.read() as records:
-            instructions = records.instructions(example.scope.client_id, example.scope.brand_id,
-                                                example.creative_ref, example.ref)
+        key = example.scope.client_id, example.scope.brand_id, example.creative_ref, example.ref
+        if records is None:
+            with self._storage.read() as reader:
+                instructions = reader.instructions(*key)
+        else:
+            instructions = records.instructions(*key)
         for instruction in instructions:
             variant = {**content, "instruction": instruction}
             if package_fingerprint(variant) == fingerprint:

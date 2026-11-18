@@ -296,7 +296,7 @@ class HostedApplication:
                 return r.drafts.read_approved_package(r.drafts.campaign_id, int(q['revision']), q['approval'])
             result = reads[path](r.drafts.campaign_id, int(q['revision']), **({'fingerprint': q['fingerprint']} if 'fingerprint' in q else {}))
             if path == '/api/campaign/package':
-                links = self.publications.active_links(r.drafts.campaign_id, int(q['revision']), result['fingerprint'])
+                links = self.publications.active_links(r.drafts, int(q['revision']), result['fingerprint'])
                 links = [{'creative_ref': link['creative_ref'], 'url': self.viewer_origin + link['path']} for link in links]
                 return {**result, 'public_comparisons': links}
             return result
