@@ -65,9 +65,6 @@ class _NativeCampaignDrafts(CampaignDrafts):
     def require_approved_package(self, db, campaign_id, revision, fingerprint):
         return self.require_approved_from(self._repository(db), campaign_id, revision, fingerprint)
 
-    def _save_instruction_revision(self, db, current, group, instruction, provenance):
-        return self._save_instruction_revision_from(self._repository(db), current, group, instruction, provenance)
-
     def write_unit(self):
         return self._storage.legacy_write()
 
@@ -173,7 +170,7 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
     drafter = (OpenRouterInstructions(openrouter_draft_models, transport=draft_transport)
                if instruction_drafter is None else instruction_drafter)
     runtime = AgentRuntime(drafts, model or RecordedInference(), setup=setup, performance=performance,
-                           delivery=delivery, instruction_tests=tests, instruction_findings=InstructionFindings(tests),
+                           delivery=delivery, instruction_tests=tests, instruction_findings=InstructionFindings(tests, tests.storage),
                            reviewer=reviewer, drafter=drafter, demo_catalog=DEMO_CATALOG, web=web)
     remote = (OpenRouterPlanner(main_models, transport=main_transport, request_body=planner_request_body)
               if planner_model is None else planner_model)

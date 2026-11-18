@@ -155,6 +155,47 @@ class _EvidenceUnit(_ViewerUnit):
                   arm.campaign, source, arm.creative, arm.fingerprint, arm.comparison)).fetchone()
 
 
+    def latest_finding_row(self, scope, comparison_key):
+        with self.drafts._use() as store:
+            client, brand, campaign = scope
+            # Include retired rows so a retired latest match cannot revive its predecessor.
+            return store.connection.execute("""
+                SELECT f.snapshot, f.retired FROM instruction_findings f
+                JOIN instruction_tests t ON t.id = json_extract(f.snapshot, '$.test_id')
+                    AND t.client_id = f.client_id AND t.brand_id = f.brand_id
+                WHERE f.client_id=? AND f.brand_id=? AND f.comparison_key=? AND t.campaign_id=?
+                ORDER BY f.rowid DESC LIMIT 1
+            """, (client, brand, comparison_key, campaign)).fetchone()
+
+    def finding_retired_row(self, scope, finding_id):
+        with self.drafts._use() as store:
+            return store.connection.execute("""
+                SELECT f.retired FROM instruction_findings f
+                JOIN instruction_tests t ON t.id = json_extract(f.snapshot, '$.test_id')
+                    AND t.client_id = f.client_id AND t.brand_id = f.brand_id
+                WHERE f.id=? AND f.client_id=? AND f.brand_id=? AND t.campaign_id=?
+            """, (finding_id, *scope)).fetchone()
+
+    def add_finding(self, scope, finding_id, comparison_key, snapshot):
+        with self.drafts._use(write=True) as store:
+            store.connection.execute("""
+                INSERT INTO instruction_findings (id, client_id, brand_id, comparison_key, snapshot)
+                VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+            """, (finding_id, *scope[:2], comparison_key, snapshot))
+
+    def retire_finding(self, scope, finding_id):
+        with self.drafts._use(write=True) as store:
+            return store.connection.execute("""
+                UPDATE instruction_findings SET retired=1
+                WHERE id=? AND client_id=? AND brand_id=? AND EXISTS (
+                    SELECT 1 FROM instruction_tests t
+                    WHERE t.id = json_extract(instruction_findings.snapshot, '$.test_id')
+                        AND t.client_id = instruction_findings.client_id
+                        AND t.brand_id = instruction_findings.brand_id AND t.campaign_id=?
+                )
+            """, (finding_id, *scope)).rowcount == 1
+
+
 class SQLiteEvidenceStorage:
     def __init__(self, path):
         self._path = path

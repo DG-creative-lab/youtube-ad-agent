@@ -140,6 +140,18 @@ class InstructionTestTests(unittest.TestCase):
         self.assertEqual(old["groups"][0]["content"]["instruction"], finding["before"])
         request = {"finding_id": finding["id"], "correction_id": eligible["correction"]["id"],
                    "draft_permission": "instruction_test"}
+        save_revision = reopened.drafts._save_instruction_revision_from
+
+        def interrupt_after_write(*args):
+            save_revision(*args)
+            raise sqlite3.OperationalError("Interrupted after writing the reused draft")
+
+        with patch.object(reopened.drafts, "_save_instruction_revision_from", side_effect=interrupt_after_write):
+            with self.assertRaises(StorageError):
+                reopened.instruction_findings.apply(*target, **request)
+        self.assertIsNone(reopened.drafts.read(target[1] + 1))
+        self.assertEqual(reopened.instruction_findings.read(*target), eligible)
+
         saved = reopened.instruction_findings.apply(*target, **request)
         reviewed = reopened.drafts.review_package(self.campaign, saved["revision"])
         self.assertEqual(saved["revision"], target[1] + 1)

@@ -34,21 +34,6 @@ class _NativeInstructionTests(InstructionTests):
     def started_for_package(self, db, package):
         return self.started_for_package_from(self.storage.borrow(db), package)
 
-    def _test(self, db, test_id):
-        return self.test_from(self.storage.borrow(db), test_id)
-
-    def _latest_snapshot(self, db, test_id):
-        return self.latest_snapshot_from(self.storage.borrow(db), test_id)
-
-    def _initial_batch_checkpoint(self, db, snapshot):
-        return self.initial_batch_checkpoint_from(self.storage.borrow(db), snapshot)
-
-    def _snapshot_rows(self, db, test, window_ms, cutoff):
-        return self.snapshot_rows_from(self.storage.borrow(db), test, window_ms, cutoff)
-
-    def _assignment_rows(self, db, test, source):
-        return self.assignment_rows_from(self.storage.borrow(db), test, source)
-
     def review_context(self, test_id, *, connection=None):
         if connection is None:
             return super().review_context(test_id)
