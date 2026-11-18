@@ -248,6 +248,43 @@ class HostedAccessTests(unittest.TestCase):
         self.assertEqual(self.public.get(links[0]['path']).status_code, 404)
         self.assertEqual(self.public.get(opened.json()['example']['takes'][0]['url']).status_code, 404)
 
+    def test_public_grant_change_during_media_resolution_blocks_write_and_download(self):
+        args = self.prepare()
+        self.post(self.reviewer, '/api/campaign/approve', args)
+        link = self.post(self.reviewer, '/api/campaign/export', args)['public_comparisons'][0]
+        token = link['path'].split('attribution=')[1]
+        headers = {'Origin': self.app.viewer_origin}
+        opened = self.public.post('/api/viewer/open', json={'attribution': token, 'visit_id': None}, headers=headers)
+        self.assertEqual(opened.status_code, 200, opened.text)
+        visit = opened.json()
+        assets = self.app.publications.assets
+
+        def replace_after_lookup(*scope):
+            loaded = assets(*scope)
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('UPDATE public_comparisons SET revision=revision+1 WHERE id=?', (token,))
+            return loaded
+
+        requests = (
+            lambda: self.public.post('/api/viewer/open', json={'attribution': token, 'visit_id': None}, headers=headers),
+            lambda: self.public.post('/api/viewer/event', json={
+                'creative_ref': visit['creative_ref'], 'example_ref': visit['example']['ref'],
+                'event_id': uuid4().hex, 'visit_id': visit['visit_id'], 'kind': 'start', 'take': 'a',
+            }, headers=headers),
+            lambda: self.public.get(visit['example']['takes'][0]['url']),
+        )
+        for request in requests:
+            with patch.object(self.app.publications, 'assets', side_effect=replace_after_lookup):
+                self.assertEqual(request().status_code, 404)
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('UPDATE public_comparisons SET revision=? WHERE id=?', (args['revision'], token))
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM viewer_visits').fetchone(), (1,))
+                self.assertEqual(db.execute('SELECT kind FROM viewer_events').fetchall(), [('arrival',)])
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE viewer_visits SET content_fingerprint=? WHERE id=?', ('0' * 64, visit['visit_id']))
+        self.assertEqual(requests[1]().status_code, 404)
+        self.assertEqual(self.public.get(visit['example']['takes'][0]['url']).status_code, 200)
+
     def test_expired_or_revoked_publications_fail_export_atomically_with_recovery_guidance(self):
         args = self.prepare()
         self.post(self.reviewer, '/api/campaign/approve', args)

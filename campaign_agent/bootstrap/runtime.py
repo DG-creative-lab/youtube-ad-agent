@@ -2,6 +2,7 @@
 from functools import partial
 import json
 from pathlib import Path
+from time import time_ns
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
@@ -18,7 +19,8 @@ from campaign_agent.adapters.sqlite_planner import (
     SQLitePlannerLifecycleStorage, SQLitePlannerReadStorage,
 )
 from campaign_agent.adapters.sqlite_schema import migrate_path
-from campaign_agent.adapters.sqlite_setup_delivery import SQLiteSetupDeliveryStorage, verified_viewer_link
+from campaign_agent.adapters.sqlite_setup_delivery import SQLiteSetupDeliveryStorage
+from campaign_agent.adapters.sqlite_viewer import SQLiteViewerStorage
 from campaign_agent.agent.planner import PlacementAgent
 from campaign_agent.agent.planning_models import SimulatedPlanner, planner_request_body
 from campaign_agent.agent.run import AgentRuntime, RecordedInference
@@ -124,6 +126,33 @@ class _NativeCampaignDelivery(CampaignDelivery):
         return self.recommend_from(self.storage.borrow(connection), campaign_id, revision, fingerprint, report_id)
 
 
+class _NativeViewerMeasurement(ViewerMeasurement):
+    """Borrow the existing SQLite transaction for experiment and review siblings."""
+
+    def __init__(self, path, examples, *, campaign_id):
+        super().__init__(SQLiteViewerStorage(path), examples, campaign_id=campaign_id,
+                         clock_ms=lambda: time_ns() // 1_000_000, new_visit_id=lambda: uuid4().hex)
+
+    def connect(self):
+        return self.storage.legacy_connect()
+
+    def open_example(self, creative_ref, example_ref=None, visit_id=None, *, connection=None, **options):
+        if connection is not None:
+            return self.open_from(self.storage.borrow(connection), creative_ref, example_ref, visit_id, **options)
+        return super().open_example(creative_ref, example_ref, visit_id, **options)
+
+    def summarize(self, scope, comparisons, *, connection=None):
+        if connection is not None:
+            return self.summarize_from(self.storage.borrow(connection), scope, comparisons)
+        return super().summarize(scope, comparisons)
+
+    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take, *, connection=None):
+        if connection is not None:
+            return self.record_from(self.storage.borrow(connection), creative_ref, visit_id, example_ref,
+                                    event_id, kind, take)
+        return super().record(creative_ref, visit_id, example_ref, event_id, kind, take)
+
+
 def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                    openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                    main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None,
@@ -145,7 +174,7 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
     setup_storage = SQLiteSetupDeliveryStorage(path)
     setup = _NativeCampaignSetup(drafts, SimulatedCampaignSetup(path) if setup_provider is None else setup_provider,
                                  setup_storage, viewer_links=viewer_links)
-    viewer = ViewerMeasurement(path, drafts.examples, campaign_id=drafts.campaign_id, verified_link=verified_viewer_link)
+    viewer = _NativeViewerMeasurement(path, drafts.examples, campaign_id=drafts.campaign_id)
     performance = CampaignPerformance(drafts, viewer, SampleCampaignReporting())
     delivery = _NativeCampaignDelivery(drafts, setup, performance, setup_storage, reporting,
                                        demo_scenario=demo_scenario, demo_report=demo_report)
@@ -181,7 +210,7 @@ def create_provider_sessions(path, *, initialize=True, **options) -> ProviderSes
 def create_viewer(path, examples=EXAMPLES, *, campaign_id='tts-sample', initialize=True):
     if initialize:
         startup.initialize_viewer(path)
-    return ViewerMeasurement(path, examples, campaign_id=campaign_id, verified_link=verified_viewer_link)
+    return _NativeViewerMeasurement(path, examples, campaign_id=campaign_id)
 
 
 def create_performance(drafts, viewer, *, initialize=True) -> CampaignPerformance:

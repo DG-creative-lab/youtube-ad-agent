@@ -79,11 +79,11 @@ class InstructionTestTests(unittest.TestCase):
         epoch = 1_700_000_000_000
         for index, event in enumerate(visits):
             event.update(id=index, admitted_ms=event["arrived_ms"] or 0, batch=0)
-            with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["admitted_ms"]) * 1_000_000):
+            with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(epoch + event["admitted_ms"]) * 1_000_000):
                 source = event["source"] if event["source"] != "unknown" else "participant"
                 visit = self.open(event["arm"], source=source)
             if event["completed_ms"] is not None:
-                with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["completed_ms"]) * 1_000_000):
+                with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(epoch + event["completed_ms"]) * 1_000_000):
                     self.complete(visit)
                     self.complete(visit)
             with closing(self.viewer.connect()) as db, db:
@@ -102,7 +102,7 @@ class InstructionTestTests(unittest.TestCase):
     def save_reuse_finding(self):
         self.start(allow_additional_batch=True)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 18)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -251,7 +251,7 @@ class InstructionTestTests(unittest.TestCase):
         self.assertIsNone(self.read()["evidence_decision"])
 
         start = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=start * 1_000_000):
             for arm, completions in (("original", 6), ("revised", 10)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -274,7 +274,7 @@ class InstructionTestTests(unittest.TestCase):
             second = reopened.save_evidence_snapshot(*ref, uuid4().hex)
         self.assertEqual(reopened.read(*ref)["evidence_decision"], {**recommendation, "snapshot_id": second["id"]})
 
-        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(cutoff + 1) * 1_000_000):
             self.open("original")
         self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
@@ -285,7 +285,7 @@ class InstructionTestTests(unittest.TestCase):
         self.assertEqual(after["batch_checkpoint_id"], second["id"])
 
         batch_arrival = cutoff + 3
-        with patch("campaign_agent.measurement.time_ns", return_value=batch_arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=batch_arrival * 1_000_000):
             for _ in range(9):
                 self.open("revised")
         self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
@@ -304,7 +304,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 6), ("revised", 10)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -314,7 +314,7 @@ class InstructionTestTests(unittest.TestCase):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
         decision = self.read()["evidence_decision"]
         self.assertEqual((decision["action"], decision["assigned"]), ("wait_for_evidence", 40))
-        with patch("campaign_agent.measurement.time_ns", return_value=(arrival + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(arrival + 1) * 1_000_000):
             self.open("original")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 1) * 1_000_000):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
@@ -334,7 +334,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm in ("original", "revised"):
                 for _ in range(20):
                     self.open(arm)
@@ -343,7 +343,7 @@ class InstructionTestTests(unittest.TestCase):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
         decision = self.read()["evidence_decision"]
         self.assertEqual((decision["action"], decision["batch_status"]), ("keep", "evaluated"))
-        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(cutoff + 1) * 1_000_000):
             self.open("original")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
@@ -358,7 +358,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 20)):
                 for index in range(25):
                     visit = self.open(arm)
@@ -397,7 +397,7 @@ class InstructionTestTests(unittest.TestCase):
         window = 300_000
         start = 1_800_000_000_000
         participant = uuid4().hex
-        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=start * 1_000_000):
             completed = self.open("original", participant)
             late = self.open("original")
             self.open("revised")
@@ -413,9 +413,9 @@ class InstructionTestTests(unittest.TestCase):
         with closing(self.viewer.connect()) as db, db:
             db.execute("UPDATE instruction_test_assignments SET source = NULL WHERE visit_id = ?", (unknown["visit_id"],))
             db.execute("UPDATE viewer_completions SET completed_ms = NULL WHERE visit_id = ?", (missing_time["visit_id"],))
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + 1) * 1_000_000):
             immature = self.open("revised")
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + window) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + window) * 1_000_000):
             self.complete(completed)
             self.complete(immature)
         with self.assertRaisesRegex(ValueError, "separate browser reference"):
@@ -440,7 +440,7 @@ class InstructionTestTests(unittest.TestCase):
 
         reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests
         self.assertEqual(reopened.open(test["id"], participant)["visit_id"], completed["visit_id"])
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + window + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + window + 1) * 1_000_000):
             self.complete(completed)
             self.complete(late)
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(start + 2 * window) * 1_000_000):

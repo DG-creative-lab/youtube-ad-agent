@@ -1,14 +1,18 @@
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from campaign_agent.access import BrandScope, LOCAL_BRAND, Operator
+from campaign_agent.adapters.sqlite_viewer import _ViewerUnit
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.bootstrap.runtime import create_viewer as ViewerMeasurement
 from campaign_agent.measurement import ViewerNotFound
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
 
 
@@ -50,6 +54,24 @@ class ViewerMeasurementTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT first_choice FROM viewer_completions").fetchall(), [("b",)])
             self.assertEqual(db.execute("SELECT COUNT(*) FROM viewer_events WHERE kind = 'arrival'").fetchone(), (1,))
             self.assertEqual(db.execute("SELECT COUNT(*) FROM viewer_events WHERE kind = 'choose'").fetchone(), (2,))
+
+    def test_choice_and_completion_roll_back_together_and_can_be_replayed(self):
+        for take in ("a", "b"):
+            self.event("start", take)
+            self.event("finish", take)
+        event_id = uuid4().hex
+        with patch.object(_ViewerUnit, "add_completion", side_effect=sqlite3.OperationalError("Interrupted completion")):
+            with self.assertRaises(StorageError):
+                self.event("choose", "b", event_id)
+        reopened = ViewerMeasurement(self.path)
+        with closing(reopened.connect()) as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM viewer_events WHERE event_id=?", (event_id,)).fetchone())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM viewer_completions").fetchone(), (0,))
+        state = reopened.record(EDIT.creative_ref, self.visit, EDIT.ref, event_id, "choose", "b")
+        self.assertEqual(state, {"finished": ["a", "b"], "choice": "b", "complete": True})
+        self.assertEqual(self.event("choose", "b", event_id), state)
+        with closing(reopened.connect()) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM viewer_completions").fetchone(), (1,))
 
     def test_switching_examples_keeps_original_attribution_and_separate_progress(self):
         self.event("start", "a")

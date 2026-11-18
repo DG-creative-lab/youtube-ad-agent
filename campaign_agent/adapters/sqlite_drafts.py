@@ -188,9 +188,11 @@ class _DraftUnit:
 
 
 @contextmanager
-def open_sqlite_unit(path, unit_type, *, write):
+def open_sqlite_unit(path, unit_type, *, write, foreign_keys=False):
     try:
         with closing(sqlite3.connect(path)) as db:
+            if foreign_keys:
+                db.execute("PRAGMA foreign_keys=ON")
             if not write:
                 db.execute("PRAGMA query_only=ON")
             db.execute("BEGIN IMMEDIATE" if write else "BEGIN")

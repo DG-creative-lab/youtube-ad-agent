@@ -234,7 +234,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         viewer = self.runtime.performance.viewer
 
         def open_visit(link, timestamp, *, rehearsal=False, tagged=True):
-            with patch('campaign_agent.measurement.time_ns',
+            with patch('campaign_agent.bootstrap.runtime.time_ns',
                        return_value=int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000)):
                 return viewer.open_example(
                     link['creative_ref'], link['comparison_ref'], content_fingerprint=link['content_fingerprint'],
@@ -245,7 +245,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
             for take in ('a', 'b'):
                 for kind in ('start', 'finish'):
                     viewer.record(link['creative_ref'], visit, link['comparison_ref'], uuid4().hex, kind, take)
-            with patch('campaign_agent.measurement.time_ns',
+            with patch('campaign_agent.bootstrap.runtime.time_ns',
                        return_value=int(datetime.fromisoformat(timestamp).timestamp() * 1_000_000_000)):
                 viewer.record(link['creative_ref'], visit, link['comparison_ref'], uuid4().hex, 'choose', 'a')
 

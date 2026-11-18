@@ -238,7 +238,7 @@ class TenantWorkspaceTests(unittest.TestCase):
         drafts.approve_package(campaign, 3, fingerprint)
         test = runtime.instruction_tests.start(campaign, 3, fingerprint, allow_additional_batch=True)
         arrival = 1_700_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 18)):
                 with patch("campaign_agent.instruction_tests.secrets.choice", return_value=arm):
                     for index in range(20):
