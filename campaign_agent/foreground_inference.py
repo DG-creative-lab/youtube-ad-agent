@@ -7,7 +7,6 @@ import re
 import sqlite3
 
 from .access import CommandAccess
-from .adapters.sqlite_runs import SQLiteRunStore
 from .inference_ledger import InferenceLedger, actual_cost
 from .application.catalogue_policy import compatible_model, fingerprint, select_endpoint
 from .ports.inference import ForegroundCredential, ProviderError
@@ -93,12 +92,14 @@ class ForegroundInference:
     def use_run(self,run_id):
         self.run_id=run_id
         with closing(sqlite3.connect(self.path)) as db:
-            self.runtime._owned_run(db,run_id)
-            row=db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?',(run_id,)).fetchone()
-            if row: settings=json.loads(row[0])['settings']
+            runs = self.runtime.borrow_run_unit(db).runs
+            self.runtime._owned_run_from(runs, run_id)
+            row = db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+            if row:
+                settings = json.loads(row[0])['settings']
             else:
-                row=db.execute('SELECT settings FROM agent_review_inference WHERE run_id=?',(run_id,)).fetchone()
-                settings=json.loads(row[0]) if row else {}
+                row = runs.structured_settings_row(run_id)
+                settings = json.loads(row[0]) if row else {}
             if settings.get('foreground'):
                 self.owned(db,settings['selection_id'],active=False)
                 self.settings_bound=settings
@@ -156,7 +157,7 @@ class ForegroundInference:
         request_hash=hashlib.sha256(encoded).hexdigest()
         with closing(sqlite3.connect(self.path)) as db:
             if self.runtime.planner.owns(self.run_id):
-                position=SQLiteRunStore(db).step_count(self.run_id)
+                position = self.runtime.borrow_run_unit(db).runs.step_count(self.run_id)
             else: position=0
             row=self.ledger.row(db,self.run_id,position)
             if row and row['state']!='released_unsent':
@@ -217,14 +218,16 @@ class ForegroundInference:
         if echoed: raise ProviderError('inference_outcome_unknown')
         return receipt
 
-    def current_run(self,db):
-        _,status=self.runtime._owned_run(db,self.run_id)
-        if status!='running': raise ProviderError('operation_conflict')
-        if self.runtime.planner.owns(self.run_id): self.runtime.planner._context(db,self.run_id)
+    def current_run(self, db):
+        unit = self.runtime.borrow_run_unit(db)
+        request, status = self.runtime._owned_run_from(unit.runs, self.run_id)
+        if status != 'running':
+            raise ProviderError('operation_conflict')
+        if self.runtime.planner.owns(self.run_id):
+            self.runtime.planner._context(db, self.run_id)
         else:
-            source=json.loads(db.execute('SELECT source FROM agent_test_sources WHERE run_id=?',(self.run_id,)).fetchone()[0])
-            request=self.runtime._owned_run(db,self.run_id)[0]
-            self.runtime._inference_context(db,request,source)
+            source = self.runtime._structured_source(unit.runs, self.run_id)
+            self.runtime._inference_context_from(unit.evidence, request, source)
 
     def reconcile(self,data):
         if self.credential is None: raise ProviderError('waiting_for_credentials')

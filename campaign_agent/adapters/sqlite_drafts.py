@@ -185,7 +185,7 @@ class _DraftUnit:
 
 
 @contextmanager
-def open_sqlite_unit(path, unit_type, *, write, foreign_keys=False):
+def open_sqlite_unit(path, unit_type, *, write, foreign_keys=False, native_failure=None):
     try:
         with closing(sqlite3.connect(path)) as db:
             if foreign_keys:
@@ -200,7 +200,9 @@ def open_sqlite_unit(path, unit_type, *, write, foreign_keys=False):
                 unit.drafts._close()
                 if db.in_transaction:
                     db.rollback()
-    except sqlite3.Error:
+    except sqlite3.Error as error:
+        if native_failure is not None:
+            raise native_failure(error) from None
         raise StorageError('unavailable', 'Campaign draft storage is unavailable.') from None
 
 

@@ -7,6 +7,7 @@ import unittest
 from campaign_agent.access import BrandScope, LOCAL_BRAND, Operator
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.run import DEMO_REQUEST
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
 from scripts.campaign_drafts import StaleDraft
 
@@ -57,8 +58,9 @@ class AgentRunTests(unittest.TestCase):
                     WHEN NEW.position=2 AND NEW.tool='save_draft'
                     AND EXISTS (SELECT 1 FROM campaign_revisions WHERE revision=2)
                     BEGIN SELECT RAISE(ABORT, 'step after saved draft'); END""")
-            with self.assertRaisesRegex(sqlite3.IntegrityError, 'step after saved draft'):
+            with self.assertRaises(StorageError) as caught:
                 runtime.resume(run_id, max_steps=1)
+            self.assertEqual(caught.exception.kind, 'conflict')
             # Fresh connections and a real runtime see exact original rows/text.
             self.assertEqual(self._durable_rows(path), baseline)
             reopened = AgentRuntime(path)
@@ -93,8 +95,9 @@ class AgentRunTests(unittest.TestCase):
                     WHEN NEW.status='ready_for_review' AND EXISTS
                     (SELECT 1 FROM agent_steps WHERE run_id=NEW.id AND position=3 AND tool='finish')
                     BEGIN SELECT RAISE(ABORT, 'status after finish step'); END""")
-            with self.assertRaisesRegex(sqlite3.IntegrityError, 'status after finish step'):
+            with self.assertRaises(StorageError) as caught:
                 runtime.resume(run_id, max_steps=1)
+            self.assertEqual(caught.exception.kind, 'conflict')
             self.assertEqual(self._durable_rows(path), baseline)
             reopened = AgentRuntime(path)
             self.assertEqual(reopened.read(run_id), progress)

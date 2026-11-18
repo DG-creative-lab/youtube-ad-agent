@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from uuid import uuid4
 
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.adapters.openrouter_reviews import ENDPOINT, ReviewInferenceError
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
@@ -83,7 +84,7 @@ class OpenRouterReviewTests(unittest.TestCase):
         self.runtime.resume(run_id, max_steps=1)
         with patch.object(self.runtime.instruction_tests, "validate_assessment",
                           side_effect=sqlite3.OperationalError("Interrupted step commit")):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(StorageError):
                 self.runtime.resume(run_id, max_steps=1)
         self.assertEqual(self.transport.call_count, 1)
         captured = self.runtime.read(run_id)
