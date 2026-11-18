@@ -26,7 +26,7 @@ from campaign_agent.handoff import package_fingerprint
 from campaign_agent import migrations
 from campaign_agent.migrations import migrate_path, SchemaConflict, versions
 from campaign_agent.recovery import backup_store, restore_store, verify_backup
-from campaign_agent.workspaces import provision_workspace
+from campaign_agent.bootstrap.runtime import provision_workspace
 from scripts.campaign_drafts import StaleDraft
 from scripts.compare_instruction_policies import walkthrough
 import test_hosted_access as hosted_fixtures

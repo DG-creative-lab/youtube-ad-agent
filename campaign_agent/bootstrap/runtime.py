@@ -13,6 +13,7 @@ from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
+from campaign_agent.adapters.sqlite_access import SQLiteCampaignAccessReader
 from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository, SQLiteDraftStorage
 from campaign_agent.adapters.sqlite_planner import (
     SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlacementCommitStorage,
@@ -22,6 +23,7 @@ from campaign_agent.adapters.sqlite_schema import migrate_path
 from campaign_agent.adapters.sqlite_setup_delivery import SQLiteSetupDeliveryStorage
 from campaign_agent.adapters.sqlite_staff_sessions import SQLiteStaffSessionStorage
 from campaign_agent.adapters.sqlite_viewer import SQLiteViewerStorage
+from campaign_agent.adapters.sqlite_workspace_admission import SQLiteWorkspaceStorage, verify as verify_workspace_owner
 from campaign_agent.agent.planner import PlacementAgent
 from campaign_agent.agent.planning_models import SimulatedPlanner, planner_request_body
 from campaign_agent.agent.run import AgentRuntime, RecordedInference
@@ -36,6 +38,7 @@ from campaign_agent.measurement import ViewerMeasurement
 from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
 from campaign_agent.provider_sessions import ProviderSessions
 from campaign_agent.staff import StaffSessions
+from campaign_agent import workspaces
 
 ROOT = Path(__file__).resolve().parents[2]
 MEDIA_DIR = ROOT / '.local/viewer-media'
@@ -192,7 +195,7 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
 def create_provider_sessions(path, *, initialize=True, **options) -> ProviderSessions:
     if initialize:
         migrate_path(path)
-    return ProviderSessions(path, cache=CatalogueCache(), **options)
+    return ProviderSessions(path, cache=CatalogueCache(), access_reader=SQLiteCampaignAccessReader, **options)
 
 
 def create_viewer(path, examples=EXAMPLES, *, campaign_id='tts-sample', initialize=True):
@@ -212,7 +215,7 @@ def create_simulated_setup(path):
 
 
 def create_asset_store(path, root):
-    store = AssetStore(path, root)
+    store = AssetStore(path, root, verify_owner=verify_workspace_owner)
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.root.mkdir(mode=0o700, parents=True, exist_ok=True)
     migrate_path(store.path)
@@ -223,3 +226,8 @@ def create_staff_sessions(path, verifier, *, issuer, audiences, client_id, clock
     startup.initialize_staff_sessions(path)
     return StaffSessions(SQLiteStaffSessionStorage(path), verifier, issuer=issuer, audiences=audiences,
                          client_id=client_id, clock=clock, new_token=lambda: token_urlsafe(32))
+
+
+def provision_workspace(path, context, campaign_id, *, operator, access):
+    workspaces.provision_workspace(SQLiteWorkspaceStorage(path), context, campaign_id,
+                                   operator=operator, access=access)

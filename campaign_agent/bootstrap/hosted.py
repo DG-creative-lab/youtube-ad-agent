@@ -1,8 +1,10 @@
 """Assemble the native staff and public applications before serving either origin."""
+from functools import partial
 from secrets import token_urlsafe
 from time import time
 
 from campaign_agent.adapters.gateplane import GateplaneAccess
+from campaign_agent.adapters.sqlite_access import SQLiteCampaignAccessStorage
 from campaign_agent.adapters.sqlite_planner_startup import (
     bind_campaign, initialize_drafts, initialize_publications, initialize_runtime_schema,
 )
@@ -28,7 +30,9 @@ def create_hosted_runtime(path, operator, *, context, campaign_id, access, **opt
 
 
 def create_hosted_application(path, sessions, client, assets, *, provider_metadata=None, provider_profiles=(),
-                              authority_factory=GateplaneAccess, initialize=True, **options):
+                              authority_factory=None, initialize=True, **options):
+    if authority_factory is None:
+        authority_factory = partial(GateplaneAccess, campaign_access=SQLiteCampaignAccessStorage(path))
     # Validate transport configuration before starting the store.
     providers = create_provider_sessions(path, initialize=False, metadata=provider_metadata,
                                          profiles=provider_profiles)

@@ -13,7 +13,8 @@ from uuid import uuid4
 from starlette.testclient import TestClient
 
 from campaign_agent.adapters.fixture_access import AUDIENCES, CLIENT_ID, ISSUER, offline_fixture
-from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp
+from campaign_agent.adapters.gateplane import timestamp
+from campaign_agent.adapters.sqlite_access import SQLiteCampaignAccessStorage
 from campaign_agent.bootstrap.hosted import create_hosted_application as HostedApplication
 from campaign_agent.bootstrap.runtime import create_staff_sessions
 from campaign_agent.ports.access import AccessRequest, AccessUnavailable
@@ -211,8 +212,10 @@ class HostedAccessTests(unittest.TestCase):
         self.assertEqual(self.buyer.get('/api/campaign').status_code, 403)
         self.authority.result_filter = lambda r: r
         ticks = [0.0]
-        access = GateplaneAccess(self.path, self.app.sessions, self.buyer.cookies.get(self.app.cookie),
-            self.authority, application_id='youtube', command={'path': '/api/campaign'}, monotonic_clock=lambda: ticks[0])
+        records = SQLiteCampaignAccessStorage(self.path)
+        access = self.app.authority_factory(self.path, self.app.sessions, self.buyer.cookies.get(self.app.cookie),
+            self.authority, application_id='youtube', command={'path': '/api/campaign'},
+            monotonic_clock=lambda: ticks[0], campaign_access=records)
         decide = self.authority.decide
         def delayed(wire):
             response = decide(wire)
@@ -221,8 +224,7 @@ class HostedAccessTests(unittest.TestCase):
         with patch.object(self.authority, 'decide', side_effect=delayed), self.assertRaises(AccessUnavailable):
             access.decide(AccessRequest('gp-buyer-a','tenant-a','brand','workspace-a','install-a',
                                        'youtube:campaign.read','campaign-a'))
-        from campaign_agent.adapters import gateplane
-        native = gateplane.native_campaign
+        native = records.access_record
         decision_returned = [False]
         ticks[0] = 0.0
         def issued(wire):
@@ -235,7 +237,7 @@ class HostedAccessTests(unittest.TestCase):
                 ticks[0] += 5.001
             return result
         with patch.object(self.authority, 'decide', side_effect=issued), \
-                patch.object(gateplane, 'native_campaign', side_effect=slow_native_check), self.assertRaises(AccessUnavailable):
+                patch.object(records, 'access_record', side_effect=slow_native_check), self.assertRaises(AccessUnavailable):
             access.decide(AccessRequest('gp-buyer-a','tenant-a','brand','workspace-a','install-a',
                                        'youtube:campaign.read','campaign-a'))
 

@@ -79,6 +79,10 @@ class CampaignDrafts:
                                                      context.workspace_id, context.installation_id):
             raise PermissionError("The campaign is unavailable in this workspace.")
 
+    def verify_owner(self):
+        with self._storage.read() as repository:
+            self._require_owner(repository)
+
     def read_from(self, repository: DraftReader, revision=None):
         self.require("youtube:campaign.read")
         self._require_owner(repository)

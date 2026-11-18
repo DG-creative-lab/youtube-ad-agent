@@ -7,14 +7,13 @@ from time import time
 from uuid import uuid4
 
 from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
-from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp, validate_record
+from campaign_agent.adapters.gateplane import timestamp, validate_record
 from campaign_agent.bootstrap.hosted import create_hosted_application, create_hosted_runtime, initialize_hosted_storage
-from campaign_agent.bootstrap.runtime import create_asset_store, create_staff_sessions
+from campaign_agent.bootstrap.runtime import create_asset_store, create_staff_sessions, provision_workspace
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.staff import VerifiedIdentity, SignInRequired
-from campaign_agent.workspaces import provision_workspace
 from campaign_agent.ports.inference import ProviderError, ChargingProfile
 from campaign_agent.model_catalogue import endpoint_fingerprint
 
@@ -190,4 +189,4 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
     metadata=AuthoredProviderMetadata()
     return create_hosted_application(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
                              fixture_login=authority, provider_metadata=metadata, provider_profiles=metadata.profiles,
-                             authority_factory=GateplaneAccess, initialize=False)
+                             initialize=False)

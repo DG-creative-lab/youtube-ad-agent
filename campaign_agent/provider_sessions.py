@@ -81,9 +81,10 @@ def parse_command(raw):
 
 
 class ProviderSessions:
-    def __init__(self,path,*,metadata=None,profiles=(),clock=time, cache: CatalogueState):
+    def __init__(self,path,*,metadata=None,profiles=(),clock=time, cache: CatalogueState, access_reader):
         self.path=Path(path);self.metadata=metadata;self.profiles=tuple(profiles);self.clock=clock
         self.cache = cache
+        self.access_reader = access_reader
 
     def _requests(self, context):
         c=context.native
@@ -104,8 +105,9 @@ class ProviderSessions:
         context.local_validate()
         if context.expires_at<=self.clock():
             raise ProviderError('authority_unavailable')
+        records = self.access_reader(db)
         for request,permit in zip(self._requests(context),permits,strict=True):
-            access.validate_permit(db,permit,request,context.command,context.session_digest)
+            access.validate_permit(records,permit,request,context.command,context.session_digest)
         if any(access.monotonic()>=p.valid_until or access.clock()>=p.wall_expires_at for p in permits):
             raise ProviderError('authority_unavailable')
 

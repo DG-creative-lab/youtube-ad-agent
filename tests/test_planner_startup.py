@@ -14,7 +14,7 @@ from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.application.campaigns import BRIEF, POLICY
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.migrations import migrate
-from campaign_agent.workspaces import _bind
+from campaign_agent.adapters.sqlite_workspace_admission import _bind
 
 
 class PlannerStartupTests(unittest.TestCase):
