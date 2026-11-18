@@ -1,0 +1,77 @@
+"""Shared storage for performance reviews and instruction experiments."""
+from dataclasses import dataclass
+from typing import ContextManager, Protocol
+
+from campaign_agent.domain.scope import BrandScope
+from .drafts import ApprovalKey, CampaignDraftRepository, CampaignScope
+from .viewer_storage import ViewerReader, ViewerWriter
+
+
+@dataclass(frozen=True)
+class BuyerCorrection:
+    id: str
+    scope: CampaignScope
+    creative: str
+    fingerprint: str
+    review_id: str
+    actor: str
+    kind: str
+    note: str
+    created_at: str
+    comparison_identity: str
+    takes_identity: str
+    comparison_version: str
+
+
+@dataclass(frozen=True)
+class ExperimentArm:
+    scope: BrandScope
+    campaign: str
+    test_id: str
+    arm: str
+    creative: str
+    comparison: str
+    fingerprint: str
+
+
+class CorrectionReader(Protocol):
+    def correction_row(self, client_id: str, brand_id: str, campaign_id: str, creative_version: str,
+                       comparison_version: str, takes_identity: str,
+                       comparison_identity: str) -> tuple[str, str, str, str, str, str] | None: ...
+
+
+class EvidenceReader(ViewerReader, CorrectionReader, Protocol):
+    def performance_review_row(self, key: ApprovalKey, attribution: str,
+                               review_id: str | None = None) -> tuple[str, str, str] | None: ...
+    def correction_operation(self, correction_id: str) -> tuple[str, str, str] | None: ...
+    def test_exists(self, test_id: str) -> bool: ...
+    def test_row(self, test_id: str, scope: CampaignScope) -> tuple[str] | None: ...
+    def assignment(self, test_id: str, participant_id: str) -> tuple[str, str, str | None] | None: ...
+    def evidence_snapshot_row(self, test_id: str, operation_id: str | None = None) -> tuple[str] | None: ...
+    def initial_checkpoint_row(self, test_id: str, initial: int) -> tuple[str] | None: ...
+    def cohort_outcomes(self, arm: ExperimentArm, window_ms: int,
+                        cutoff: int) -> list[tuple[str | None, int, int, int]]: ...
+    def assignment_counts(self, arm: ExperimentArm, source: str | None) -> tuple[int, int]: ...
+    def participant_watermark(self, test_id: str) -> int: ...
+    def latest_assessment(self, test_id: str) -> tuple[str, str, str] | None: ...
+
+
+class EvidenceWriter(EvidenceReader, ViewerWriter, Protocol):
+    @property
+    def drafts(self) -> CampaignDraftRepository: ...
+
+    def save_performance_review(self, key: ApprovalKey, review_id: str, now: str, snapshot: str) -> str: ...
+    def add_correction(self, correction: BuyerCorrection) -> None: ...
+    def add_test(self, key: ApprovalKey, test_id: str, started_at: str, snapshot: str) -> None: ...
+    def add_assignment(self, test_id: str, participant_id: str, arm: str, visit_id: str, source: str) -> None: ...
+    def add_evidence_snapshot(self, snapshot_id: str, test_id: str, operation_id: str, snapshot: str) -> None: ...
+    def add_assessment(self, review_id: str, test_id: str, actor: str, now: str, snapshot: str) -> None: ...
+
+
+class EvidenceWriteUnit(EvidenceWriter, Protocol):
+    def commit(self) -> None: ...
+
+
+class EvidenceStorage(Protocol):
+    def read(self) -> ContextManager[EvidenceReader]: ...
+    def write(self) -> ContextManager[EvidenceWriteUnit]: ...
