@@ -1,6 +1,7 @@
 """HTTP -> native state -> current authority -> effect checks, all synthetic."""
 from contextlib import closing
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -11,9 +12,10 @@ from uuid import uuid4
 
 from starlette.testclient import TestClient
 
-from campaign_agent.adapters.fixture_access import offline_fixture
+from campaign_agent.adapters.fixture_access import AUDIENCES, CLIENT_ID, ISSUER, offline_fixture
 from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp
 from campaign_agent.bootstrap.hosted import create_hosted_application as HostedApplication
+from campaign_agent.bootstrap.runtime import create_staff_sessions
 from campaign_agent.ports.access import AccessRequest, AccessUnavailable
 
 
@@ -138,6 +140,50 @@ class HostedAccessTests(unittest.TestCase):
         self.post(self.buyer, '/api/session/end', {})
         self.authority.unavailable = False
         self.assertEqual(self.buyer.get('/api/campaign').status_code, 401)
+
+    def test_staff_selection_rolls_back_on_storage_failure_and_survives_reopen(self):
+        token = self.buyer.cookies.get(self.app.cookie)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            original = db.execute('SELECT * FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone()
+            db.execute("""CREATE TRIGGER fail_staff_selection AFTER UPDATE OF campaign_id ON staff_sessions
+                          BEGIN SELECT RAISE(FAIL, 'private database detail'); END""")
+        args = {'campaign_id': 'campaign-a-brand2'}
+        self.assertEqual(self.post(self.buyer, '/api/session/context', args, 503),
+                         {'error': 'Could not complete this action.'})
+        with closing(sqlite3.connect(self.path)) as db, db:
+            self.assertEqual(db.execute('SELECT * FROM staff_sessions WHERE token_hash=?',
+                                        (token_hash,)).fetchone(), original)
+            db.execute('DROP TRIGGER fail_staff_selection')
+
+        self.post(self.buyer, '/api/session/context', args)
+        reopened_sessions = create_staff_sessions(self.path, self.authority, issuer=ISSUER,
+                                                   audiences=AUDIENCES, client_id=CLIENT_ID)
+        reopened = HostedApplication(self.path, reopened_sessions, self.authority, self.app.assets,
+                                     staff_origin=self.app.staff_origin, viewer_origin=self.app.viewer_origin,
+                                     fixture_login=self.authority, initialize=False)
+        client = self.enterContext(TestClient(reopened.staff, base_url=reopened.staff_origin))
+        client.cookies.set(reopened.cookie, token)
+        response = client.get('/api/session')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['campaign_id'], args['campaign_id'])
+        self.assertEqual(response.headers['x-csrf-token'], self.buyer.headers['x-csrf-token'])
+        self.assertEqual(self.other.get('/api/session').json()['campaign_id'], 'campaign-b')
+        with closing(sqlite3.connect(self.path)) as db:
+            stored = db.execute('SELECT * FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone()
+        self.assertEqual(stored, (*original[:5], args['campaign_id'], *original[6:]))
+
+    def test_expired_staff_session_only_allows_local_logout(self):
+        token = self.buyer.cookies.get(self.app.cookie)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE staff_sessions SET expires_at=0 WHERE token_hash=?', (token_hash,))
+        self.assertEqual(self.buyer.get('/api/session').status_code, 401)
+        self.post(self.buyer, '/api/session/context', {'campaign_id': 'campaign-a-brand2'}, 401)
+        self.authority.unavailable = True
+        self.post(self.buyer, '/api/session/end', {})
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertIsNone(db.execute('SELECT 1 FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone())
 
     def test_permission_and_draft_mandate_are_independent_and_denied_setup_does_not_dispatch(self):
         config = self.buyer.get('/api/mode').json()

@@ -180,31 +180,31 @@ class HostedApplication:
                 raise ProviderError('invalid_request')
             action=path.removeprefix('/api/openrouter/')
             validate_fields(action,data)
-            row=self.sessions.local(token)
-            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),row[5]):
+            session = self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),session.csrf):
                 raise ProviderError('access_denied')
             session_digest=hashlib.sha256(token.encode()).hexdigest()
             if action=='disconnect':
                 # Original local session is sufficient only for revocation, not metadata or inference.
-                context=ProviderContext('',None,'',session_digest,row[6],{},lambda:self.sessions.local(token))
-                return JSONResponse(self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,None)),row[5]
+                context=ProviderContext('',None,'',session_digest,session.expires_at,{},lambda:self.sessions.local(token))
+                return JSONResponse(self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,None)),session.csrf
             identity,campaign,csrf=self.sessions.current(token)
             command={'method':method,'path':path,'query':{},'body':data}
             runtime,_=self.runtime(token,campaign,command)
-            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,session_digest,row[6],command,
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,session_digest,session.expires_at,command,
                                     lambda:self.sessions.local(token))
             result=self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,runtime.drafts.access)
             return JSONResponse(result),csrf
         agent_paths={'/api/agent/placements','/api/agent/next-test','/api/agent/instruction-review','/api/agent/experiment-next-test','/api/agent/run'}
         if method=='POST' and path in agent_paths:
             from .foreground_inference import ForegroundInference,dispatch_agent
-            row=self.sessions.local(token)
-            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),row[5]): raise ProviderError('access_denied')
+            session = self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),session.csrf): raise ProviderError('access_denied')
             _,campaign,csrf=self.sessions.current(token)
             command={'method':method,'path':path,'query':dict(request.query_params),'body':data}
             if request.query_params: raise ProviderError('invalid_request')
             runtime,_=self.runtime(token,campaign,command)
-            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,hashlib.sha256(token.encode()).hexdigest(),row[6],command,lambda:self.sessions.local(token))
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,hashlib.sha256(token.encode()).hexdigest(),session.expires_at,command,lambda:self.sessions.local(token))
             foreground=ForegroundInference(self.provider_sessions,context,runtime.drafts.access,request.headers.getlist('x-openrouter-key'),completion_transport=self.provider_completion_transport)
             foreground.attach(runtime)
             try: result=dispatch_agent(runtime,path,data)
@@ -213,8 +213,8 @@ class HostedApplication:
         if request.headers.getlist('x-openrouter-key'):
             raise ProviderError('invalid_request')
         if path == '/api/session/end' and method == 'POST':
-            row = self.sessions.local(token, allow_expired=True)
-            if not secrets.compare_digest(request.headers.get('x-csrf-token', ''), row[5]):
+            session = self.sessions.local(token, allow_expired=True)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token', ''), session.csrf):
                 raise PermissionError('Refresh the session before submitting changes.')
             fields(data, set())
             self.sessions.end(token)

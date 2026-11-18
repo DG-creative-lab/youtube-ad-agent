@@ -81,6 +81,15 @@ unit. The unit checks the source experiment, current correction and eligible
 brief before writing. Applying a finding commits its tested wording and lineage
 in one draft revision.
 
+## Staff session storage · #37
+
+Staff sign-in, local session lookup, campaign selection and sign-out use
+[typed session records](../campaign_agent/ports/staff_sessions.py). The
+[SQLite adapter](../campaign_agent/adapters/sqlite_staff_sessions.py) owns each
+session change. Application policy still checks expiry and the current upstream
+identity. The hosted entrypoint authorizes campaign selection before saving it.
+Startup and recovery still use the existing staff session table.
+
 ## Residual native graph
 
 Every row below stays on the original store until its own adoption. #37 owns the
@@ -92,7 +101,7 @@ entrypoints. These owners do not authorize provider activation or a backend swit
 | --- | --- | --- |
 | `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: nonpilot recorded preparation, review/structured/experiment/delivery command reads and writes. Remaining callers still own the native transactions that combine draft writes with their records. Pilot draft/provenance and run lifecycle are not deferred here. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
 | `agent/conversations.py` and borrowed native store APIs in `adapters/sqlite_{drafts,planner,runs,conversations}.py` | #37: remaining nonpilot consumers of caller-owned native connections. #88: converge composition without deleting the supported compatibility path prematurely. Pilot follow-up selection, supersession, messages and transcript adoption already belong to the selected unit. | Session/operator/campaign/settings scope, stale message checks, exact ordering and malformed-history behavior. |
-| `access.py`, `workspaces.py`, `staff.py`, `agent/capabilities.py`, `adapters/local_access.py` | #37: remaining provisioning, staff session records, advisory catalogue and nonpilot permit/native readers. #87: external authority/client adoption. #88: entrypoint resolution/wiring. Selected placement access uses the original permit and same-unit preimage; legacy `CommandAccess` is not asserted migrated. | Current grants, full owner/workspace/installation, expiry/revocation, original command identity, fail-closed disclosure and permit fences. |
+| `access.py`, `workspaces.py`, `staff.py`, `agent/capabilities.py`, `adapters/local_access.py` | #37: remaining provisioning, advisory catalogue and nonpilot permit/native readers. Staff session commands use the typed store. #87: external authority/client adoption. #88: entrypoint resolution/wiring. Selected placement access uses the original permit and same-unit preimage; legacy `CommandAccess` is not asserted migrated. | Current grants, full owner/workspace/installation, expiry/revocation, original command identity, fail-closed disclosure and permit fences. |
 | `measurement.py`, `performance.py`, `instruction_tests.py`, `learning.py` | Viewer, review, experiment and finding commands use scoped units. Retained agent workflows borrow evidence records on their native transaction. Their named pilot context reads and required startup/adoption are in #86, not postponed. | Attribution and denominators, exact comparison/takes identities, current corrections, source versions, scoped evidence and reviewed reuse. |
 | `campaign_setup.py`, `delivery.py`, `adapters/simulated_setup.py` | #37: setup, delivery and recommendation units are adopted. The simulated provider's resource store is a separate provider effect boundary. | Exact approved package/account/action, zero dispatch on denial, received versus unknown outcomes, no repeated uncertain effects, report grain/tagged attribution. |
 | `assets.py`, `publications.py`, `recovery.py`, legacy media helpers in `handoff.py` | #37: native private catalog/blob records, asset integrity and whole-store recovery. Publication grant and viewer writes use scoped units. #87/#88: external asset boundary and remaining media wiring. Selected logical media facts do not establish object-storage readiness. | Immutable scope/digest/filename, current publication access, historical approval evidence and restore invalidation. |
