@@ -1,16 +1,14 @@
 """Native planner context reads on the caller's exact transaction connection."""
 
+from .sqlite_drafts import SQLiteDraftRepository
+
 
 class SQLitePlannerContext:
     def __init__(self, db):
         self._db = db
 
     def approval_row(self, client_id, brand_id, campaign_id, revision, fingerprint):
-        return self._db.execute(
-            "SELECT actor_id, approved_at FROM campaign_package_approvals WHERE "
-            "client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ? "
-            "AND snapshot IS NOT NULL",
-            (client_id, brand_id, campaign_id, revision, fingerprint)).fetchone()
+        return SQLiteDraftRepository(self._db).approval_row((client_id, brand_id, campaign_id, revision, fingerprint))
 
     def saved_review_row(self, client_id, brand_id, campaign_id, revision, fingerprint,
                          attribution, review_id=None):

@@ -167,7 +167,7 @@ class LocalHttpJourneyTests(unittest.TestCase):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
         from campaign_agent.application.planner_runtime import PlacementRuntime
-        import campaign_agent.application.campaigns as campaigns
+        from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStorage
         import campaign_agent.agent.planner as legacy_planner
         from scripts import placement_review
 
@@ -191,7 +191,9 @@ class LocalHttpJourneyTests(unittest.TestCase):
                   patch.object(PlacementRuntime, 'start', record_start),
                   patch.object(placement_review, 'create_drafts', side_effect=AssertionError('Duplicate draft startup')),
                   patch.object(placement_review, 'create_viewer', side_effect=AssertionError('Duplicate viewer startup')),
-                  patch.object(campaigns, 'sqlite3', blocked), patch.object(legacy_planner, 'sqlite3', blocked)):
+                  patch.object(SQLiteDraftStorage, 'read', side_effect=AssertionError('Legacy draft read')),
+                  patch.object(SQLiteDraftStorage, 'write', side_effect=AssertionError('Legacy draft write')),
+                  patch.object(legacy_planner, 'sqlite3', blocked)):
                 self.serve_journey(Path(directory) / 'demo.sqlite3', journey)
             self.assertEqual(len(starts), 1)
 

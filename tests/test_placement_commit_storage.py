@@ -21,9 +21,16 @@ class PlacementCommitTests(unittest.TestCase):
         runtime = self.case.runtime
         run = self.case.start()
         runtime.resume(run, max_steps=2)
+        save = runtime.drafts.save
+
+        def save_from_unit(payload, *, connection=None, repository=None):
+            self.assertIsNone(connection, 'Borrowed native draft writer')
+            self.assertIsNotNone(repository, 'Standalone draft writer')
+            return save(payload, repository=repository)
+
         with patch.object(runtime.planner, '_commit_legacy_turn', side_effect=AssertionError('Legacy commit')), \
              patch.object(runtime.drafts, 'write_unit', side_effect=AssertionError('Native writer')), \
-             patch.object(runtime.drafts, '_save', side_effect=AssertionError('Native draft writer')), \
+             patch.object(runtime.drafts, 'save', side_effect=save_from_unit), \
              patch('campaign_agent.adapters.sqlite_planner.SQLitePlannerStore.catalogs',
                    new_callable=PropertyMock, side_effect=AssertionError('Legacy catalogue factory')):
             result = runtime.resume(run, max_steps=1)
