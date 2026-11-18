@@ -272,8 +272,8 @@ class TenantWorkspaceTests(unittest.TestCase):
             with self.assertRaises(PackageConflict):
                 other.instruction_findings.apply(*foreign_target, finding_id=finding["id"],
                                                 correction_id=eligible["correction"]["id"], draft_permission="instruction_test")
-            with closing(sqlite3.connect(self.path)) as db, self.assertRaises(ViewerNotFound):
-                other.instruction_tests._test(db, finding["test_id"])
+            with other.instruction_tests.storage.read() as records, self.assertRaises(ViewerNotFound):
+                other.instruction_tests.test_from(records, finding["test_id"])
             self.assertEqual(other.drafts.read()["revision"], 3)
         with self.assertRaises(PermissionError):
             reopened.instruction_findings.apply(*target, finding_id=finding["id"], correction_id=eligible["correction"]["id"])
