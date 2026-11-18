@@ -34,7 +34,7 @@ from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, 
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from campaign_agent.bootstrap.runtime import create_performance, create_provider_sessions as ProviderSessions
+from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.provider_sessions import ProviderContext, parse_command
 from campaign_agent.ports.inference import ProviderError
@@ -99,24 +99,32 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 raise ValueError("Missing key")
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
-    supplied_factory = runtime_factory is not None
-    runtime_factory = runtime_factory or AgentRuntime
-    drafts = CampaignDrafts(draft_path, live, media_dir=media_dir if media_dir is not None else (DEMO_MEDIA_DIR if demo_scenario else None),
-                            initialize=initialize)
-    agent = None if live else runtime_factory(draft_path, media_dir=drafts.media_dir,
-                                          openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
-                                          openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
-                                          main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,web=True, initialize=initialize)
-    if agent and supplied_factory:
+    if runtime_factory is None:
+        runtime_factory = AgentRuntime
+    if media_dir is None and demo_scenario:
+        media_dir = DEMO_MEDIA_DIR
+
+    if live:
+        drafts = CampaignDrafts(draft_path, True, media_dir=media_dir, initialize=initialize)
+        viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id,
+                                   initialize=initialize)
+        agent = providers = performance = instruction_tests = None
+    else:
+        agent = runtime_factory(
+            draft_path, media_dir=media_dir,
+            openrouter_models=tuple(dict.fromkeys((*openrouter_review_models, *main_models))),
+            openrouter_draft_models=tuple(dict.fromkeys((*openrouter_draft_models, *main_models))),
+            main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,
+            web=True, initialize=initialize,
+        )
         drafts = agent.drafts
-    providers = (provider_sessions_factory(draft_path, metadata=provider_metadata, profiles=provider_profiles,
-                                          initialize=initialize) if agent else None)
-    if agent:
+        performance = agent.performance
+        viewer = performance.viewer
+        instruction_tests = agent.instruction_tests
+        providers = provider_sessions_factory(draft_path, metadata=provider_metadata, profiles=provider_profiles,
+                                             initialize=initialize)
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
-    viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id, initialize=initialize)
-    performance = None if live else create_performance(drafts, viewer, initialize=initialize)
-    instruction_tests = agent.instruction_tests if agent else None
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
                        '/api/campaign/setup/create': agent.setup.create,
                        '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})

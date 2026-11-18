@@ -161,6 +161,7 @@ class LocalHttpJourneyTests(unittest.TestCase):
         from campaign_agent.application.planner_runtime import PlacementRuntime
         import campaign_agent.application.campaigns as campaigns
         import campaign_agent.agent.planner as legacy_planner
+        from scripts import placement_review
 
         with TemporaryDirectory() as directory:
             original_start = PlacementRuntime.start
@@ -180,6 +181,8 @@ class LocalHttpJourneyTests(unittest.TestCase):
             blocked = SimpleNamespace(connect=Mock(side_effect=AssertionError('application SQLite connection')), Error=sqlite3.Error)
             with (patch('campaign_agent.foreground_inference.ForegroundInference.attach', side_effect=AssertionError('foreground attached')),
                   patch.object(PlacementRuntime, 'start', record_start),
+                  patch.object(placement_review, 'CampaignDrafts', side_effect=AssertionError('Duplicate draft startup')),
+                  patch.object(placement_review, 'ViewerMeasurement', side_effect=AssertionError('Duplicate viewer startup')),
                   patch.object(campaigns, 'sqlite3', blocked), patch.object(legacy_planner, 'sqlite3', blocked)):
                 self.serve_journey(Path(directory) / 'demo.sqlite3', journey)
             self.assertEqual(len(starts), 1)
