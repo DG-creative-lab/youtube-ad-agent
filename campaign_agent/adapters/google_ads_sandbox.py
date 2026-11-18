@@ -2,6 +2,7 @@
 import base64
 import binascii
 from hashlib import sha256
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -334,3 +335,54 @@ class GoogleAdsSandbox:
         configuration['logo_name'] = ', '.join(sorted(logo_names))
         return {'operation_id': operation_id, 'campaign_id': campaign_id, 'configuration': configuration,
                 'groups': sorted(references.values(), key=context_order)}
+
+
+ADS_SCOPE = 'https://www.googleapis.com/auth/adwords'
+
+
+def google_transport(config, session, credentials_dir, *, read_only=False):
+    # The optional Google libraries are loaded only for this CLI.
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    import requests
+
+    token = json.loads((credentials_dir / 'google-ads-token.json').read_text())
+    client = json.loads((credentials_dir / 'oauth-client.json').read_text())['installed']
+    if (set(token.get('scopes', [])) != {ADS_SCOPE} or token.get('client_id') != client['client_id']
+            or token.get('token_uri') != 'https://oauth2.googleapis.com/token'):
+        raise ValueError('Use the configured Google Ads OAuth client and Ads-only grant.')
+    credentials = Credentials.from_authorized_user_info(token)
+    if not credentials.valid:
+        try:
+            credentials.refresh(Request())
+        except Exception:
+            raise SetupProviderError('The Google Ads grant could not be refreshed.') from None
+        if credentials.granted_scopes and set(credentials.granted_scopes) != {ADS_SCOPE}:
+            raise SetupProviderError('The refreshed OAuth grant has unexpected scopes.')
+
+    def post(account, endpoint, body):
+        if ((endpoint == 'googleAds:mutate' and (read_only or account != config['account_id']))
+                or (endpoint == 'googleAds:searchStream' and account not in {config['manager_id'], config['account_id']})
+                or endpoint not in {'googleAds:mutate', 'googleAds:searchStream'}):
+            raise SetupProviderError('The request is outside the configured Google Ads sandbox.')
+        try:
+            response = session.post(
+                f'https://googleads.googleapis.com/{API_VERSION}/customers/{account}/{endpoint}',
+                headers={'Authorization': 'Bearer ' + credentials.token, 'login-customer-id': config['manager_id']},
+                json=body, timeout=20, allow_redirects=False,
+            )
+            payload = response.json()
+        except (requests.RequestException, ValueError):
+            raise SetupProviderError('The Google Ads request outcome could not be established.') from None
+        if response.status_code != 200:
+            # Return only bounded error codes and field names. Never print credentials or raw responses.
+            errors = payload.get('error', {}).get('details', []) if isinstance(payload, dict) else []
+            summary = [
+                {'code': item.get('errorCode'), 'location': item.get('location')}
+                for detail in errors for item in detail.get('errors', [])
+            ]
+            request_id = response.headers.get('request-id', 'unavailable')
+            raise SetupProviderError(f'Google Ads rejected the request ({response.status_code}, {request_id}): {json.dumps(summary)}')
+        return payload, response.headers.get('request-id')
+
+    return post

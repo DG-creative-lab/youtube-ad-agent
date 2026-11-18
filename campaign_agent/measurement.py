@@ -6,8 +6,10 @@ import sqlite3
 from time import time_ns
 from uuid import uuid4
 
-from .access import LOCAL_BRAND
+from .campaign_setup import CampaignSetup
 from .creatives import EXAMPLES
+from .domain.errors import PackageConflict
+from .handoff import package_fingerprint
 
 
 class ViewerNotFound(LookupError):
@@ -15,55 +17,12 @@ class ViewerNotFound(LookupError):
 
 
 class ViewerMeasurement:
-    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample", initialize=True):
+    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample"):
         self.path = path
         # Server composition selects the campaign. Public payloads cannot override it.
         self.campaign_id = campaign_id
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
-        if not initialize:
-            return
-        with closing(self.connect()) as db, db:
-            db.executescript("""
-                BEGIN IMMEDIATE;
-                CREATE TABLE IF NOT EXISTS viewer_visits (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    creative_ref TEXT NOT NULL, content_fingerprint TEXT, ad_link_id TEXT,
-                    arrived_ms INTEGER, rehearsal INTEGER
-                );
-                CREATE TABLE IF NOT EXISTS viewer_events (
-                    seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
-                    event_id TEXT NOT NULL, example_ref TEXT NOT NULL, kind TEXT NOT NULL,
-                    take TEXT NOT NULL, UNIQUE (visit_id, event_id)
-                );
-                CREATE TABLE IF NOT EXISTS viewer_completions (
-                    visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
-                    example_ref TEXT NOT NULL, first_choice TEXT NOT NULL, completed_ms INTEGER,
-                    PRIMARY KEY (visit_id, example_ref)
-                );
-            """)
-            columns = {column[1] for column in db.execute("PRAGMA table_info(viewer_visits)")}
-            if "content_fingerprint" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
-            if "ad_link_id" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN ad_link_id TEXT")
-            if "campaign_id" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN campaign_id TEXT")
-                # Admit the original demo only if no sibling campaign makes that legacy
-                # attribution ambiguous. Other unbound history stays quarantined.
-                has_owners = db.execute("SELECT 1 FROM sqlite_master WHERE name='campaign_owners' AND type='table'").fetchone()
-                ambiguous_demo = has_owners and db.execute(
-                    "SELECT 1 FROM campaign_owners WHERE client_id=? AND brand_id=? "
-                    "AND campaign_id NOT IN ('tts-sample','tts-catalog')",
-                    (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone()
-                if not ambiguous_demo:
-                    db.execute("UPDATE viewer_visits SET campaign_id='tts-sample' WHERE client_id=? AND brand_id=?",
-                               (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id))
-            for column in ("arrived_ms", "rehearsal"):
-                if column not in columns:
-                    db.execute(f"ALTER TABLE viewer_visits ADD COLUMN {column} INTEGER")
-            if "completed_ms" not in {column[1] for column in db.execute("PRAGMA table_info(viewer_completions)")}:
-                db.execute("ALTER TABLE viewer_completions ADD COLUMN completed_ms INTEGER")
 
     def connect(self):
         db = sqlite3.connect(self.path)
@@ -76,6 +35,57 @@ class ViewerMeasurement:
         if origin is None or target is None or origin.scope != target.scope:
             raise ViewerNotFound("This comparison is unavailable.")
         return origin, target
+
+    def open_verified_ad(self, drafts, attribution, visit_id, *, rehearsal):
+        with closing(self.connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            link = CampaignSetup.verified_viewer_link(db, drafts.scope, attribution,
+                                                     campaign_id=drafts.campaign_id)
+            if link is None:
+                raise ViewerNotFound("This ad comparison is unavailable.")
+            result = self.open_reviewed(
+                drafts,
+                {"creative_ref": link["creative_ref"], "example_ref": link["comparison_ref"],
+                 "visit_id": visit_id}, link["content_fingerprint"], None,
+                ad_link_id=link["id"], rehearsal=rehearsal, connection=db,
+            )
+            return {**result, "creative_ref": link["creative_ref"]}
+
+    def open_reviewed(self, drafts, data, fingerprint, references, *, ad_link_id=None, rehearsal=False, connection=None):
+        if fingerprint is None:
+            return self.open_example(**data)
+        origin, example = self.resolve(data["creative_ref"], data["example_ref"])
+        if references is None:
+            references = {origin.ref: fingerprint}
+        if references.get(origin.ref) != fingerprint or example.ref not in references:
+            raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+        verified = {}
+        for item in self.examples.values():
+            if item.scope != origin.scope or item.ref not in references:
+                continue
+            content = drafts.comparison_content(item, references[item.ref])
+            if (package_fingerprint(content) == references[item.ref]
+                    and all(take["sha256"] for take in content["takes"])):
+                verified[item.ref] = content
+        if not verified:
+            raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+        selected_ref = example.ref if example.ref in verified else next(iter(verified))
+        result = self.open_example(
+            **{**data, "example_ref": selected_ref},
+            content_fingerprint=fingerprint,
+            origin_unavailable=origin.ref not in verified,
+            ad_link_id=ad_link_id, rehearsal=rehearsal, connection=connection,
+        )
+        content = verified[selected_ref]
+        comparison = result["example"]
+        comparison["instruction"] = content["instruction"]
+        for take, reviewed in zip(comparison["takes"], content["takes"]):
+            take["url"] += "?sha256=" + reviewed["sha256"]
+        comparison["captions"] += "?sha256=" + content["captions_sha256"]
+        result["examples"] = [item for item in result["examples"] if item["ref"] in verified]
+        if selected_ref != example.ref:
+            result["notice"] = "That reviewed example is unavailable. Another verified example is open."
+        return result
 
     @staticmethod
     def visit_key(origin, visit_id):

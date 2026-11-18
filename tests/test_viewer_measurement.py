@@ -7,8 +7,9 @@ from uuid import uuid4
 
 from campaign_agent.access import BrandScope, LOCAL_BRAND, Operator
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from scripts.campaign_drafts import CampaignDrafts
+from campaign_agent.bootstrap.runtime import create_viewer as ViewerMeasurement
+from campaign_agent.measurement import ViewerNotFound
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
 
 
 EDIT, BOOK = EXAMPLES

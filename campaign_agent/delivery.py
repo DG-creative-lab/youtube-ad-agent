@@ -32,19 +32,12 @@ def viewer_window(report):
 
 class CampaignDelivery:
     def __init__(self, drafts, simulated_setup, performance, reporting: CampaignReporting | None = None, *,
-                 demo_scenario=None, demo_report: Callable[[DeliveryBinding], dict] | None = None, initialize=True):
+                 demo_scenario=None, demo_report: Callable[[DeliveryBinding], dict] | None = None):
         if (demo_scenario is None) != (demo_report is None) or (demo_report is not None and reporting is not None):
             raise ValueError('Choose a portable demo scenario without live reporting.')
         self.drafts, self.simulated_setup = drafts, simulated_setup
         self.performance, self.reporting, self.demo_scenario = performance, reporting, demo_scenario
         self.demo_report = demo_report
-        if not initialize:
-            return
-        with closing(sqlite3.connect(drafts.path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_reports (
-                id TEXT PRIMARY KEY, setup_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')
-            db.execute('''CREATE TABLE IF NOT EXISTS campaign_delivery_recommendations (
-                id TEXT PRIMARY KEY, report_id TEXT NOT NULL, snapshot TEXT NOT NULL)''')
 
     def binding(self, db, campaign_id, revision, fingerprint) -> DeliveryBinding | None:
         scope = self.drafts._package_scope(campaign_id, revision)

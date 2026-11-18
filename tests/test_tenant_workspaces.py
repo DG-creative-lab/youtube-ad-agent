@@ -15,11 +15,14 @@ from campaign_agent.access import BrandScope, LOCAL_BRAND, LOCAL_CONTEXT, LOCAL_
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
-from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.handoff import package_fingerprint
+from campaign_agent.bootstrap.runtime import create_viewer as ViewerMeasurement
+from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.workspaces import provision_workspace
-from scripts.campaign_drafts import BRIEF, POLICY, CampaignDrafts, PackageConflict
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import BRIEF, POLICY, PackageConflict
 
 
 class Decisions:

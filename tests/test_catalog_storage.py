@@ -142,10 +142,10 @@ class CatalogStorageTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(patch.object(placement_review, 'ThreadingHTTPServer', side_effect=server))
             stack.enter_context(patch.object(placement_review, 'Thread'))
-            stack.enter_context(patch.object(placement_review, 'AgentRuntime', return_value=self.case.runtime))
             stack.enter_context(patch.object(placement_review.secrets, 'token_urlsafe', return_value='authored-operator'))
             stack.enter_context(redirect_stdout(io.StringIO()))
-            placement_review.serve(18981, False, draft_path=self.case.path, viewer_port=18982)
+            placement_review.serve(18981, False, draft_path=self.case.path, viewer_port=18982,
+                                   runtime_factory=lambda *args, **kwargs: self.case.runtime)
         handler = servers[0].handler.__new__(servers[0].handler)
         handler.server = servers[0]
         handler.path = '/api/agent/catalog'

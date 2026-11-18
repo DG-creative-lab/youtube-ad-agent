@@ -40,41 +40,10 @@ def recorded_assessment(context):
 
 
 class InstructionTests:
-    def __init__(self, drafts, viewer, performance, *, initialize=True):
+    def __init__(self, drafts, viewer, performance):
         self.drafts = drafts
         self.viewer = viewer
         self.performance = performance
-        if not initialize:
-            return
-        with closing(viewer.connect()) as db, db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS instruction_tests (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    campaign_id TEXT NOT NULL, revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
-                    started_at TEXT NOT NULL, snapshot TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS instruction_test_assignments (
-                    test_id TEXT NOT NULL REFERENCES instruction_tests(id),
-                    participant_id TEXT NOT NULL, arm TEXT NOT NULL CHECK (arm IN ('original', 'revised')),
-                    visit_id TEXT NOT NULL UNIQUE REFERENCES viewer_visits(id),
-                    source TEXT CHECK (source IN ('participant', 'rehearsal', 'fixture')),
-                    PRIMARY KEY (test_id, participant_id)
-                );
-                CREATE TABLE IF NOT EXISTS instruction_test_reviews (
-                    id TEXT PRIMARY KEY, test_id TEXT NOT NULL REFERENCES instruction_tests(id),
-                    actor_id TEXT NOT NULL, created_at TEXT NOT NULL, snapshot TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS instruction_test_evidence_snapshots (
-                    id TEXT PRIMARY KEY, test_id TEXT NOT NULL REFERENCES instruction_tests(id),
-                    operation_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                    UNIQUE (test_id, operation_id)
-                );
-            """)
-            db.execute("BEGIN IMMEDIATE")
-            columns = {row[1] for row in db.execute("PRAGMA table_info(instruction_test_assignments)")}
-            if "source" not in columns:
-                db.execute("ALTER TABLE instruction_test_assignments ADD COLUMN source TEXT "
-                           "CHECK (source IN ('participant', 'rehearsal', 'fixture'))")
 
     @staticmethod
     def test_id(campaign_id, revision, fingerprint, scope=LOCAL_BRAND):

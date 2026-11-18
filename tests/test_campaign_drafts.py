@@ -5,7 +5,8 @@ import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.campaign_drafts import CampaignDrafts, StaleDraft
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import StaleDraft
 
 
 EDITING = {"id": "SAMPLE00001", "title": "Editing tutorial", "creative": "video-editing", "source": "synthetic"}

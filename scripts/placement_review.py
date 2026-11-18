@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find candidate placements and route a creator-supplied video catalog."""
 import argparse
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -21,26 +21,26 @@ ROOT = Path(__file__).resolve().parents[1]
 if not __package__:
     sys.path.insert(0, str(ROOT))
 
-from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.bootstrap.local import create_local_planner
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR, create_drafts, create_viewer
 from campaign_agent.agent.run import DEMO_REQUEST, RUN_ID
 from campaign_agent.ports.catalogs import CatalogStorageError
 from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.campaign_setup import CampaignSetup
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, caption_bytes, media_sha256, package_fingerprint
+from campaign_agent.handoff import caption_bytes, media_sha256
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.placements import read_catalog, rule_assignment
-from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
+from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.bootstrap.runtime import create_provider_sessions as ProviderSessions
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.provider_sessions import ProviderContext, parse_command
 from campaign_agent.ports.inference import ProviderError
-from campaign_agent.application.campaigns import CampaignDrafts, DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
+from campaign_agent.application.campaigns import DEFAULT_DRAFT_PATH, MAX_DRAFT_BYTES, MAX_PLACEMENTS
 from campaign_agent.domain.errors import PackageConflict, StaleDraft
-from scripts.google_ads_sandbox import google_transport
+from campaign_agent.adapters.google_ads_sandbox import google_transport
 
 YOUTUBE_SEARCH = "https://www.googleapis.com/youtube/v3/search"
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
@@ -100,13 +100,13 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         except (OSError, KeyError, TypeError, ValueError):
             raise ValueError("The approved local YouTube Data API key is unavailable.") from None
     if runtime_factory is None:
-        runtime_factory = AgentRuntime
+        runtime_factory = create_local_planner
     if media_dir is None and demo_scenario:
         media_dir = DEMO_MEDIA_DIR
 
     if live:
-        drafts = CampaignDrafts(draft_path, True, media_dir=media_dir, initialize=initialize)
-        viewer = ViewerMeasurement(draft_path, drafts.examples, campaign_id=drafts.campaign_id,
+        drafts = create_drafts(draft_path, True, media_dir=media_dir, initialize=initialize)
+        viewer = create_viewer(draft_path, drafts.examples, campaign_id=drafts.campaign_id,
                                    initialize=initialize)
         agent = providers = performance = instruction_tests = None
     else:
@@ -122,7 +122,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         viewer = performance.viewer
         instruction_tests = agent.instruction_tests
         providers = provider_sessions_factory(draft_path, metadata=provider_metadata, profiles=provider_profiles,
-                                             initialize=initialize)
+                                             initialize=False)
         for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
             agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
@@ -383,7 +383,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             try:
                 data=parse_command(self.rfile.read(int(length)))
                 from campaign_agent.foreground_inference import ForegroundInference,dispatch_agent
-                runtime=runtime_factory(draft_path,media_dir=drafts.media_dir,reporting=reporting,demo_scenario=demo_scenario,web=True,initialize=initialize)
+                runtime=runtime_factory(draft_path,media_dir=drafts.media_dir,reporting=reporting,demo_scenario=demo_scenario,web=True,initialize=False)
                 command={'method':'POST','path':self.path,'query':{},'body':data}
                 context=ProviderContext(runtime.operator.id,runtime.drafts.context,runtime.drafts.campaign_id,
                     hashlib.sha256(operator_token.encode()).hexdigest(),time()+3600,command,
@@ -483,7 +483,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     or any(data[key] is not None and not isinstance(data[key], str)
                            for key in ("example_ref", "visit_id"))):
                 raise ValueError("Invalid comparison request.")
-            return self.open_comparison(data, content, references)
+            return viewer.open_reviewed(drafts, data, content, references)
 
         def open_ad_comparison(self, data):
             rehearsal = data.pop("rehearsal", False)
@@ -494,54 +494,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 raise ValueError("Choose a valid ad comparison link.")
             if agent is None:
                 raise ViewerNotFound("This ad comparison is unavailable.")
-            with closing(viewer.connect()) as db, db:
-                db.execute("BEGIN IMMEDIATE")
-                link = CampaignSetup.verified_viewer_link(db, drafts.scope, data["attribution"],
-                                                         campaign_id=drafts.campaign_id)
-                if link is None:
-                    raise ViewerNotFound("This ad comparison is unavailable.")
-                result = self.open_comparison(
-                    {"creative_ref": link["creative_ref"], "example_ref": link["comparison_ref"],
-                     "visit_id": data["visit_id"]}, link["content_fingerprint"], None,
-                    ad_link_id=link["id"], rehearsal=rehearsal, connection=db,
-                )
-                return {**result, "creative_ref": link["creative_ref"]}
-
-        def open_comparison(self, data, fingerprint, references, *, ad_link_id=None, rehearsal=False, connection=None):
-            if fingerprint is None:
-                return viewer.open_example(**data)
-            origin, example = viewer.resolve(data["creative_ref"], data["example_ref"])
-            if references is None:
-                references = {origin.ref: fingerprint}
-            if references.get(origin.ref) != fingerprint or example.ref not in references:
-                raise PackageConflict("The comparison has changed. Reload the package in the planner.")
-            verified = {}
-            for item in viewer.examples.values():
-                if item.scope != origin.scope or item.ref not in references:
-                    continue
-                content = drafts.comparison_content(item, references[item.ref])
-                if (package_fingerprint(content) == references[item.ref]
-                        and all(take["sha256"] for take in content["takes"])):
-                    verified[item.ref] = content
-            if not verified:
-                raise PackageConflict("The comparison has changed. Reload the package in the planner.")
-            selected_ref = example.ref if example.ref in verified else next(iter(verified))
-            result = viewer.open_example(
-                **{**data, "example_ref": selected_ref},
-                content_fingerprint=fingerprint,
-                origin_unavailable=origin.ref not in verified,
-                ad_link_id=ad_link_id, rehearsal=rehearsal, connection=connection,
-            )
-            content = verified[selected_ref]
-            comparison = result["example"]
-            comparison["instruction"] = content["instruction"]
-            for take, reviewed in zip(comparison["takes"], content["takes"]):
-                take["url"] += "?sha256=" + reviewed["sha256"]
-            comparison["captions"] += "?sha256=" + content["captions_sha256"]
-            result["examples"] = [item for item in result["examples"] if item["ref"] in verified]
-            if selected_ref != example.ref:
-                result["notice"] = "That reviewed example is unavailable. Another verified example is open."
-            return result
+            return viewer.open_verified_ad(drafts, data['attribution'], data['visit_id'], rehearsal=rehearsal)
 
         def do_GET(self):
             if not self.check_host():
@@ -862,7 +815,7 @@ def assign(path, jev_limit, register_catalog=False):
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
             raise ValueError("Set OPENROUTER_API_KEY to use the paid OpenRouter mode.")
-    references = CampaignDrafts(DEFAULT_DRAFT_PATH, live=True).register_catalog(records) if register_catalog else {}
+    references = create_drafts(DEFAULT_DRAFT_PATH, live=True).register_catalog(records) if register_catalog else {}
     for row in records:
         description = row["description"]
         result = {"video_id": row["video_id"], "source": row["source"],
@@ -891,7 +844,7 @@ def google_ads_reporting(config_path):
 
         with requests.Session() as session:
             session.trust_env = False
-            yield google_transport(config, session, read_only=True)
+            yield google_transport(config, session, ROOT / '.local/google', read_only=True)
 
     try:
         return GoogleAdsReporting(config['manager_id'], config['account_id'], connect)

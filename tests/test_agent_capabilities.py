@@ -261,10 +261,9 @@ class CapabilityLocalRouteTests(unittest.TestCase):
             stack.enter_context(patch.object(placement_review, 'ThreadingHTTPServer', side_effect=server))
             stack.enter_context(patch.object(placement_review, 'Thread'))
             stack.enter_context(patch.object(placement_review.secrets, 'token_urlsafe', return_value='authored-operator'))
-            stack.enter_context(patch.object(placement_review, 'AgentRuntime', side_effect=runtime))
             stack.enter_context(redirect_stdout(io.StringIO()))
             placement_review.serve(18981, live=False, viewer_port=18982,
-                                   draft_path=Path(directory) / 'local.sqlite3')
+                                   draft_path=Path(directory) / 'local.sqlite3', runtime_factory=runtime)
             handler = servers[0].handler.__new__(servers[0].handler)
             handler.server = servers[0]
             handler.path = '/api/agent/capabilities'

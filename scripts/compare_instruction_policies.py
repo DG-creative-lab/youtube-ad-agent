@@ -20,7 +20,8 @@ if not __package__:
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.handoff import package_fingerprint
 from campaign_agent.domain.instruction_policy import (
     ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP, recommend_instruction_action,
 )

@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore
-from scripts.campaign_drafts import CampaignDrafts
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
 
 
 class SQLiteDraftStoreTests(unittest.TestCase):

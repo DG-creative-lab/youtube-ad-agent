@@ -13,7 +13,7 @@ from starlette.testclient import TestClient
 
 from campaign_agent.adapters.fixture_access import offline_fixture
 from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp
-from campaign_agent.hosted import HostedApplication
+from campaign_agent.bootstrap.hosted import create_hosted_application as HostedApplication
 from campaign_agent.ports.access import AccessRequest, AccessUnavailable
 
 
@@ -89,6 +89,20 @@ class HostedAccessTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute('SELECT campaign_id FROM viewer_visits WHERE id=?', (visit['visit_id'],)).fetchone()[0], 'campaign-a')
             self.assertEqual(db.execute('SELECT COUNT(*) FROM viewer_completions').fetchone()[0], 1)
+
+    def test_hosted_requests_use_prepared_store_and_current_authority(self):
+        with patch('campaign_agent.bootstrap.runtime.startup.initialize_runtime_schema',
+                   side_effect=AssertionError('request attempted schema initialization')):
+            existing = self.buyer.get('/api/campaign')
+            self.assertEqual(existing.status_code, 200, existing.text)
+            self.assertEqual(existing.json()['revision'], 1)
+            # Unprovisioned native history cannot be invented by an HTTP request,
+            # even when the upstream buyer has a draft capability.
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute("DELETE FROM campaign_revisions WHERE campaign_id='campaign-a'")
+            self.assertEqual(self.buyer.get('/api/campaign').status_code, 403)
+            with closing(sqlite3.connect(self.path)) as db:
+                self.assertIsNone(db.execute("SELECT 1 FROM campaign_revisions WHERE campaign_id='campaign-a'").fetchone())
 
     def test_client_brand_campaign_and_session_selectors_cannot_grant_access(self):
         args = self.prepare()

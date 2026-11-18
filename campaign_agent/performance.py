@@ -82,58 +82,12 @@ def propose_next_test(delivery, activity):
 
 
 class CampaignPerformance:
-    def __init__(self, drafts, viewer, reporting: SampleReporting, *, initialize=True):
+    def __init__(self, drafts, viewer, reporting: SampleReporting):
         if viewer.campaign_id != drafts.campaign_id:
             raise ValueError("Bind measurement to this campaign before reviewing activity.")
         self.drafts = drafts
         self.viewer = viewer
         self.reporting = reporting
-        if not initialize:
-            return
-        with closing(sqlite3.connect(drafts.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS campaign_performance_reviews (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    campaign_id TEXT NOT NULL, revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
-                    created_at TEXT NOT NULL, last_requested_at TEXT NOT NULL, snapshot TEXT NOT NULL
-                )
-            """)
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS campaign_buyer_corrections (
-                    sequence INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE,
-                    client_id TEXT NOT NULL, brand_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
-                    creative_version TEXT NOT NULL, comparison_fingerprint TEXT NOT NULL,
-                    review_id TEXT NOT NULL, actor_id TEXT NOT NULL, kind TEXT NOT NULL,
-                    note TEXT NOT NULL, created_at TEXT NOT NULL,
-                    comparison_identity TEXT, takes_identity TEXT, comparison_version TEXT
-                )
-            """)
-            columns = {column[1] for column in db.execute("PRAGMA table_info(campaign_buyer_corrections)")}
-            missing = {"comparison_identity", "takes_identity", "comparison_version"} - columns
-            for column in sorted(missing):
-                db.execute(f"ALTER TABLE campaign_buyer_corrections ADD COLUMN {column} TEXT")
-            self._migrate_correction_identities(db)
-
-    def _migrate_correction_identities(self, db):
-        rows = db.execute("""
-            SELECT c.id, c.creative_version, a.snapshot
-            FROM campaign_buyer_corrections c
-            JOIN campaign_performance_reviews r ON r.id = c.review_id
-                AND r.client_id = c.client_id AND r.brand_id = c.brand_id AND r.campaign_id = c.campaign_id
-            JOIN campaign_package_approvals a ON a.client_id = r.client_id AND a.brand_id = r.brand_id
-                AND a.campaign_id = r.campaign_id AND a.revision = r.revision AND a.fingerprint = r.fingerprint
-            WHERE a.snapshot IS NOT NULL
-                AND (c.comparison_identity IS NULL OR c.takes_identity IS NULL OR c.comparison_version IS NULL)
-        """).fetchall()
-        for correction_id, creative, snapshot in rows:
-            group = comparison_group(json.loads(snapshot), creative)
-            db.execute(
-                "UPDATE campaign_buyer_corrections SET comparison_identity = ?, takes_identity = ?, "
-                "comparison_version = ? WHERE id = ?",
-                (comparison_identity(group), comparison_identity(group, keep_takes=True),
-                 group["comparison_version"], correction_id),
-            )
 
     def _latest_correction(self, db, evidence, package):
         proposal = evidence["proposal"]

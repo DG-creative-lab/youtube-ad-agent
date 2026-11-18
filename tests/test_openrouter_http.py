@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from starlette.testclient import TestClient
 from campaign_agent.adapters.fixture_access import offline_fixture,AuthoredProviderMetadata
-from campaign_agent.hosted import HostedApplication
+from campaign_agent.bootstrap.hosted import create_hosted_application as HostedApplication
 from campaign_agent.ports.inference import ProviderError
 
 
@@ -438,9 +438,8 @@ class OpenRouterLocalTests(unittest.TestCase):
             stack.enter_context(patch.object(placement_review.Thread,'start'))
             stack.enter_context(patch.object(placement_review.Thread,'join'))
             stack.enter_context(patch.object(placement_review.secrets,'token_urlsafe',return_value='authored-local-operator'))
-            stack.enter_context(patch.object(placement_review,'AgentRuntime',side_effect=runtime))
             stack.enter_context(redirect_stdout(io.StringIO()))
-            placement_review.serve(18981,False,draft_path=path,viewer_port=18982,provider_metadata=metadata,
+            placement_review.serve(18981,False,draft_path=path,viewer_port=18982,provider_metadata=metadata,runtime_factory=runtime,
                 provider_profiles=metadata.profiles,main_models=('example/model:free',),openrouter_review_models=('example/model:free',))
             handler=servers[0].handler.__new__(servers[0].handler);handler.server=servers[0];handler.send=Mock()
             tab=uuid4().hex

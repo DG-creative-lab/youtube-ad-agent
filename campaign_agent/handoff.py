@@ -1,14 +1,9 @@
 """Build the manual handoff for the fictional campaign."""
 import hashlib
-from pathlib import Path
 
 from .creatives import EXAMPLES
 from .domain.fingerprints import package_fingerprint as package_fingerprint
 from .application.planner_context import assemble_package
-
-
-MEDIA_DIR = Path(__file__).resolve().parents[1] / ".local/viewer-media"
-DEMO_MEDIA_DIR = Path(__file__).resolve().parents[1] / "examples/viewer-media"
 
 
 def media_sha256(data):

@@ -3,10 +3,9 @@ from contextlib import closing
 import json
 import re
 import sqlite3
-from typing import Callable
 
 from campaign_agent.domain.inference_errors import ReviewInferenceError
-from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore, SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlannerReadStorage, SQLitePlacementCommitStorage, SQLitePlannerLifecycleStorage
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.ports.placement_commit import PlacementCommitUnit, PlacementCommitStorage, PlacementRepositories
@@ -15,7 +14,6 @@ from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClas
 from campaign_agent.delivery import delivery_message
 from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
-from campaign_agent.placement_discovery import PlacementDiscovery
 from campaign_agent.domain.errors import PackageConflict
 from .conversations import CampaignConversations
 from .replies import REPLY_VERSION, clarification, reply, verified_result
@@ -56,26 +54,23 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 
 class PlacementAgent:
-    def __init__(self, owner, *, make_main_model: Callable[[], PlannerModel], foreground_compatible: bool,
-                 simulator: MainModel, classifier: PlacementClassifier, initialize=True):
+    def __init__(self, owner, *, remote: PlannerModel, simulator: MainModel, classifier: PlacementClassifier,
+                 catalogs, receipts: PlannerReceiptStorage, commit_storage: PlacementCommitStorage,
+                 read_storage: PlannerReadStorage, conversations):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
-        self.foreground_compatible = foreground_compatible
-        self.web_disabled = False
-        catalog_storage = SQLiteCatalogStorage(self.path)
-        if initialize:
-            catalog_storage.initialize()
-        self.catalogs = PlacementDiscovery(self.drafts, catalog_storage)
-        self.remote = make_main_model()
+        self.foreground_compatible = False
+        self.web_disabled = owner.web
+        self.catalogs = catalogs
+        self.remote = remote
+        self.remote.web_disabled = owner.web
         self.simulator = simulator
         self.classifier = classifier
         self.review_tools = CampaignReviewTools(self)
-        if initialize:
-            SQLitePlannerLifecycleStorage.initialize(self.path)
-        self.receipt_storage: PlannerReceiptStorage = SQLitePlannerLifecycleStorage(self.path)
-        self.placement_commit_storage: PlacementCommitStorage = SQLitePlacementCommitStorage(self.path)
-        self.read_storage: PlannerReadStorage = SQLitePlannerReadStorage(self.path)
-        self.conversation_storage = SQLiteConversationStorage(self.path)
-        self.conversations = CampaignConversations(self, initialize=initialize)
+        self.receipt_storage = receipts
+        self.placement_commit_storage = commit_storage
+        self.read_storage = read_storage
+        self.conversation_storage = conversations
+        self.conversations = CampaignConversations(self)
 
     def _require_model_available(self, settings):
         # The supplied-model seam is offline-only until admitted dispatch is a port.

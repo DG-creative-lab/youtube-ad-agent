@@ -1,4 +1,4 @@
-"""Explicit adapter-owned schema and adoption for the local planner pilot.
+"""Explicit schema and legacy adoption for the native SQLite runtime.
 
 Each phase preserves the legacy constructor's commit boundary. The caller
 provides the authored seed, exact context/examples, and a capability check.
@@ -38,13 +38,33 @@ def _viewer_connect(path):
     return db
 
 
-def _campaign_schema(path, context, campaign_id, seed_snapshot, authorize):
+def _catalog_schema(db):
+    columns = {row[1] for row in db.execute("PRAGMA table_info(catalog_entries)")}
+    legacy = bool(columns) and "client_id" not in columns
+    if legacy:
+        db.execute("ALTER TABLE catalog_entries RENAME TO catalog_entries_legacy")
+    db.execute('''CREATE TABLE IF NOT EXISTS catalog_entries (
+        ref TEXT PRIMARY KEY, video_id TEXT NOT NULL, title TEXT NOT NULL,
+        source TEXT NOT NULL, source_reference TEXT NOT NULL,
+        client_id TEXT NOT NULL, brand_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
+        UNIQUE(client_id,brand_id,campaign_id,video_id,title,source,source_reference))''')
+    if legacy:
+        db.execute('''INSERT INTO catalog_entries
+            SELECT ref,video_id,title,source,source_reference,?,?,'tts-catalog' FROM catalog_entries_legacy''',
+                   (LOCAL_CONTEXT.scope.client_id, LOCAL_CONTEXT.scope.brand_id))
+        db.execute("DROP TABLE catalog_entries_legacy")
+
+
+def initialize_drafts(path, *, context=None, campaign_id=None, seed_snapshot=None, authorize=None, live=False):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         initialize(db)
-        if context == LOCAL_CONTEXT and campaign_id in {"tts-sample", "tts-catalog"}:
-            admit_demo_campaign(db, campaign_id)
-        verify(db, context, campaign_id)
+        if context is not None:
+            if context == LOCAL_CONTEXT and campaign_id in {"tts-sample", "tts-catalog"}:
+                admit_demo_campaign(db, campaign_id)
+            verify(db, context, campaign_id)
         db.execute("""
                 CREATE TABLE IF NOT EXISTS campaign_revisions (
                     campaign_id TEXT NOT NULL,
@@ -53,30 +73,33 @@ def _campaign_schema(path, context, campaign_id, seed_snapshot, authorize):
                     PRIMARY KEY (campaign_id, revision)
                 )
             """)
-        db.execute("""
-                    CREATE TABLE IF NOT EXISTS comparison_instruction_versions (
-                        client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                        creative_version TEXT NOT NULL, comparison_version TEXT NOT NULL,
-                        instruction_id TEXT NOT NULL, instruction TEXT NOT NULL,
-                        PRIMARY KEY (client_id, brand_id, creative_version, comparison_version, instruction_id)
-                    )
-                """)
-        db.execute("""
-                    CREATE TABLE IF NOT EXISTS campaign_package_approvals (
-                        client_id TEXT NOT NULL,
-                        brand_id TEXT NOT NULL,
-                        campaign_id TEXT NOT NULL,
-                        revision INTEGER NOT NULL,
-                        fingerprint TEXT NOT NULL,
-                        actor_id TEXT NOT NULL,
-                        approved_at TEXT NOT NULL,
-                        snapshot TEXT,
-                        PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint)
-                    )
-                """)
-        columns = db.execute("PRAGMA table_info(campaign_package_approvals)").fetchall()
-        if "snapshot" not in {column[1] for column in columns}:
-            db.execute("ALTER TABLE campaign_package_approvals ADD COLUMN snapshot TEXT")
+        if live:
+            _catalog_schema(db)
+        else:
+            db.execute("""
+                        CREATE TABLE IF NOT EXISTS comparison_instruction_versions (
+                            client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+                            creative_version TEXT NOT NULL, comparison_version TEXT NOT NULL,
+                            instruction_id TEXT NOT NULL, instruction TEXT NOT NULL,
+                            PRIMARY KEY (client_id, brand_id, creative_version, comparison_version, instruction_id)
+                        )
+                    """)
+            db.execute("""
+                        CREATE TABLE IF NOT EXISTS campaign_package_approvals (
+                            client_id TEXT NOT NULL,
+                            brand_id TEXT NOT NULL,
+                            campaign_id TEXT NOT NULL,
+                            revision INTEGER NOT NULL,
+                            fingerprint TEXT NOT NULL,
+                            actor_id TEXT NOT NULL,
+                            approved_at TEXT NOT NULL,
+                            snapshot TEXT,
+                            PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint)
+                        )
+                    """)
+            columns = db.execute("PRAGMA table_info(campaign_package_approvals)").fetchall()
+            if "snapshot" not in {column[1] for column in columns}:
+                db.execute("ALTER TABLE campaign_package_approvals ADD COLUMN snapshot TEXT")
         db.execute("""CREATE TABLE IF NOT EXISTS placement_catalog_entries (
                 ref TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
                 campaign_id TEXT NOT NULL, video_id TEXT NOT NULL, title TEXT NOT NULL, source TEXT NOT NULL,
@@ -97,12 +120,31 @@ def _campaign_schema(path, context, campaign_id, seed_snapshot, authorize):
                                    "AND client_id=? AND brand_id=? AND campaign_id=? AND video_id=? AND title=? AND source=?",
                                    (row["source_reference"], ref, client, brand, campaign,
                                     row["video_id"], row["description"], row["source"]))
-        if not SQLiteDraftStore(db).has_revisions(campaign_id):
-            authorize("youtube:campaign.draft")
-            SQLiteDraftStore(db).append_snapshot(campaign_id, 1, seed_snapshot)
+        if context is not None:
+            _seed_campaign(db, campaign_id, seed_snapshot, authorize)
 
 
-def _simulated_setup(path):
+def _seed_campaign(db, campaign_id, seed_snapshot, authorize):
+    store = SQLiteDraftStore(db)
+    if not store.has_revisions(campaign_id):
+        authorize("youtube:campaign.draft")
+        store.append_snapshot(campaign_id, 1, seed_snapshot)
+
+
+def bind_campaign(path, *, context, campaign_id, seed_snapshot, authorize):
+    """Verify current ownership and seed a provisioned campaign when needed."""
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("BEGIN")
+        verify(db, context, campaign_id)
+        if SQLiteDraftStore(db).has_revisions(campaign_id):
+            return
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        verify(db, context, campaign_id)
+        _seed_campaign(db, campaign_id, seed_snapshot, authorize)
+
+
+def initialize_simulated_setup(path):
     with closing(sqlite3.connect(path)) as db, db:
         db.execute("""CREATE TABLE IF NOT EXISTS simulated_campaigns (
                 account_id TEXT NOT NULL, operation_id TEXT NOT NULL, snapshot TEXT NOT NULL,
@@ -110,7 +152,7 @@ def _simulated_setup(path):
             )""")
 
 
-def _campaign_setup(path):
+def initialize_campaign_setup(path):
     with closing(sqlite3.connect(path)) as db, db:
         db.execute('BEGIN IMMEDIATE')
         columns = {row[1] for row in db.execute('PRAGMA table_info(campaign_setups)')}
@@ -128,7 +170,7 @@ def _campaign_setup(path):
             db.execute('DROP TABLE campaign_setups_legacy')
 
 
-def _viewer_schema(path):
+def initialize_viewer(path):
     with closing(_viewer_connect(path)) as db, db:
         db.executescript("""
                 BEGIN IMMEDIATE;
@@ -172,7 +214,7 @@ def _viewer_schema(path):
             db.execute("ALTER TABLE viewer_completions ADD COLUMN completed_ms INTEGER")
 
 
-def _performance_schema(path):
+def initialize_performance(path):
     with closing(sqlite3.connect(path)) as db, db:
         db.execute("BEGIN IMMEDIATE")
         db.execute("""
@@ -303,13 +345,18 @@ def initialize_local_planner(path, *, context, campaign_id, seed_snapshot: str, 
             or len({example.creative_ref for example in examples}) != len(examples)):
         raise PermissionError("Supply the brand's own comparison catalog.")
     authorize("youtube:campaign.read")
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _campaign_schema(path, context, campaign_id, seed_snapshot, authorize)
-    _simulated_setup(path)
-    _campaign_setup(path)
-    _viewer_schema(path)
-    _performance_schema(path)
+    initialize_drafts(path, context=context, campaign_id=campaign_id,
+                      seed_snapshot=seed_snapshot, authorize=authorize)
+    initialize_runtime_schema(path)
+    return campaign_id
+
+
+def initialize_runtime_schema(path, *, simulated_setup=True):
+    if simulated_setup:
+        initialize_simulated_setup(path)
+    initialize_campaign_setup(path)
+    initialize_viewer(path)
+    initialize_performance(path)
     _delivery_schema(path)
     _instruction_test_schema(path)
     _instruction_findings_schema(path)
@@ -318,7 +365,6 @@ def initialize_local_planner(path, *, context, campaign_id, seed_snapshot: str, 
     SQLiteCatalogStorage(path).initialize()
     SQLitePlannerLifecycleStorage.initialize(path)
     _conversation_adoption(path)
-    return campaign_id
 
 
 class SQLiteLocalPlannerStartup:
@@ -328,3 +374,21 @@ class SQLiteLocalPlannerStartup:
     def initialize(self, *, context, campaign_id, seed_snapshot: str, examples, authorize):
         return initialize_local_planner(self._path, context=context, campaign_id=campaign_id,
                                         seed_snapshot=seed_snapshot, examples=examples, authorize=authorize)
+
+
+def initialize_publications(path):
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute('''CREATE TABLE IF NOT EXISTS public_comparisons (
+            id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+            campaign_id TEXT NOT NULL, revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
+            creative_ref TEXT NOT NULL, snapshot TEXT NOT NULL, expires_at REAL NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(campaign_id,revision,fingerprint,creative_ref))''')
+
+
+def initialize_staff_sessions(path):
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute('''CREATE TABLE IF NOT EXISTS staff_sessions (
+            token_hash TEXT PRIMARY KEY, credential_reference TEXT NOT NULL,
+            issuer TEXT NOT NULL, subject TEXT NOT NULL, upstream_session TEXT NOT NULL,
+            campaign_id TEXT NOT NULL, csrf TEXT NOT NULL, expires_at REAL NOT NULL)''')
