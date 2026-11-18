@@ -3,6 +3,7 @@ from contextlib import closing, contextmanager
 import sqlite3
 
 from campaign_agent.ports.storage_errors import StorageError
+from .sqlite_access import campaign_owner_row
 
 
 class SQLiteDraftStore:
@@ -86,11 +87,7 @@ class SQLiteDraftRepository:
 
     def owner_row(self, campaign_id):
         with self._use() as store:
-            return store.connection.execute(
-                'SELECT b.client_id,b.brand_id,b.workspace_id,b.installation_id '
-                'FROM campaign_owners c JOIN brand_workspaces b '
-                'ON c.client_id=b.client_id AND c.brand_id=b.brand_id WHERE c.campaign_id=?',
-                (campaign_id,)).fetchone()
+            return campaign_owner_row(store.connection, campaign_id)
 
     def read_snapshot(self, campaign_id, revision=None):
         with self._use() as store:

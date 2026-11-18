@@ -44,6 +44,17 @@ class CommandPermit:
 
 
 
+@dataclass(frozen=True)
+class CampaignAccessRecord:
+    owner: tuple[str, str, str, str]  # Client, brand, workspace and installation IDs.
+    revision: str
+    snapshot: str
+
+
+class CampaignAccessReader(Protocol):
+    def access_record(self, campaign_id: str) -> CampaignAccessRecord | None: ...
+
+
 class StaffAuthority(AccessPolicy, Protocol):
     """Resolve current staff context before constructing a campaign runtime."""
 

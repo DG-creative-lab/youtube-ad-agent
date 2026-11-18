@@ -1,5 +1,5 @@
 """Request-local connection proof and one shared foreground inference admission path."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 import hashlib
 import json
@@ -16,8 +16,7 @@ class ForegroundInference:
     def __init__(self,providers,context,access,key_values,*,completion_transport=None):
         self.providers,self.path,self.context,self.access=providers,providers.path,context,access
         self.credential=ForegroundCredential.from_values(key_values,required=False)
-        self.policy=CommandAccess(self.path,context,access)
-        self.policy.guard=self.local_commit_guard
+        self.policy = CommandAccess(self.path, context, access, read_scope=self._read_access)
         self.ledger=InferenceLedger(clock=providers.clock)
         self.run_id=None;self.runtime=None;self.settings_bound=None
         self.completion_transport=completion_transport
@@ -58,7 +57,7 @@ class ForegroundInference:
 
     def close(self):
         self.credential=None
-        self.policy.guard=None
+        self.settings_bound = None
         if self.runtime is not None:
             self.runtime.drafts.access=self.access
             self.runtime.foreground=None
@@ -108,6 +107,12 @@ class ForegroundInference:
         saved=self.owned(db,settings['selection_id'],key=key,active=active)
         expected={k:v for k,v in settings.items() if k not in ('mode','foreground','prompt_version')}
         if saved!=expected: raise ProviderError('selection_stale')
+
+    @contextmanager
+    def _read_access(self):
+        with closing(sqlite3.connect(self.path)) as db:
+            yield self.providers.access_reader(db)
+            self.local_commit_guard(db)
 
     def local_commit_guard(self,db):
         if self.settings_bound:
@@ -169,14 +174,18 @@ class ForegroundInference:
                  'workspace_id':n.workspace_id,'installation_id':n.installation_id,'campaign_id':self.context.campaign_id,
                  'connection_id':settings['connection_id'],'selection_id':settings['selection_id']}
         with closing(sqlite3.connect(self.path)) as db,db:
-            db.execute('BEGIN IMMEDIATE');self.policy.check(db);self.check_connection(db,settings,key=True)
+            db.execute('BEGIN IMMEDIATE')
+            self.policy.check(self.providers.access_reader(db))
+            self.check_connection(db, settings, key=True)
             self.current_run(db);self.qualified_for_dispatch(settings)
             self.ledger.reserve(db,self.run_id,position,binding,settings,request_hash)
             self.qualified_for_dispatch(settings)
         # Separate committed marker; any crash after this point is possibly sent.
         try:
             with closing(sqlite3.connect(self.path)) as db,db:
-                db.execute('BEGIN IMMEDIATE');self.policy.check(db);self.check_connection(db,settings,key=True)
+                db.execute('BEGIN IMMEDIATE')
+                self.policy.check(self.providers.access_reader(db))
+                self.check_connection(db, settings, key=True)
                 self.current_run(db);self.qualified_for_dispatch(settings)
                 self.ledger.dispatch(db,self.run_id,position)
                 self.qualified_for_dispatch(settings)
@@ -235,7 +244,8 @@ class ForegroundInference:
         if cost is None: raise ProviderError('inference_outcome_unknown')
         self.policy.refresh()
         with closing(sqlite3.connect(self.path)) as db,db:
-            db.execute('BEGIN IMMEDIATE');self.policy.check(db)
+            db.execute('BEGIN IMMEDIATE')
+            self.policy.check(self.providers.access_reader(db))
             self.owned(db,row['selection_id'],key=True,active=False,reconcile=True)
             self.ledger.settle(db,row['run_id'],row['position'],*cost)
             return self.ledger.projection(self.ledger.row(db,row['run_id'],row['position']))

@@ -37,7 +37,8 @@ with an explicit clock. `adapters/catalogue_cache.py` owns the bounded process c
 Each provider-session service gets one cache, and sessions prove scope and key
 binding before using it. The hosted fixture still resolves current staff authority
 before runtime construction. Local and Gateplane access adapters use the shared
-native permit check against the caller's connection.
+permit check against typed ownership and revision records. Foreground writes
+borrow the reader on their existing SQLite transaction.
 
 Python callers that previously constructed a runtime with the implicit defaults
 now use `bootstrap.runtime.create_runtime`. The internal catalogue

@@ -100,6 +100,7 @@
     "campaign_agent/ports/staff_sessions.py": "port",
     "campaign_agent/ports/storage_errors.py": "port",
     "campaign_agent/ports/viewer_storage.py": "port",
+    "campaign_agent/ports/workspaces.py": "port",
     "campaign_agent/provider_sessions.py": "application",
     "campaign_agent/publications.py": "application",
     "campaign_agent/recovery.py": "application",

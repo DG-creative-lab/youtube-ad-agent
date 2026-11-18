@@ -90,6 +90,21 @@ session change. Application policy still checks expiry and the current upstream
 identity. The hosted entrypoint authorizes campaign selection before saving it.
 Startup and recovery still use the existing staff session table.
 
+## Workspace ownership and permit reads · #37
+
+Trusted provisioning uses the [workspace storage contract](../campaign_agent/ports/workspaces.py).
+SQLite reserves one writer transaction for legacy admission, the brand and campaign
+bindings, and their commit. The provisioning command still requires workspace
+configuration access and refuses unknown unowned histories and conflicting
+installation claims. The capability catalogue checks ownership through draft storage.
+
+[Typed permit reads](../campaign_agent/ports/access.py) bind the current owner,
+revision and raw campaign snapshot. Gateplane resolves those facts through the
+configured read adapter. Provider-session and foreground commit checks use the
+reader on their existing write transaction, so an uncommitted change is visible
+to the permit check. Permit expiry, command and staff-session binding still apply.
+The provider-session and foreground transactions still use their native adapters.
+
 ## Residual native graph
 
 Every row below stays on the original store until its own adoption. #37 owns the
@@ -101,11 +116,10 @@ entrypoints. These owners do not authorize provider activation or a backend swit
 | --- | --- | --- |
 | `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: nonpilot recorded preparation, review/structured/experiment/delivery command reads and writes. Remaining callers still own the native transactions that combine draft writes with their records. Pilot draft/provenance and run lifecycle are not deferred here. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
 | `agent/conversations.py` and borrowed native store APIs in `adapters/sqlite_{drafts,planner,runs,conversations}.py` | #37: remaining nonpilot consumers of caller-owned native connections. #88: converge composition without deleting the supported compatibility path prematurely. Pilot follow-up selection, supersession, messages and transcript adoption already belong to the selected unit. | Session/operator/campaign/settings scope, stale message checks, exact ordering and malformed-history behavior. |
-| `access.py`, `workspaces.py`, `staff.py`, `agent/capabilities.py`, `adapters/local_access.py` | #37: remaining provisioning, advisory catalogue and nonpilot permit/native readers. Staff session commands use the typed store. #87: external authority/client adoption. #88: entrypoint resolution/wiring. Selected placement access uses the original permit and same-unit preimage; legacy `CommandAccess` is not asserted migrated. | Current grants, full owner/workspace/installation, expiry/revocation, original command identity, fail-closed disclosure and permit fences. |
 | `measurement.py`, `performance.py`, `instruction_tests.py`, `learning.py` | Viewer, review, experiment and finding commands use scoped units. Retained agent workflows borrow evidence records on their native transaction. Their named pilot context reads and required startup/adoption are in #86, not postponed. | Attribution and denominators, exact comparison/takes identities, current corrections, source versions, scoped evidence and reviewed reuse. |
 | `campaign_setup.py`, `delivery.py`, `adapters/simulated_setup.py` | #37: setup, delivery and recommendation units are adopted. The simulated provider's resource store is a separate provider effect boundary. | Exact approved package/account/action, zero dispatch on denial, received versus unknown outcomes, no repeated uncertain effects, report grain/tagged attribution. |
 | `assets.py`, `publications.py`, `recovery.py`, legacy media helpers in `handoff.py` | #37: native private catalog/blob records, asset integrity and whole-store recovery. Publication grant and viewer writes use scoped units. #87/#88: external asset boundary and remaining media wiring. Selected logical media facts do not establish object-storage readiness. | Immutable scope/digest/filename, current publication access, historical approval evidence and restore invalidation. |
-| `migrations.py`, `workspaces.py`, `adapters/sqlite_schema.py`, `sqlite_workspace_admission.py`, `sqlite_planner_startup.py` | Shared adapter startup owns the former constructor schema and adoption. #37 owns the remaining native storage graph, including the provisioning/recovery migration bindings and future schema allocation. | Identical migration names/checksums, key/uniqueness/nullability refusal, local-only adoption, viewer ambiguity/quarantine, provenance recovery and no history rewrite. |
+| `migrations.py`, `workspaces.py`, `adapters/sqlite_schema.py`, `sqlite_workspace_admission.py`, `sqlite_planner_startup.py` | Shared adapter startup owns the former constructor schema and adoption. #37 owns the remaining native storage graph, including recovery migration bindings and future schema allocation. | Identical migration names/checksums, key/uniqueness/nullability refusal, local-only adoption, viewer ambiguity/quarantine, provenance recovery and no history rewrite. |
 | `provider_sessions.py`, `model_catalogue.py`, `inference_ledger.py`, `foreground_inference.py` | #37: remaining native verifier/operation/selection/cache/quota/receipt/settlement graph. #87: qualified provider contracts/transport. #88: foreground assembly; #70 retains real route/cost/privacy qualification. | Request-local credentials, actor/account/selection identity, admission/deadline/budget, reserved/received/unknown phases and receipt-before-domain effects. |
 | `hosted.py`, `scripts/placement_review.py`, `scripts/product_storage.py`, agent CLI/tools and hosted fixtures | #88: remaining parser/session/origin/CSRF/credential and factory consolidation; #37: residual native reader/writer consumers. Existing local placement UI routing is adopted; hosted/provider flows are retained. | Same application commands, existing URLs/JSON/errors, staff/public isolation and no alternative writer. |
 

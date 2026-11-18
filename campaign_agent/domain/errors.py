@@ -1,4 +1,4 @@
-"""Shared campaign revision and approval conflicts."""
+"""Shared campaign and storage conflicts."""
 
 class StaleDraft(ValueError):
     """A later revision already exists for this campaign."""
@@ -9,3 +9,7 @@ class StaleDraft(ValueError):
 
 class PackageConflict(ValueError):
     """The reviewed package is stale or lacks a matching approval."""
+
+
+class SchemaConflict(RuntimeError):
+    """The native storage history or ownership schema requires reconciliation."""

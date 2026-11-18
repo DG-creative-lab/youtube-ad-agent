@@ -1,9 +1,5 @@
 """Advisory capability metadata; execution authority stays in application commands."""
-from contextlib import closing
 from dataclasses import dataclass
-import sqlite3
-
-from campaign_agent.workspaces import verify
 
 
 READ = 'youtube:campaign.read'
@@ -95,8 +91,7 @@ def _mode(definition, runtime):
 def catalogue(runtime):
     """Project current scope/grants once per capability, never business readiness or effects."""
     runtime.require(READ)
-    with closing(sqlite3.connect(runtime.path)) as db:
-        verify(db, runtime.drafts.context, runtime.drafts.campaign_id)
+    runtime.drafts.verify_owner()
     allowed = {READ: True}
     for permission in dict.fromkeys(permission for item in CAPABILITIES
                                     for permission in item.required_capabilities):

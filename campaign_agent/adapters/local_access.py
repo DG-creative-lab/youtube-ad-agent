@@ -1,10 +1,11 @@
 """Explicit local demo access; never a hosted authentication fallback."""
-from campaign_agent.domain.access_binding import CAPABILITIES, LOCAL_CONTEXT
-from campaign_agent.domain.access_binding import LOCAL_OPERATOR, command_hash
-from .sqlite_access import validate_permit
-from campaign_agent.ports.access import CommandPermit
+import json
 from time import time, monotonic
 from uuid import uuid4
+
+from campaign_agent.domain.access_binding import CAPABILITIES, LOCAL_CONTEXT, LOCAL_OPERATOR, command_hash
+from campaign_agent.ports.access import CampaignAccessReader, CommandPermit
+from .sqlite_access import SQLiteCampaignAccessStorage, validate_permit
 
 
 class LocalDemoAccess:
@@ -20,19 +21,17 @@ class LocalDemoAccess:
         ) else "deny"
 
     def permit(self, request, *, command, session_digest, expires_at, path):
-        from contextlib import closing
-        import sqlite3
         if request.actor_id != LOCAL_OPERATOR.id or self.decide(request) != 'allow':
             raise PermissionError('Local command unavailable.')
-        with closing(sqlite3.connect(path)) as db:
-            row = db.execute('SELECT revision,snapshot FROM campaign_revisions WHERE campaign_id=? ORDER BY revision DESC LIMIT 1',
-                             (request.campaign_id,)).fetchone()
-        if row is None or expires_at <= self.clock():
+        record = SQLiteCampaignAccessStorage(path).access_record(request.campaign_id)
+        expected = (request.client_id, request.brand_id, request.workspace_id, request.installation_id)
+        if record is None or record.owner != expected or expires_at <= self.clock():
             raise PermissionError('Local command unavailable.')
         expiry = min(expires_at, self.clock()+5)
-        return CommandPermit(request, command_hash(command), session_digest, str(row[0]),
-            command_hash(__import__('json').loads(row[1])), uuid4().hex,
+        return CommandPermit(request, command_hash(command), session_digest, record.revision,
+            command_hash(json.loads(record.snapshot)), uuid4().hex,
             self.monotonic()+max(0,expiry-self.clock()), expiry)
 
-    def validate_permit(self, db, permit, request, command, session_digest):
-        validate_permit(db,permit,request,command,session_digest,clock=self.clock,monotonic_clock=self.monotonic)
+    def validate_permit(self, records: CampaignAccessReader, permit, request, command, session_digest):
+        validate_permit(records, permit, request, command, session_digest,
+                        clock=self.clock, monotonic_clock=self.monotonic)

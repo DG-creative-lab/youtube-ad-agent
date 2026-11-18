@@ -8,8 +8,7 @@ import hashlib
 import sqlite3
 
 
-class SchemaConflict(RuntimeError):
-    pass
+from campaign_agent.domain.errors import SchemaConflict as SchemaConflict
 
 
 def immutable(table):
