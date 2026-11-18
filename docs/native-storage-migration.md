@@ -39,6 +39,16 @@ unit, with separately durable requested/received/failure phases. Draft, step, st
 outcome and reply commit or roll back together. Native failures are mapped to core
 storage errors at the adopted boundary; unknown outcomes are not blind retries.
 
+## Campaign draft and package storage · #37
+
+Campaign draft reads and writes, brief changes, live catalogue registration,
+package review, approval, historical snapshots, export and comparison instruction
+versions use scoped records and transactions defined in `ports/drafts.py`.
+`adapters/sqlite_drafts.py` owns the native queries and standalone units. Reads
+are read-only, writes require explicit commit, and records expire with the unit.
+Legacy setup, reporting, learning, publishing and agent paths borrow the draft
+repository on their existing transaction so related records still commit together.
+
 ## Residual native graph
 
 Every row below stays on the original store until its own adoption. #37 owns the
@@ -48,7 +58,7 @@ entrypoints. These owners do not authorize provider activation or a backend swit
 
 | Current code family | Remaining work and owner | Required preservation |
 | --- | --- | --- |
-| `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: nonpilot recorded preparation, review/structured/experiment/delivery command reads and writes; package approvals/export and instruction saves. #88: retire compatibility construction only after callers migrate. Pilot draft/provenance and run lifecycle are not deferred here. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
+| `application/campaigns.py`, legacy paths in `agent/run.py`, `agent/planner.py`, `agent/review_tools.py` | #37: nonpilot recorded preparation, review/structured/experiment/delivery command reads and writes. Remaining callers still own the native transactions that combine draft writes with their records. Pilot draft/provenance and run lifecycle are not deferred here. | Raw JSON, native IDs, approval snapshots/fingerprints, savepoint atomicity, original received evidence and terminal reply/replay behavior. |
 | `agent/conversations.py` and borrowed native store APIs in `adapters/sqlite_{drafts,planner,runs,conversations}.py` | #37: remaining nonpilot consumers of caller-owned native connections. #88: converge composition without deleting the supported compatibility path prematurely. Pilot follow-up selection, supersession, messages and transcript adoption already belong to the selected unit. | Session/operator/campaign/settings scope, stale message checks, exact ordering and malformed-history behavior. |
 | `access.py`, `workspaces.py`, `staff.py`, `agent/capabilities.py`, `adapters/local_access.py` | #37: remaining provisioning, staff session records, advisory catalogue and nonpilot permit/native readers. #87: external authority/client adoption. #88: entrypoint resolution/wiring. Selected placement access uses the original permit and same-unit preimage; legacy `CommandAccess` is not asserted migrated. | Current grants, full owner/workspace/installation, expiry/revocation, original command identity, fail-closed disclosure and permit fences. |
 | `measurement.py`, `performance.py`, `instruction_tests.py`, `learning.py` | #37: event/visit/completion/assignment aggregation, review and correction writes/freshness, experiments, assessments, snapshots, finding lineage and reuse. Their named pilot context reads and required startup/adoption are in #86, not postponed. | Attribution and denominators, exact comparison/takes identities, current corrections, source versions, scoped evidence and reviewed reuse. |

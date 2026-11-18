@@ -2,6 +2,7 @@
 from functools import partial
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.adapters import demo_delivery, sqlite_planner_startup as startup
@@ -11,7 +12,7 @@ from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructio
 from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.adapters.sample_reporting import SampleCampaignReporting
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
-from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository, SQLiteDraftStorage
 from campaign_agent.adapters.sqlite_planner import (
     SQLiteCatalogStorage, SQLiteConversationStorage, SQLitePlacementCommitStorage,
     SQLitePlannerLifecycleStorage, SQLitePlannerReadStorage,
@@ -44,13 +45,50 @@ def draft_seed(campaign_id):
                        'policy': POLICY, 'placements': []})
 
 
+class _NativeCampaignDrafts(CampaignDrafts):
+    """Bridge retained workflows that own a native transaction with sibling writes."""
+
+    _repository = staticmethod(SQLiteDraftRepository)
+
+    def __init__(self, path, live, operator, **options):
+        self.path = Path(path)
+        super().__init__(live, operator, storage=SQLiteDraftStorage(self.path), new_id=lambda: uuid4().hex,
+                         **options)
+
+    def _read(self, db, revision=None):
+        return self.read_from(self._repository(db), revision)
+
+    def _package_review(self, db, campaign_id, revision):
+        return self._review_from(self._repository(db), campaign_id, revision)
+
+    def require_approved_package(self, db, campaign_id, revision, fingerprint):
+        return self.require_approved_from(self._repository(db), campaign_id, revision, fingerprint)
+
+    def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
+        return self.save_instruction_test_from(self._repository(db), package, review, correction, instruction,
+                                               inference=inference)
+
+    def _save_instruction_revision(self, db, current, group, instruction, provenance):
+        return self._save_instruction_revision_from(self._repository(db), current, group, instruction, provenance)
+
+    def write_unit(self):
+        return self._storage.legacy_write()
+
+    def save(self, payload, *, connection=None, repository=None):
+        if connection is not None:
+            if repository is not None:
+                raise ValueError("Choose one draft transaction source.")
+            repository = self._repository(connection)
+        return super().save(payload, repository=repository)
+
+
 def create_drafts(path, live, operator=LOCAL_OPERATOR, *, media_dir=None, context=LOCAL_CONTEXT,
                   campaign_id=None, access=None, examples=None, initialize=True):
     if media_dir is None:
         media_dir = MEDIA_DIR if MEDIA_DIR.is_dir() else DEMO_MEDIA_DIR
-    drafts = CampaignDrafts(Path(path), live, operator, context=context, media_dir=media_dir,
-                            campaign_id=campaign_id, examples=examples, repository=SQLiteDraftRepository,
-                            access=LocalDemoAccess() if access is None else access)
+    drafts = _NativeCampaignDrafts(path, live, operator, context=context, media_dir=media_dir,
+                                   campaign_id=campaign_id, examples=examples,
+                                   access=LocalDemoAccess() if access is None else access)
     drafts.require('youtube:campaign.read')
     if initialize:
         startup.initialize_drafts(drafts.path, context=context, campaign_id=drafts.campaign_id,

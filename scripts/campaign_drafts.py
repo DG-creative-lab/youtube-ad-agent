@@ -1,15 +1,11 @@
 """Compatibility exports for campaign draft commands."""
 
 from campaign_agent.application.campaigns import (
-    closing,
-    contextmanager,
     datetime,
     timezone,
     json,
     Path,
     re,
-    sqlite3,
-    uuid4,
     StaleDraft,
     PackageConflict,
     VIDEO_ID,
@@ -17,7 +13,6 @@ from campaign_agent.application.campaigns import (
     LOCAL_OPERATOR,
     require_access,
     render_instruction_choices,
-    verify,
     handoff,
     example_content,
     package_blockers,

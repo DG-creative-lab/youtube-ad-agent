@@ -6,7 +6,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository
 from campaign_agent.creatives import EXAMPLES
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
 from scripts.campaign_drafts import PackageConflict
 
@@ -64,6 +66,27 @@ class PackageHandoffTests(unittest.TestCase):
             reopened.export_setup(campaign_id, 3, latest["fingerprint"])
         self.assertEqual(reopened.review_package(campaign_id, 2)["approval"], approved["approval"])
         self.assertEqual(reopened.read_approved_package(campaign_id, 2, fingerprint)["package"], approved["package"])
+
+    def test_approval_unit_rolls_back_when_the_response_cannot_be_completed(self):
+        drafts = self.drafts
+        campaign_id = drafts.campaign_id
+        drafts.save({"campaign_id": campaign_id, "revision": 1, "placements": self.placements})
+        args = campaign_id, 2, drafts.review_package(campaign_id, 2)["fingerprint"]
+        with patch.object(SQLiteDraftRepository, "approval_history",
+                          side_effect=sqlite3.OperationalError("unavailable native approval history")):
+            with self.assertRaisesRegex(StorageError, "Campaign draft storage is unavailable"):
+                drafts.approve_package(*args)
+        reopened = CampaignDrafts(self.path, live=False, media_dir=self.media_dir)
+        self.assertIsNone(reopened.read_approved_package(*args))
+        self.assertEqual(reopened.review_package(campaign_id, 2)["history"], [])
+        approved = reopened.approve_package(*args)
+        self.assertEqual(reopened.approve_package(*args), approved)
+        self.assertEqual(len(approved["history"]), 1)
+        self.assertEqual(reopened.export_setup(*args)["approval"], approved["approval"])
+        with patch.object(SQLiteDraftRepository, "owner_row",
+                          return_value=("local-client", "tts-demo", "local-workspace", "foreign-installation")):
+            with self.assertRaises(PermissionError):
+                reopened.read_approved_package(*args)
 
     def test_review_names_missing_groups_and_blocks_approval(self):
         drafts = self.drafts

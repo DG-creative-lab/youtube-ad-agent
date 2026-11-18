@@ -3,9 +3,11 @@ from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
-from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStore
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftStorage, SQLiteDraftStore
 from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from campaign_agent.ports.storage_errors import StorageError
 
 
 class SQLiteDraftStoreTests(unittest.TestCase):
@@ -17,6 +19,58 @@ class SQLiteDraftStoreTests(unittest.TestCase):
         self.db = sqlite3.connect(self.path)
         self.addCleanup(self.db.close)
         self.store = SQLiteDraftStore(self.db)
+
+    def test_owned_units_reject_read_writes_and_close_their_records(self):
+        storage = SQLiteDraftStorage(self.path)
+        with storage.read() as read:
+            self.assertIsNotNone(read.read_snapshot("tts-catalog", 1))
+            with self.assertRaises(StorageError) as readonly:
+                read.append_snapshot("tts-catalog", 2, "{}")
+            self.assertEqual(readonly.exception.kind, "read_only")
+        with self.assertRaises(StorageError) as closed:
+            read.read_snapshot("tts-catalog", 1)
+        self.assertEqual(closed.exception.kind, "closed")
+        self.assertIsNone(self.store.read_snapshot("tts-catalog", 2))
+
+    def test_owned_writes_require_explicit_commit(self):
+        storage = SQLiteDraftStorage(self.path)
+        snapshot = ' {"revision": 2} '
+        with storage.write() as discarded:
+            discarded.drafts.append_snapshot("tts-catalog", 2, snapshot)
+        self.assertIsNone(self.store.read_snapshot("tts-catalog", 2))
+        with self.assertRaises(StorageError) as closed:
+            discarded.commit()
+        self.assertEqual(closed.exception.kind, "closed")
+
+        with storage.write() as accepted:
+            accepted.drafts.append_snapshot("tts-catalog", 2, snapshot)
+            with self.assertRaises(StorageError) as duplicate:
+                accepted.drafts.append_snapshot("tts-catalog", 2, "{}")
+            self.assertEqual(duplicate.exception.kind, "unavailable")
+            accepted.commit()
+            with self.assertRaises(StorageError) as closed:
+                accepted.drafts.read_snapshot("tts-catalog", 2)
+            self.assertEqual(closed.exception.kind, "closed")
+        self.assertEqual(self.store.read_snapshot("tts-catalog", 2), snapshot)
+
+    def test_lost_commit_confirmation_is_safe_and_can_be_read_back(self):
+        class LateFailure(sqlite3.Connection):
+            def commit(self):
+                super().commit()
+                raise sqlite3.OperationalError("private diagnostic")
+
+        storage = SQLiteDraftStorage(self.path)
+        native_connect = sqlite3.connect
+        with patch("campaign_agent.adapters.sqlite_drafts.sqlite3.connect",
+                   side_effect=lambda path: native_connect(path, factory=LateFailure)):
+            with self.assertRaises(StorageError) as failed:
+                with storage.write() as unit:
+                    unit.drafts.append_snapshot("tts-catalog", 2, "{}")
+                    unit.commit()
+        self.assertEqual(failed.exception.kind, "commit_unknown")
+        self.assertNotIn("private diagnostic", str(failed.exception))
+        with storage.read() as reopened:
+            self.assertEqual(reopened.read_snapshot("tts-catalog", 2), "{}")
 
     def test_raw_history_latest_exact_and_missing_survive_reopen(self):
         historical = ' \n{ "title" : "Café é · 朗読 🎙", "escaped": "\\u00e9" }\n'

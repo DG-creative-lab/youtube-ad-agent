@@ -43,8 +43,6 @@
     {"rule": "external","source": "campaign_agent/staff.py","target": "time","owner_issue": 37,"removal_milestone": "37-native-graph","reason": "Retire this direct import under the accepted module migration; see original import row."},
     {"rule": "external","source": "campaign_agent/workspaces.py","target": "pathlib","owner_issue": 37,"removal_milestone": "37-native-graph","reason": "Retire this direct import under the accepted module migration; see original import row."},
     {"rule": "external","source": "campaign_agent/workspaces.py","target": "sqlite3","owner_issue": 37,"removal_milestone": "37-native-graph","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "external","source": "campaign_agent/application/campaigns.py","target": "pathlib","owner_issue": 88,"removal_milestone": "88-composition","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "external","source": "campaign_agent/application/campaigns.py","target": "sqlite3","owner_issue": 86,"removal_milestone": "86-first-uow","reason": "Retire this direct import under the accepted module migration; see original import row."},
-    {"rule": "external","source": "campaign_agent/application/campaigns.py","target": "uuid","owner_issue": 86,"removal_milestone": "86-first-uow","reason": "Retire this direct import under the accepted module migration; see original import row."}
+    {"rule": "external","source": "campaign_agent/application/campaigns.py","target": "pathlib","owner_issue": 88,"removal_milestone": "88-composition","reason": "Retire this direct import under the accepted module migration; see original import row."}
   ]
 }

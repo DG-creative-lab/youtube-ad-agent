@@ -1,19 +1,15 @@
-"""Local campaign draft commands and their SQLite storage."""
+"""Campaign draft, approval and handoff commands over scoped records."""
 
-from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
-import sqlite3
-from uuid import uuid4
 
-from campaign_agent.ports.drafts import DraftRepository
+from campaign_agent.ports.drafts import CampaignDraftReader, CampaignDraftRepository, CampaignDraftStorage, DraftReader, DraftRepository
 from campaign_agent.domain.errors import StaleDraft, PackageConflict
 from campaign_agent.domain.placements import VIDEO_ID
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, require_access
 from campaign_agent.creatives import render_instruction_choices
-from campaign_agent.workspaces import verify
 from campaign_agent import handoff
 from campaign_agent.handoff import example_content, package_blockers, package_fingerprint, sample_package
 
@@ -57,15 +53,15 @@ POLICY = {
 
 
 class CampaignDrafts:
-    def __init__(self, path, live, operator, *, context, access, media_dir, repository,
-                 campaign_id=None, examples=None):
+    def __init__(self, live, operator, *, context, access, media_dir, storage: CampaignDraftStorage,
+                 new_id, campaign_id=None, examples=None):
         self.operator = operator
         self.context = context
         self.scope = context.scope
         self.access = access
-        self.path = path
         self.media_dir = media_dir
-        self._repository = repository
+        self._storage = storage
+        self._new_id = new_id
         self.live = live
         if campaign_id is None and context != LOCAL_CONTEXT:
             raise ValueError("Choose a provisioned campaign for this workspace.")
@@ -77,15 +73,15 @@ class CampaignDrafts:
             raise PermissionError("Supply the brand's own comparison catalog.")
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}
 
-    def _read(self, db, revision=None):
-        return self.read_from(self._repository(db), revision)
-
-    def read_from(self, repository: DraftRepository, revision=None):
-        self.require("youtube:campaign.read")
+    def _require_owner(self, repository: DraftReader):
         context = self.context
         if repository.owner_row(self.campaign_id) != (context.scope.client_id, context.scope.brand_id,
                                                      context.workspace_id, context.installation_id):
             raise PermissionError("The campaign is unavailable in this workspace.")
+
+    def read_from(self, repository: DraftReader, revision=None):
+        self.require("youtube:campaign.read")
+        self._require_owner(repository)
         snapshot = repository.read_snapshot(self.campaign_id, revision)
         return json.loads(snapshot) if snapshot is not None else None
 
@@ -93,8 +89,8 @@ class CampaignDrafts:
         route = getattr(self, "_placement_commands", None)
         if route is not None and route[1]():
             return route[0].read(revision)
-        with closing(sqlite3.connect(self.path)) as db:
-            return self._read(db, revision)
+        with self._storage.read() as records:
+            return self.read_from(records, revision)
 
     def _package_scope(self, campaign_id, revision):
         self.require("youtube:campaign.read")
@@ -103,55 +99,42 @@ class CampaignDrafts:
             raise ValueError("Choose a valid sample campaign revision.")
         return self.scope.client_id, self.scope.brand_id, campaign_id
 
-    def _package_review(self, db, campaign_id, revision):
+    def _review_from(self, records: CampaignDraftReader, campaign_id, revision):
         scope = self._package_scope(campaign_id, revision)
-        latest = self._read(db)
-        draft = latest if latest["revision"] == revision else self._read(db, revision)
+        latest = self.read_from(records)
+        draft = latest if latest["revision"] == revision else self.read_from(records, revision)
         if draft is None:
             raise ValueError("Campaign revision unavailable.")
-        draft = {**draft, "placements": self._validate_placements(db, draft["placements"], draft["brief"]["contexts"])}
+        draft = {**draft, "placements": self._validate_from(records, draft["placements"], draft["brief"]["contexts"])}
         package = sample_package(draft, self.media_dir, examples=self.examples)
         fingerprint = package_fingerprint(package)
         key = (*scope, revision, fingerprint)
-        row = db.execute(
-            "SELECT actor_id, approved_at FROM campaign_package_approvals WHERE "
-            "client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ? "
-            "AND snapshot IS NOT NULL",
-            key,
-        ).fetchone()
+        row = records.approval_row(key)
         approval = {"actor_id": row[0], "approved_at": row[1]} if row else None
         return {"package": package, "fingerprint": fingerprint, "approval": approval,
                 "current_revision": latest["revision"], "blockers": package_blockers(package)}, key
 
-    def _approval_history(self, db, scope):
+    def _approval_history(self, records: CampaignDraftReader, scope):
         return [
             {"revision": revision, "fingerprint": fingerprint, "approved_at": approved_at,
              "snapshot_available": bool(available)}
-            for revision, fingerprint, approved_at, available in db.execute(
-                "SELECT revision, fingerprint, approved_at, snapshot IS NOT NULL "
-                "FROM campaign_package_approvals WHERE client_id = ? AND brand_id = ? AND campaign_id = ? "
-                "ORDER BY revision DESC, approved_at DESC, fingerprint", scope,
-            )
+            for revision, fingerprint, approved_at, available in records.approval_history(scope)
         ]
 
     def read_approved_package(self, campaign_id, revision, fingerprint):
         scope = self._package_scope(campaign_id, revision)
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute(
-                "SELECT actor_id, approved_at, snapshot FROM campaign_package_approvals "
-                "WHERE client_id = ? AND brand_id = ? AND campaign_id = ? AND revision = ? AND fingerprint = ?",
-                (*scope, revision, fingerprint),
-            ).fetchone()
+        with self._storage.read() as records:
+            self._require_owner(records)
+            row = records.approval_snapshot_row((*scope, revision, fingerprint))
         if row is None or row[2] is None:
             return None
         return {"fingerprint": fingerprint, "approval": {"actor_id": row[0], "approved_at": row[1]},
                 "package": json.loads(row[2])}
 
     def review_package(self, campaign_id, revision):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN")
-            review, key = self._package_review(db, campaign_id, revision)
-            review["history"] = self._approval_history(db, key[:3])
+        with self._storage.read() as records:
+            review, key = self._review_from(records, campaign_id, revision)
+            review["history"] = self._approval_history(records, key[:3])
             return review
 
     def _require_current_package(self, review, revision, fingerprint):
@@ -161,27 +144,23 @@ class CampaignDrafts:
             raise PackageConflict(" ".join(review["blockers"]))
 
     def approve_package(self, campaign_id, revision, fingerprint):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
+        with self._storage.write() as unit:
+            records = unit.drafts
             self.require("youtube:campaign.approve")
-            review, key = self._package_review(db, campaign_id, revision)
+            review, key = self._review_from(records, campaign_id, revision)
             self._require_current_package(review, revision, fingerprint)
             if review["approval"] is None:
                 approved_at = datetime.now(timezone.utc).isoformat()
                 self.require("youtube:campaign.approve")
-                db.execute(
-                    "INSERT INTO campaign_package_approvals "
-                    "(client_id, brand_id, campaign_id, revision, fingerprint, actor_id, approved_at, snapshot) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (*key, self.operator.id, approved_at, json.dumps(review["package"])),
-                )
+                records.append_approval(key, self.operator.id, approved_at, json.dumps(review["package"]))
                 review["approval"] = {"actor_id": self.operator.id, "approved_at": approved_at}
-            review["history"] = self._approval_history(db, key[:3])
+            review["history"] = self._approval_history(records, key[:3])
+            unit.commit()
             return review
 
-    def require_approved_package(self, db, campaign_id, revision, fingerprint):
-        """Validate approval in the caller's transaction and return the reviewed package."""
-        review, _ = self._package_review(db, campaign_id, revision)
+    def require_approved_from(self, records: CampaignDraftReader, campaign_id, revision, fingerprint):
+        """Validate approval against the current unit and return the reviewed package."""
+        review, _ = self._review_from(records, campaign_id, revision)
         self._require_current_package(review, revision, fingerprint)
         if review["approval"] is None:
             raise PackageConflict("Approve this revision before continuing.")
@@ -189,9 +168,8 @@ class CampaignDrafts:
 
     def export_setup(self, campaign_id, revision, fingerprint):
         self.require("youtube:campaign.export")
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN")
-            review = self.require_approved_package(db, campaign_id, revision, fingerprint)
+        with self._storage.read() as records:
+            review = self.require_approved_from(records, campaign_id, revision, fingerprint)
             self.require("youtube:campaign.export")
             return {
                 "handoff": "Manual Google Ads setup example",
@@ -213,22 +191,16 @@ class CampaignDrafts:
                 raise ValueError("Catalog registration requires a creator-supplied or licensed source and a source_reference of up to 500 characters for each entry.")
             entries.append((row["video_id"], row["description"], row["source"], reference.strip()))
 
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
+        scope = self.scope.client_id, self.scope.brand_id, self.campaign_id
+        with self._storage.write() as unit:
+            records = unit.drafts
             self.require("youtube:catalog.write")
-            verify(db, self.context, self.campaign_id)
-            db.executemany(
-                "INSERT OR IGNORE INTO catalog_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                ((uuid4().hex, *entry, self.scope.client_id, self.scope.brand_id, self.campaign_id) for entry in entries),
-            )
-            return {
-                entry[0]: db.execute(
-                    "SELECT ref FROM catalog_entries WHERE video_id = ? AND title = ? "
-                    "AND source = ? AND source_reference = ? AND client_id=? AND brand_id=? AND campaign_id=?",
-                    (*entry, self.scope.client_id, self.scope.brand_id, self.campaign_id),
-                ).fetchone()[0]
-                for entry in entries
-            }
+            self._require_owner(records)
+            for entry in entries:
+                records.register_catalog_entry(scope, self._new_id(), entry)
+            references = {entry[0]: records.catalog_ref(scope, entry) for entry in entries}
+            unit.commit()
+            return references
 
     def comparison_content(self, example, fingerprint):
         """Verify a content reference using current media and immutable instruction versions."""
@@ -237,13 +209,10 @@ class CampaignDrafts:
         content = example_content(example, self.media_dir)
         if self.live or package_fingerprint(content) == fingerprint:
             return content
-        with closing(sqlite3.connect(self.path)) as db:
-            rows = db.execute(
-                "SELECT instruction FROM comparison_instruction_versions WHERE client_id = ? AND brand_id = ? "
-                "AND creative_version = ? AND comparison_version = ?",
-                (example.scope.client_id, example.scope.brand_id, example.creative_ref, example.ref),
-            ).fetchall()
-        for instruction, in rows:
+        with self._storage.read() as records:
+            instructions = records.instructions(example.scope.client_id, example.scope.brand_id,
+                                                example.creative_ref, example.ref)
+        for instruction in instructions:
             variant = {**content, "instruction": instruction}
             if package_fingerprint(variant) == fingerprint:
                 return variant
@@ -262,24 +231,25 @@ class CampaignDrafts:
                 or not isinstance(goal, str) or not 0 < len(goal.strip()) <= 500
                 or not isinstance(context, str) or context not in BRIEF["contexts"]):
             raise ValueError("Enter a brief title, goal and supported comparison context.")
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
+        with self._storage.write() as unit:
+            records = unit.drafts
             self.require("youtube:campaign.draft")
-            review, _ = self._package_review(db, campaign_id, revision)
+            review, _ = self._review_from(records, campaign_id, revision)
             if review["current_revision"] != revision or review["fingerprint"] != fingerprint:
                 raise PackageConflict("The package has changed. Load and review the latest draft.")
-            current = self._read(db)
+            current = self.read_from(records)
             saved = {
                 "campaign_id": campaign_id, "revision": revision + 1, "policy": POLICY,
-                "brief": {**BRIEF, "id": uuid4().hex, "title": title.strip(), "goal": goal.strip(),
+                "brief": {**BRIEF, "id": self._new_id(), "title": title.strip(), "goal": goal.strip(),
                           "contexts": {context: BRIEF["contexts"][context]}},
                 "placements": [row for row in current["placements"] if row["creative"] == context],
             }
             self.require("youtube:campaign.draft")
-            self._repository(db).append_snapshot(campaign_id, saved["revision"], json.dumps(saved))
+            records.append_snapshot(campaign_id, saved["revision"], json.dumps(saved))
+            unit.commit()
         return saved
 
-    def save_instruction_test(self, db, package, review, correction, instruction, *, inference=None):
+    def save_instruction_test_from(self, records: CampaignDraftRepository, package, review, correction, instruction, *, inference=None):
         """Persist one instruction change in the caller's validated review transaction."""
         self._package_scope(package["campaign_id"], package["revision"])
         group = next(group for group in package["groups"]
@@ -288,7 +258,7 @@ class CampaignDrafts:
         if inference is not None and inference.get("mode") == "openrouter":
             if render_instruction_choices(inference.get("wording_choices")) != instruction:
                 raise ValueError("Provider instructions must match the approved components.")
-        current = self._read(db)
+        current = self.read_from(records)
         if current["revision"] != package["revision"]:
             raise StaleDraft(current)
         test = {
@@ -303,12 +273,12 @@ class CampaignDrafts:
             test.update(source_test_id=review["test_id"], review_type="instruction_test")
         if inference is not None:
             test["inference"] = inference
-        return self._save_instruction_revision(db, current, group, instruction, {"instruction_test": test})
+        return self._save_instruction_revision_from(records, current, group, instruction, {"instruction_test": test})
 
-    def _save_instruction_revision(self, db, current, group, instruction, provenance):
+    def _save_instruction_revision_from(self, records: CampaignDraftRepository, current, group, instruction, provenance):
         """Write the wording, its viewer version and provenance in the caller's transaction."""
         self.require("youtube:campaign.draft")
-        verify(db, self.context, self.campaign_id)
+        self._require_owner(records)
         saved = {
             **current, "revision": current["revision"] + 1,
             "comparison_instructions": {**current.get("comparison_instructions", {}),
@@ -317,28 +287,17 @@ class CampaignDrafts:
         }
         if "instruction_test" in provenance:
             saved.pop("instruction_reuse", None)
-        db.executemany(
-            "INSERT INTO comparison_instruction_versions VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-            [(self.scope.client_id, self.scope.brand_id, group["creative_version"], group["comparison_version"],
-              package_fingerprint({"instruction": text}), text)
-             for text in (group["content"]["instruction"], instruction)],
-        )
-        self._repository(db).append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
+        versions = [(package_fingerprint({"instruction": text}), text)
+                    for text in (group["content"]["instruction"], instruction)]
+        records.add_instructions(self.scope.client_id, self.scope.brand_id, group["creative_version"],
+                                 group["comparison_version"], versions)
+        records.append_snapshot(self.campaign_id, saved["revision"], json.dumps(saved))
         return saved
 
-    @contextmanager
-    def write_unit(self):
-        """Own one native SQLite write transaction and its connection."""
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            yield db
-
-    def save(self, payload, *, connection=None, repository: DraftRepository | None = None):
+    def save(self, payload, *, repository: DraftRepository | None = None):
         route = getattr(self, "_placement_commands", None)
-        if connection is None and repository is None and route is not None and route[1]():
+        if repository is None and route is not None and route[1]():
             return route[0].save(payload)
-        if connection is not None and repository is not None:
-            raise ValueError("Choose one draft transaction source.")
         if not isinstance(payload, dict) or set(payload) != {"campaign_id", "revision", "placements"}:
             raise ValueError("Send a campaign ID, expected revision and placements.")
         expected = payload["revision"]
@@ -351,13 +310,10 @@ class CampaignDrafts:
 
         if repository is not None:
             return self._save_from(repository, expected, rows)
-        if connection is not None:
-            return self._save(db=connection, expected=expected, rows=rows)
-        with self.write_unit() as db:
-            return self._save(db, expected, rows)
-
-    def _save(self, db, expected, rows):
-        return self._save_from(self._repository(db), expected, rows)
+        with self._storage.write() as unit:
+            saved = self._save_from(unit.drafts, expected, rows)
+            unit.commit()
+            return saved
 
     def _save_from(self, repository: DraftRepository, expected, rows):
         self.require("youtube:campaign.draft")
@@ -382,10 +338,7 @@ class CampaignDrafts:
     def examples(self):
         return handoff.EXAMPLES if self._examples is None else self._examples
 
-    def _validate_placements(self, db, rows, contexts):
-        return self._validate_from(self._repository(db), rows, contexts)
-
-    def _validate_from(self, repository: DraftRepository, rows, contexts):
+    def _validate_from(self, repository: DraftReader, rows, contexts):
         seen, result = set(), []
         for row in rows:
             fields = ("id", "title", "creative", "source")
