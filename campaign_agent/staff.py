@@ -1,13 +1,11 @@
 """Server-owned staff sessions. Upstream verification is an injected boundary."""
-from contextlib import closing
 from dataclasses import dataclass, field
 import hashlib
 import math
-import secrets
-import sqlite3
-from time import time
-from typing import Protocol
+from typing import Callable, Protocol
+
 from .ports.access import AccessUnavailable
+from .ports.staff_sessions import StaffSession, StaffSessionStorage
 
 
 class SignInRequired(PermissionError):
@@ -37,9 +35,11 @@ def digest(value):
 
 
 class StaffSessions:
-    def __init__(self, path, verifier, *, issuer, audiences, client_id, clock=time):
-        self.path, self.verifier, self.issuer = path, verifier, issuer
-        self.audiences, self.client_id, self.clock = frozenset(audiences), client_id, clock
+    def __init__(self, storage: StaffSessionStorage, verifier: IdentityVerifier, *,
+                 issuer, audiences, client_id, clock: Callable[[], float], new_token: Callable[[], str]):
+        self.storage, self.verifier, self.issuer = storage, verifier, issuer
+        self.audiences, self.client_id = frozenset(audiences), client_id
+        self.clock, self.new_token = clock, new_token
 
     def _identity(self, reference):
         try:
@@ -59,35 +59,32 @@ class StaffSessions:
     def establish(self, credential_reference, campaign_id):
         """Trusted callback/composition only: reference points to already verified server credentials."""
         identity = self._identity(credential_reference)
-        token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        token, csrf = self.new_token(), self.new_token()
         expiry = min(identity.expires_at, self.clock() + 3600)
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT INTO staff_sessions VALUES(?,?,?,?,?,?,?,?)", (digest(token), credential_reference,
-                       identity.issuer, identity.subject, identity.session_id, campaign_id, csrf, expiry))
+        self.storage.insert(digest(token), StaffSession(
+            credential_reference, identity.issuer, identity.subject, identity.session_id, campaign_id, csrf, expiry,
+        ))
         return token
 
-    def local(self, token, *, allow_expired=False):
+    def local(self, token, *, allow_expired=False) -> StaffSession:
         if not isinstance(token, str) or len(token) != 43:
             raise SignInRequired("Sign in to open this workspace.")
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute("SELECT credential_reference,issuer,subject,upstream_session,campaign_id,csrf,expires_at "
-                             "FROM staff_sessions WHERE token_hash=?", (digest(token),)).fetchone()
-        if row is None or (not allow_expired and row[6] <= self.clock()):
+        session = self.storage.read(digest(token))
+        if session is None or (not allow_expired and session.expires_at <= self.clock()):
             raise SignInRequired("Sign in to open this workspace.")
-        return row
+        return session
 
     def current(self, token):
-        row = self.local(token)
-        identity = self._identity(row[0])
-        if (identity.issuer, identity.subject, identity.session_id) != row[1:4]:
+        session = self.local(token)
+        identity = self._identity(session.credential_reference)
+        if ((identity.issuer, identity.subject, identity.session_id)
+                != (session.issuer, session.subject, session.upstream_session)):
             raise SignInRequired("The staff session identity changed. Sign in again.")
-        return identity, row[4], row[5]
+        return identity, session.campaign_id, session.csrf
 
     def select(self, token, campaign_id):
         # The caller must authorize the candidate through the product/Gateplane context first.
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("UPDATE staff_sessions SET campaign_id=? WHERE token_hash=?", (campaign_id, digest(token)))
+        self.storage.select_campaign(digest(token), campaign_id)
 
     def end(self, token):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("DELETE FROM staff_sessions WHERE token_hash=?", (digest(token),))
+        self.storage.delete(digest(token))

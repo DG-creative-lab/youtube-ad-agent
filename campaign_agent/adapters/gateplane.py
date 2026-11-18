@@ -168,12 +168,12 @@ class GateplaneAccess:
             if native_campaign(self.path, request.campaign_id) != (context, revision, snapshot_hash):
                 return 'deny'
             if (self.monotonic() - start >= min(5000, result['valid_for_ms']) / 1000
-                    or self.clock() >= min(expiry, identity.expires_at, session[6])):
+                    or self.clock() >= min(expiry, identity.expires_at, session.expires_at)):
                 raise ValueError('Access expired during native verification')
         except Exception:
             raise AccessUnavailable('Current access decision is unavailable.') from None
         if permit:
-            wall_expiry = min(expiry, identity.expires_at, session[6])
+            wall_expiry = min(expiry, identity.expires_at, session.expires_at)
             deadline = min(start+min(5000,result['valid_for_ms'])/1000,
                            self.monotonic()+max(0,wall_expiry-self.clock()))
             return CommandPermit(request, hash_value(self.command), hashlib.sha256(self.session_token.encode()).hexdigest(),

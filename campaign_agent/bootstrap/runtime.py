@@ -2,7 +2,8 @@
 from functools import partial
 import json
 from pathlib import Path
-from time import time_ns
+from secrets import token_urlsafe
+from time import time, time_ns
 from uuid import uuid4
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
@@ -19,6 +20,7 @@ from campaign_agent.adapters.sqlite_planner import (
 )
 from campaign_agent.adapters.sqlite_schema import migrate_path
 from campaign_agent.adapters.sqlite_setup_delivery import SQLiteSetupDeliveryStorage
+from campaign_agent.adapters.sqlite_staff_sessions import SQLiteStaffSessionStorage
 from campaign_agent.adapters.sqlite_viewer import SQLiteViewerStorage
 from campaign_agent.agent.planner import PlacementAgent
 from campaign_agent.agent.planning_models import SimulatedPlanner, planner_request_body
@@ -217,7 +219,7 @@ def create_asset_store(path, root):
     return store
 
 
-def create_staff_sessions(path, verifier, **options):
-    sessions = StaffSessions(path, verifier, **options)
+def create_staff_sessions(path, verifier, *, issuer, audiences, client_id, clock=time):
     startup.initialize_staff_sessions(path)
-    return sessions
+    return StaffSessions(SQLiteStaffSessionStorage(path), verifier, issuer=issuer, audiences=audiences,
+                         client_id=client_id, clock=clock, new_token=lambda: token_urlsafe(32))
