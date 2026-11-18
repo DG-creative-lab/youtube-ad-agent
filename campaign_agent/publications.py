@@ -21,13 +21,6 @@ _REPUBLICATION_REQUIRED = (
 class Publications:
     def __init__(self, path, assets, *, clock=time):
         self.path, self.assets, self.clock = path, assets, clock
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS public_comparisons (
-                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                campaign_id TEXT NOT NULL, revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
-                creative_ref TEXT NOT NULL, snapshot TEXT NOT NULL, expires_at REAL NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1,
-                UNIQUE(campaign_id,revision,fingerprint,creative_ref))''')
 
     def publish(self, runtime, campaign_id, revision, fingerprint):
         # Publication is an export effect. A read or a model tool cannot publish content.
@@ -43,15 +36,22 @@ class Publications:
                     VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
                     (secrets.token_urlsafe(32), scope.client_id, scope.brand_id, campaign_id, revision, fingerprint,
                      group['creative_version'], json.dumps(group), self.clock() + 3600))
-            links = [{'creative_ref': creative, 'path': '/viewer?attribution=' + key}
-                    for key, creative in db.execute('SELECT id,creative_ref FROM public_comparisons '
-                        'WHERE campaign_id=? AND revision=? AND fingerprint=? AND active=1 AND expires_at>?',
-                        (campaign_id, revision, fingerprint, self.clock()))]
+            links = self._active_links(db, campaign_id, revision, fingerprint)
             if {link['creative_ref'] for link in links} != {group['creative_version'] for group in package['groups']}:
                 # Fail the whole export and roll back any sibling inserts. In particular,
                 # retrying export cannot revive a revoked grant or replace setup destinations.
                 raise PackageConflict(_REPUBLICATION_REQUIRED)
             return links
+
+    def _active_links(self, db, campaign_id, revision, fingerprint):
+        return [{'creative_ref': creative, 'path': '/viewer?attribution=' + key}
+            for key, creative in db.execute('SELECT id,creative_ref FROM public_comparisons '
+                'WHERE campaign_id=? AND revision=? AND fingerprint=? AND active=1 AND expires_at>?',
+                (campaign_id, revision, fingerprint, self.clock()))]
+
+    def active_links(self, campaign_id, revision, fingerprint):
+        with closing(sqlite3.connect(self.path)) as db:
+            return self._active_links(db, campaign_id, revision, fingerprint)
 
     def resolve(self, token):
         if not isinstance(token, str) or len(token) != 43:

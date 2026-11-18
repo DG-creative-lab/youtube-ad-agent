@@ -7,14 +7,13 @@ from time import time
 from uuid import uuid4
 
 from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
-from campaign_agent.assets import AssetStore
 from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp, validate_record
-from campaign_agent.bootstrap.runtime import create_runtime
+from campaign_agent.bootstrap.hosted import create_hosted_application, create_hosted_runtime, initialize_hosted_storage
+from campaign_agent.bootstrap.runtime import create_asset_store, create_staff_sessions
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR
-from campaign_agent.hosted import HostedApplication
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
 from campaign_agent.ports.access import AccessUnavailable
-from campaign_agent.staff import StaffSessions, VerifiedIdentity, SignInRequired
+from campaign_agent.staff import VerifiedIdentity, SignInRequired
 from campaign_agent.workspaces import provision_workspace
 from campaign_agent.ports.inference import ProviderError, ChargingProfile
 from campaign_agent.model_catalogue import endpoint_fingerprint
@@ -154,7 +153,8 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
     }
     seed = _SeedAccess()
     operator = Operator('fixture-provisioner', frozenset(context.scope for context in contexts.values()))
-    store = AssetStore(path, asset_root if asset_root is not None else path.with_suffix('.assets'))
+    initialize_hosted_storage(path)
+    store = create_asset_store(path, asset_root if asset_root is not None else path.with_suffix('.assets'))
     catalogs = {}
     def assets(client, brand):
         scope = BrandScope(client, brand)
@@ -177,17 +177,17 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
                                (context.scope.client_id, context.scope.brand_id, catalog))
                 catalogs[context.scope] = catalog
         examples, media_dir = assets(context.scope.client_id, context.scope.brand_id)
-        r = create_runtime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
+        r = create_hosted_runtime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
         r.planner.catalogs.register('Authored fixture catalog', [
             {'video_id': 'SAMPLE00001', 'description': 'Video editing tutorial', 'source': 'synthetic'},
             {'video_id': 'SAMPLE00002', 'description': 'Audiobook narration tutorial', 'source': 'synthetic'}])
     authority = FixtureAuthority()
-    sessions = StaffSessions(path, authority, issuer=ISSUER, audiences=AUDIENCES, client_id=CLIENT_ID)
+    sessions = create_staff_sessions(path, authority, issuer=ISSUER, audiences=AUDIENCES, client_id=CLIENT_ID)
     # Fixture authority is in-memory, so a restart requires explicit synthetic sign-in.
     # The fixture-owned database retains campaigns, approvals and viewer evidence.
     with closing(sqlite3.connect(path)) as db, db:
         db.execute('DELETE FROM staff_sessions')
     metadata=AuthoredProviderMetadata()
-    return HostedApplication(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
+    return create_hosted_application(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
                              fixture_login=authority, provider_metadata=metadata, provider_profiles=metadata.profiles,
-                             authority_factory=GateplaneAccess)
+                             authority_factory=GateplaneAccess, initialize=False)

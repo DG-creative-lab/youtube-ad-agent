@@ -95,7 +95,15 @@ class LocalHttpJourneyTests(unittest.TestCase):
         from campaign_agent.bootstrap.planner import create_local_planner
         from scripts import placement_review
 
-        runtime = create_local_planner(path, media_dir=media_dir)
+        runtime = None
+
+        def compose(*args, **kwargs):
+            nonlocal runtime
+            result = create_local_planner(*args, **kwargs)
+            if kwargs['initialize']:
+                runtime = result
+            return result
+
         stop = Event()
         completed = []
         case = self
@@ -147,10 +155,10 @@ class LocalHttpJourneyTests(unittest.TestCase):
                     completed.append(True)
 
         with (patch.object(placement_review, 'ThreadingHTTPServer', Server),
+              patch.object(placement_review, 'create_local_planner', side_effect=compose),
               patch.object(placement_review.secrets, 'token_urlsafe', return_value='token'),
               redirect_stdout(io.StringIO())):
-            placement_review.serve(8765, False, path, viewer_port=8766,
-                                   runtime_factory=create_local_planner, initialize=False, media_dir=media_dir)
+            placement_review.serve(8765, False, path, viewer_port=8766, media_dir=media_dir)
         self.assertEqual(completed, [True])
 
     def test_offline_placement_uses_typed_runtime_without_foreground(self):
@@ -181,8 +189,8 @@ class LocalHttpJourneyTests(unittest.TestCase):
             blocked = SimpleNamespace(connect=Mock(side_effect=AssertionError('application SQLite connection')), Error=sqlite3.Error)
             with (patch('campaign_agent.foreground_inference.ForegroundInference.attach', side_effect=AssertionError('foreground attached')),
                   patch.object(PlacementRuntime, 'start', record_start),
-                  patch.object(placement_review, 'CampaignDrafts', side_effect=AssertionError('Duplicate draft startup')),
-                  patch.object(placement_review, 'ViewerMeasurement', side_effect=AssertionError('Duplicate viewer startup')),
+                  patch.object(placement_review, 'create_drafts', side_effect=AssertionError('Duplicate draft startup')),
+                  patch.object(placement_review, 'create_viewer', side_effect=AssertionError('Duplicate viewer startup')),
                   patch.object(campaigns, 'sqlite3', blocked), patch.object(legacy_planner, 'sqlite3', blocked)):
                 self.serve_journey(Path(directory) / 'demo.sqlite3', journey)
             self.assertEqual(len(starts), 1)

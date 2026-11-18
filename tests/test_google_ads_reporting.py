@@ -8,6 +8,7 @@ from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox
 from campaign_agent.agent.conversations import bounded_context
+from campaign_agent.bootstrap.runtime import create_setup
 from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
 from campaign_agent.measurement import ViewerNotFound
 from scripts.campaign_drafts import PackageConflict
@@ -156,7 +157,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         offline = self.sandbox.case.runtime
         provider = GoogleAdsSandbox(fixtures.MANAGER, fixtures.ACCOUNT, self.sandbox.creatives, fixtures.LOGO,
                                     self.sandbox.post, viewer_origin='https://viewer.example.com/')
-        google = CampaignSetup(self.sandbox.drafts, provider)
+        google = create_setup(self.sandbox.drafts, provider)
         simulated_plan = offline.setup.validate(*self.reference)
         google_plan = google.validate(*self.reference)
         self.assertEqual(len(simulated_plan['viewer_links']), 2)

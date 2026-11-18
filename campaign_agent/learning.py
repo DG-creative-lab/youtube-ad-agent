@@ -32,24 +32,10 @@ def _comparison_key(group, baseline):
 
 
 class InstructionFindings:
-    def __init__(self, tests, *, initialize=True):
+    def __init__(self, tests):
         self.tests = tests
         self.drafts = tests.drafts
         self.connect = tests.viewer.connect
-        if not initialize:
-            return
-        with closing(self.connect()) as db, db:
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS instruction_findings (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    comparison_key TEXT NOT NULL, snapshot TEXT NOT NULL,
-                    retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1))
-                )
-            """)
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS instruction_findings_scope
-                ON instruction_findings(client_id, brand_id, comparison_key)
-            """)
 
     def _current_source(self, db, test, snapshot_id):
         snapshot = self.tests._latest_snapshot(db, test["id"])

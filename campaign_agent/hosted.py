@@ -1,11 +1,9 @@
 """ASGI staff/public composition over existing commands; no loopback HTTP wrapper."""
-from contextlib import closing
 from html import escape
 import json
 import hashlib
 from pathlib import Path
 import secrets
-import sqlite3
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
@@ -16,16 +14,12 @@ from starlette.routing import Route
 
 from campaign_agent.domain.scope import Operator
 from campaign_agent.assets import AssetUnavailable
-from campaign_agent.adapters.gateplane import GateplaneAccess
-from campaign_agent.bootstrap.runtime import create_runtime
 from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.handoff import caption_bytes, media_sha256, read_media
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable, StaffAuthorityFactory
-from campaign_agent.publications import Publications
 from campaign_agent.staff import SignInRequired
-from campaign_agent.bootstrap.runtime import create_provider_sessions
 from campaign_agent.provider_sessions import ProviderContext, validate_fields
 from campaign_agent.ports.inference import ProviderError
 from campaign_agent.domain.errors import PackageConflict, StaleDraft
@@ -54,12 +48,14 @@ def fields(data, required, optional=()):
 
 class HostedApplication:
     def __init__(self, path, sessions, client, assets, *, staff_origin, viewer_origin,
-                 application_id='youtube', fixture_login=None, provider_metadata=None, provider_profiles=(),
-                 provider_completion_transport=None, authority_factory: StaffAuthorityFactory = GateplaneAccess):
+                 publications, provider_sessions, runtime_factory, authority_factory: StaffAuthorityFactory,
+                 application_id='youtube', fixture_login=None, provider_metadata=None,
+                 provider_completion_transport=None):
         self.path, self.sessions, self.client, self.assets = path, sessions, client, assets
         self.staff_origin, self.viewer_origin, self.application_id = staff_origin, viewer_origin, application_id
         self.provider_completion_transport=provider_completion_transport
         self.authority_factory = authority_factory
+        self.runtime_factory = runtime_factory
         self.fixture_login = fixture_login
         self.fixture = fixture_login is not None
         if self.fixture and provider_metadata is not None and not getattr(provider_metadata,'synthetic',False):
@@ -75,8 +71,8 @@ class HostedApplication:
         if staff_origin == viewer_origin:
             raise ValueError('Staff and viewer origins must be separate.')
         self.cookie = 'gp_fixture_session' if self.fixture else '__Host-gp_session'
-        self.publications = Publications(path, assets)
-        self.provider_sessions = create_provider_sessions(path,metadata=provider_metadata,profiles=provider_profiles)
+        self.publications = publications
+        self.provider_sessions = provider_sessions
         self.staff = self._app(False)
         self.viewer = self._app(True)
 
@@ -151,7 +147,7 @@ class HostedApplication:
                                         application_id=self.application_id, command=command)
         _, context, principal = access.principal(campaign)
         examples, media_dir = self.assets(context.scope.client_id, context.scope.brand_id)
-        runtime = create_runtime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
+        runtime = self.runtime_factory(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
                     context=context, campaign_id=campaign, access=access, examples=examples, media_dir=media_dir,
                     viewer_links=self.publications.approved_links,web=True)
         return runtime, principal
@@ -300,11 +296,8 @@ class HostedApplication:
                 return r.drafts.read_approved_package(r.drafts.campaign_id, int(q['revision']), q['approval'])
             result = reads[path](r.drafts.campaign_id, int(q['revision']), **({'fingerprint': q['fingerprint']} if 'fingerprint' in q else {}))
             if path == '/api/campaign/package':
-                with closing(sqlite3.connect(self.path)) as db:
-                    links = [{'creative_ref': creative, 'url': self.viewer_origin + '/viewer?attribution=' + token}
-                             for token, creative in db.execute('SELECT id,creative_ref FROM public_comparisons '
-                                 'WHERE campaign_id=? AND revision=? AND fingerprint=? AND active=1 AND expires_at>?',
-                                 (r.drafts.campaign_id, int(q['revision']), result['fingerprint'], self.publications.clock()))]
+                links = self.publications.active_links(r.drafts.campaign_id, int(q['revision']), result['fingerprint'])
+                links = [{'creative_ref': link['creative_ref'], 'url': self.viewer_origin + link['path']} for link in links]
                 return {**result, 'public_comparisons': links}
             return result
         raise ViewerNotFound()

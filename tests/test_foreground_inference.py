@@ -549,12 +549,10 @@ class LocalForegroundTests(unittest.TestCase):
             stack.enter_context(patch.object(placement_review.Thread,'start'));stack.enter_context(patch.object(placement_review.Thread,'join'))
             stack.enter_context(patch.object(placement_review.secrets,'token_urlsafe',return_value='authored-local-operator'))
             stack.enter_context(redirect_stdout(io.StringIO()))
-            options = {}
+            options = {"runtime_factory": runtime}
             if bootstrapped:
                 create_local_planner(path)
                 options.update(runtime_factory=runtime, provider_sessions_factory=_provider_sessions, initialize=False)
-            else:
-                stack.enter_context(patch.object(placement_review, 'AgentRuntime', side_effect=runtime))
             placement_review.serve(18981, False, draft_path=path, viewer_port=18982, provider_metadata=metadata,
                                    provider_profiles=metadata.profiles, provider_completion_transport=complete, **options)
             handler=servers[0].handler.__new__(servers[0].handler);handler.server=servers[0];handler.send=Mock()

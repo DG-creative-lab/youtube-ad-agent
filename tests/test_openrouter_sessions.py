@@ -13,9 +13,9 @@ from campaign_agent.recovery import backup_store,restore_store
 from campaign_agent.adapters.fixture_access import offline_fixture,AuthoredProviderMetadata
 from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.access import LOCAL_CONTEXT,LOCAL_OPERATOR
-from campaign_agent.assets import AssetStore
+from campaign_agent.bootstrap.runtime import create_asset_store as AssetStore
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
 import test_openrouter_http as http_fixtures
 import test_openrouter_reviews as review_fixtures
 import test_openrouter_instructions as draft_fixtures

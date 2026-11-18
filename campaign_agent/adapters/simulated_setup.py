@@ -9,15 +9,8 @@ class SimulatedCampaignSetup:
     account_id = 'offline-demo'
     local_validation = True
 
-    def __init__(self, path, *, initialize=True):
+    def __init__(self, path):
         self.path = path
-        if not initialize:
-            return
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS simulated_campaigns (
-                account_id TEXT NOT NULL, operation_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                PRIMARY KEY (account_id, operation_id)
-            )''')
 
     def prepare(self, package, fingerprint):
         return {

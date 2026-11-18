@@ -11,7 +11,6 @@ import sqlite3
 from time import time
 
 from campaign_agent.domain.scope import WorkspaceContext
-from .migrations import migrate_path
 from .application.catalogue_policy import fingerprint, normalize, select_endpoint, compatible_model, model_id, price
 from .ports.access import AccessRequest, AccessUnavailable
 from .ports.inference import CatalogueState, ForegroundCredential, ProviderError
@@ -82,11 +81,9 @@ def parse_command(raw):
 
 
 class ProviderSessions:
-    def __init__(self,path,*,metadata=None,profiles=(),clock=time,initialize=True, cache: CatalogueState):
+    def __init__(self,path,*,metadata=None,profiles=(),clock=time, cache: CatalogueState):
         self.path=Path(path);self.metadata=metadata;self.profiles=tuple(profiles);self.clock=clock
         self.cache = cache
-        if initialize:
-            migrate_path(self.path)
 
     def _requests(self, context):
         c=context.native

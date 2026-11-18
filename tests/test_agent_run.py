@@ -7,7 +7,8 @@ import unittest
 from campaign_agent.access import BrandScope, LOCAL_BRAND, Operator
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.agent.run import DEMO_REQUEST
-from scripts.campaign_drafts import CampaignDrafts, StaleDraft
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import StaleDraft
 
 
 class AgentRunTests(unittest.TestCase):

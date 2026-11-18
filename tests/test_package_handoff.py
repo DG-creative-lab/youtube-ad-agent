@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from campaign_agent.creatives import EXAMPLES
-from scripts.campaign_drafts import CampaignDrafts, PackageConflict
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import PackageConflict
 
 
 class PackageHandoffTests(unittest.TestCase):

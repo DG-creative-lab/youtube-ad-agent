@@ -40,11 +40,6 @@ class StaffSessions:
     def __init__(self, path, verifier, *, issuer, audiences, client_id, clock=time):
         self.path, self.verifier, self.issuer = path, verifier, issuer
         self.audiences, self.client_id, self.clock = frozenset(audiences), client_id, clock
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS staff_sessions (
-                token_hash TEXT PRIMARY KEY, credential_reference TEXT NOT NULL,
-                issuer TEXT NOT NULL, subject TEXT NOT NULL, upstream_session TEXT NOT NULL,
-                campaign_id TEXT NOT NULL, csrf TEXT NOT NULL, expires_at REAL NOT NULL)''')
 
     def _identity(self, reference):
         try:

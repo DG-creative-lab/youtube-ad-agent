@@ -18,7 +18,6 @@ from campaign_agent.domain.scope import BrandScope
 from .access import require_access
 from .creatives import Example
 from .handoff import media_sha256, package_fingerprint
-from .migrations import migrate_path
 from .workspaces import verify
 
 MAX_BLOB_BYTES = 64 * 1024 * 1024
@@ -97,9 +96,6 @@ class CatalogMedia:
 class AssetStore:
     def __init__(self, path, root):
         self.path, self.root = Path(path), Path(root).resolve()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        migrate_path(self.path)
 
     def import_catalog(self, context, campaign_id, examples, source, *, operator, access):
         """Trusted provisioning; no upload or ownership assertion endpoint is added."""

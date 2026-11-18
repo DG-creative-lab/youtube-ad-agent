@@ -4,18 +4,18 @@ The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.
 
-## Current architecture milestone · #87 provider composition
+## Current architecture milestone · #88 startup and entrypoints
 
-The native composition in `bootstrap/runtime.py` supplies planning, assessment,
-drafting, simulated setup and authored reporting dependencies. The existing CLI and
-local and hosted launchers use that composition. Catalogue policy uses an explicit
-clock and the provider-session service receives a cache owned by its launcher.
+Local demo, hosted staff/public and authored fixtures explicitly prepare the
+native SQLite store before serving commands. The local HTTP and placement CLI
+launchers use the same placement composition. Hosted requests bind the current
+staff principal and campaign without rerunning schema initialization. The
+standalone sandbox command retains its opt-in configuration and delegates to its
+own composition root.
 
-Foreground compatibility follows the concrete native models selected by the
-composition. Explicitly supplied services retain their offline use and receipt
-recovery. Existing commands preserve request, reservation and receipt semantics.
-The remaining transport and startup consolidation stays with #88. GitHub #87
-closes when its completion PR merges into main.
+The runtime still qualifies only the native foreground adapters selected by its
+bootstrap. Storage connection and repository ownership for retained commands
+continues under [#37](native-storage-migration.md).
 
 ### Delivered #86 local placement pilot
 

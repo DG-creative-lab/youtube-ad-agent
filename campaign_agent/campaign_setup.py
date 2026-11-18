@@ -16,31 +16,10 @@ def _valid_resource_id(value: object) -> bool:
 
 
 class CampaignSetup:
-    def __init__(self, drafts, provider: SetupProvider, *, viewer_links=None, initialize=True):
+    def __init__(self, drafts, provider: SetupProvider, *, viewer_links=None):
         self.drafts, self.provider = drafts, provider
         self.viewer_links = viewer_links
         self.path = drafts.path
-        if not initialize:
-            return
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            columns = {row[1] for row in db.execute('PRAGMA table_info(campaign_setups)')}
-            legacy = bool(columns) and 'provider' not in columns
-            if legacy:
-                db.execute('ALTER TABLE campaign_setups RENAME TO campaign_setups_legacy')
-            db.execute('''CREATE TABLE IF NOT EXISTS campaign_setups (
-                client_id TEXT NOT NULL, brand_id TEXT NOT NULL, campaign_id TEXT NOT NULL,
-                revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
-                provider TEXT NOT NULL, account_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                PRIMARY KEY (client_id, brand_id, campaign_id, revision, fingerprint, provider, account_id)
-            )''')
-            if legacy:
-                db.execute('''INSERT INTO campaign_setups
-                              SELECT client_id, brand_id, campaign_id, revision, fingerprint,
-                                     json_extract(snapshot, '$.plan.provider'),
-                                     json_extract(snapshot, '$.plan.account_id'), snapshot
-                              FROM campaign_setups_legacy''')
-                db.execute('DROP TABLE campaign_setups_legacy')
 
     def _key(self, campaign_id, revision, fingerprint):
         scope = self.drafts._package_scope(campaign_id, revision)

@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
-from campaign_agent.agent.conversations import CampaignConversations
+from campaign_agent.adapters.sqlite_conversations import SQLiteConversationStore
 import test_placement_planner as fixtures
 
 
@@ -45,7 +45,14 @@ class ConversationStorageTests(unittest.TestCase):
         with sqlite3.connect(self.case.path) as db:
             db.execute('DROP TABLE planner_messages')
             db.execute('ALTER TABLE planner_sessions DROP COLUMN campaign_id')
-        with patch.object(CampaignConversations, 'finish', side_effect=RuntimeError('interrupt adoption')):
+        append = SQLiteConversationStore.append_message
+
+        def interrupt_assistant(store, session, run_id, role, *args):
+            if role == 'assistant':
+                raise RuntimeError('interrupt adoption')
+            return append(store, session, run_id, role, *args)
+
+        with patch.object(SQLiteConversationStore, 'append_message', interrupt_assistant):
             with self.assertRaisesRegex(RuntimeError, 'interrupt adoption'):
                 self.case.reopen()
         with sqlite3.connect(self.case.path) as db:

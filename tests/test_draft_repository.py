@@ -45,8 +45,7 @@ class DraftRepositoryTests(unittest.TestCase):
 
     def test_pure_draft_participant_keeps_provenance_replay_and_stale_rules(self):
         original = self.records.snapshots[0]
-        with patch('campaign_agent.application.campaigns.SQLiteDraftStore', side_effect=AssertionError('No native store')), \
-             patch('campaign_agent.application.campaigns.SQLiteDraftRepository', side_effect=AssertionError('No native repository')):
+        with patch.object(self.drafts, '_repository', side_effect=AssertionError('No native repository')):
             saved = self.drafts.save(self.payload, repository=self.records)
             self.assertEqual(saved['revision'], 2)
             self.assertEqual(saved['placements'], [self.row])
