@@ -12,6 +12,7 @@ if not __package__:
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox, google_transport
 from campaign_agent.bootstrap.runtime import create_drafts, create_setup
 from campaign_agent.ports.campaign_effects import SetupProviderError
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.application.campaigns import DEFAULT_DRAFT_PATH
 
 def main():
@@ -50,7 +51,7 @@ def main():
                 result = setup.reconcile(*reference, args.setup_id)
         print(json.dumps(result, indent=2))
         return 0 if result['status'] in {'validated', 'verified'} else 1
-    except (ImportError, OSError, KeyError, TypeError, ValueError, SetupProviderError) as error:
+    except (ImportError, OSError, KeyError, TypeError, ValueError, SetupProviderError, StorageError) as error:
         print(f'Sandbox setup stopped: {error}', file=sys.stderr)
         return 1
 

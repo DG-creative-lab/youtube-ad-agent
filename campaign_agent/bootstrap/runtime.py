@@ -18,6 +18,7 @@ from campaign_agent.adapters.sqlite_planner import (
     SQLitePlannerLifecycleStorage, SQLitePlannerReadStorage,
 )
 from campaign_agent.adapters.sqlite_schema import migrate_path
+from campaign_agent.adapters.sqlite_setup_delivery import SQLiteSetupDeliveryStorage, verified_viewer_link
 from campaign_agent.agent.planner import PlacementAgent
 from campaign_agent.agent.planning_models import SimulatedPlanner, planner_request_body
 from campaign_agent.agent.run import AgentRuntime, RecordedInference
@@ -96,6 +97,33 @@ def create_drafts(path, live, operator=LOCAL_OPERATOR, *, media_dir=None, contex
     return drafts
 
 
+class _NativeCampaignSetup(CampaignSetup):
+    """Retain same-transaction validation inside the existing native agent turn."""
+
+    def validate(self, campaign_id, revision, fingerprint, *, connection=None):
+        if connection is None:
+            return super().validate(campaign_id, revision, fingerprint)
+        return self.validate_from(self.storage.borrow(connection), campaign_id, revision, fingerprint)
+
+
+class _NativeCampaignDelivery(CampaignDelivery):
+    """Use the planner's existing transaction for report and sibling turn writes."""
+
+    def binding(self, db, campaign_id, revision, fingerprint):
+        return self.binding_from(self.storage.borrow(db), campaign_id, revision, fingerprint)
+
+    def saved_report(self, db, binding):
+        return self.saved_report_from(self.storage.borrow(db), binding)
+
+    def save(self, db, campaign_id, revision, fingerprint, report):
+        return self.save_from(self.storage.borrow(db), campaign_id, revision, fingerprint, report)
+
+    def recommend(self, campaign_id, revision, fingerprint, report_id, *, connection=None):
+        if connection is None:
+            return super().recommend(campaign_id, revision, fingerprint, report_id)
+        return self.recommend_from(self.storage.borrow(connection), campaign_id, revision, fingerprint, report_id)
+
+
 def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None, *, media_dir=None,
                    openrouter_models=(), review_transport=None, openrouter_draft_models=(), draft_transport=None,
                    main_models=(), main_transport=None, planner_simulator=None, placement_classifier=None,
@@ -114,11 +142,13 @@ def create_runtime(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, model=None,
     path = drafts.path
     if initialize:
         startup.initialize_runtime_schema(path, simulated_setup=setup_provider is None)
-    setup = CampaignSetup(drafts, SimulatedCampaignSetup(path) if setup_provider is None else setup_provider,
-                          viewer_links=viewer_links)
-    viewer = ViewerMeasurement(path, drafts.examples, campaign_id=drafts.campaign_id)
+    setup_storage = SQLiteSetupDeliveryStorage(path)
+    setup = _NativeCampaignSetup(drafts, SimulatedCampaignSetup(path) if setup_provider is None else setup_provider,
+                                 setup_storage, viewer_links=viewer_links)
+    viewer = ViewerMeasurement(path, drafts.examples, campaign_id=drafts.campaign_id, verified_link=verified_viewer_link)
     performance = CampaignPerformance(drafts, viewer, SampleCampaignReporting())
-    delivery = CampaignDelivery(drafts, setup, performance, reporting, demo_scenario=demo_scenario, demo_report=demo_report)
+    delivery = _NativeCampaignDelivery(drafts, setup, performance, setup_storage, reporting,
+                                       demo_scenario=demo_scenario, demo_report=demo_report)
     tests = InstructionTests(drafts, viewer, performance)
     reviewer = (OpenRouterReviews(openrouter_models, transport=review_transport)
                 if instruction_reviewer is None else instruction_reviewer)
@@ -151,7 +181,7 @@ def create_provider_sessions(path, *, initialize=True, **options) -> ProviderSes
 def create_viewer(path, examples=EXAMPLES, *, campaign_id='tts-sample', initialize=True):
     if initialize:
         startup.initialize_viewer(path)
-    return ViewerMeasurement(path, examples, campaign_id=campaign_id)
+    return ViewerMeasurement(path, examples, campaign_id=campaign_id, verified_link=verified_viewer_link)
 
 
 def create_performance(drafts, viewer, *, initialize=True) -> CampaignPerformance:
@@ -163,7 +193,7 @@ def create_performance(drafts, viewer, *, initialize=True) -> CampaignPerformanc
 
 def create_setup(drafts, provider, *, viewer_links=None):
     startup.initialize_campaign_setup(drafts.path)
-    return CampaignSetup(drafts, provider, viewer_links=viewer_links)
+    return _NativeCampaignSetup(drafts, provider, SQLiteSetupDeliveryStorage(drafts.path), viewer_links=viewer_links)
 
 
 def create_simulated_setup(path):

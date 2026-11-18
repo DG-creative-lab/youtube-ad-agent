@@ -6,7 +6,6 @@ import sqlite3
 from time import time_ns
 from uuid import uuid4
 
-from .campaign_setup import CampaignSetup
 from .creatives import EXAMPLES
 from .domain.errors import PackageConflict
 from .handoff import package_fingerprint
@@ -17,10 +16,11 @@ class ViewerNotFound(LookupError):
 
 
 class ViewerMeasurement:
-    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample"):
+    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample", verified_link=None):
         self.path = path
         # Server composition selects the campaign. Public payloads cannot override it.
         self.campaign_id = campaign_id
+        self._verified_link = verified_link
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
 
@@ -37,10 +37,11 @@ class ViewerMeasurement:
         return origin, target
 
     def open_verified_ad(self, drafts, attribution, visit_id, *, rehearsal):
+        if self._verified_link is None:
+            raise ViewerNotFound("This ad comparison is unavailable.")
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            link = CampaignSetup.verified_viewer_link(db, drafts.scope, attribution,
-                                                     campaign_id=drafts.campaign_id)
+            link = self._verified_link(db, drafts.scope, attribution, campaign_id=drafts.campaign_id)
             if link is None:
                 raise ViewerNotFound("This ad comparison is unavailable.")
             result = self.open_reviewed(
@@ -144,39 +145,6 @@ class ViewerMeasurement:
                 "completion_rate": completed / arrivals if arrivals else None,
             })
         return observations
-
-    @staticmethod
-    def ad_link_activity(db, scope, link, *, campaign_id="tts-sample"):
-        arrivals, completions = db.execute("""
-            SELECT COUNT(*), COUNT(c.visit_id)
-            FROM viewer_visits v
-            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
-            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
-            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
-        """, (f"arrival:{link['comparison_ref']}", scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'], campaign_id)).fetchone()
-        return {"arrivals": arrivals, "completions": completions}
-
-    @staticmethod
-    def ad_link_window_activity(db, scope, link, start_ms, end_ms, *, campaign_id="tts-sample"):
-        rows = db.execute("""
-            SELECT v.rehearsal, COUNT(*), COUNT(c.visit_id)
-            FROM viewer_visits v
-            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
-            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
-                AND c.completed_ms >= v.arrived_ms AND c.completed_ms < ?
-            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
-                AND v.arrived_ms >= ? AND v.arrived_ms < ? AND v.rehearsal IN (0, 1)
-            GROUP BY v.rehearsal
-        """, (f"arrival:{link['comparison_ref']}", end_ms, scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'], campaign_id, start_ms, end_ms))
-        cohorts = {rehearsal: (arrivals, completions) for rehearsal, arrivals, completions in rows}
-        arrivals, completions = cohorts.get(0, (0, 0))
-        rehearsals, rehearsal_completions = cohorts.get(1, (0, 0))
-        return {"arrivals": arrivals, "completions": completions,
-                "rehearsal_arrivals": rehearsals, "rehearsal_completions": rehearsal_completions}
 
     def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
                      content_fingerprint=None, origin_unavailable=False, ad_link_id=None, rehearsal=False, connection=None):

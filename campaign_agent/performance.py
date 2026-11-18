@@ -9,6 +9,7 @@ import sqlite3
 from .domain.performance import LOW_COMPLETION_RATE, MIN_LOCAL_ARRIVALS, apply_correction
 from .handoff import package_fingerprint
 from .ports.campaign_effects import SampleReporting
+from .ports.setup_delivery import SetupDeliveryReader
 from campaign_agent.domain.errors import PackageConflict
 
 
@@ -116,6 +117,13 @@ class CampaignPerformance:
             "campaign_id": package["campaign_id"],
             "proposal": {"kind": "comparison_test", "creative_version": creative},
         }, package)
+
+    def correction_for_comparison_from(self, records: SetupDeliveryReader, package, creative):
+        scope = self.drafts._package_scope(package["campaign_id"], package["revision"])
+        group = comparison_group(package, creative)
+        row = records.correction_row(*scope, creative, group["comparison_version"],
+                                     comparison_identity(group, keep_takes=True), comparison_identity(group))
+        return self._correction_record(row) if row else None
 
     @staticmethod
     def _correction_record(row):
