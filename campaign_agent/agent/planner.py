@@ -275,7 +275,7 @@ class PlacementAgent:
             if self.owner.foreground: self.owner.foreground.before_commit(source['settings'])
             self.owner.require("youtube:agent.run")
             classified = None
-            if receipt['tool'] == 'classify_catalog' and not receipt['arguments']:
+            if receipt['tool'] == 'classify_catalog' and not receipt['arguments'] and not source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
                 classified = self._classify(run_id)
             captured_review = None
             if receipt['tool'] == 'review_performance' and not receipt['arguments']:
@@ -413,7 +413,7 @@ class PlacementAgent:
         ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
                       'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
         return {'revision': saved['revision'], 'ambiguous': ambiguous,
-                'message': 'Placement draft saved for package review. Classifications are simulated.'}, 'ready_for_review'
+                'message': 'Placement draft saved for package review.' + (' Classifications are simulated.' if source['settings']['mode'] == 'simulated' else '')}, 'ready_for_review'
 
     def _finish(self, db, run_id, result, status):
         SQLiteRunStore(db).update_status(run_id, status)
@@ -422,6 +422,11 @@ class PlacementAgent:
 
     def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
         name, args = call['tool'], call['arguments']
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/') and name in {'review_performance', 'validate_campaign_setup'}:
+            raise ValueError('This tool uses evaluation fixtures and is unavailable for live requests.')
+        if name == 'classify_catalog' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.placement_discovery import model_assignments
+            return model_assignments(args, history, self.drafts._read(db)['brief']['contexts']), 'running'
         if name in {'read_campaign', 'inspect_catalog', 'classify_catalog', 'review_performance', 'load_experiment_evidence'} and args:
             raise ValueError('Unexpected fields')
         if name == 'read_campaign':
@@ -495,6 +500,9 @@ class PlacementAgent:
             return self._save_placement_tool(SQLitePlannerStore(db).placement_repositories, source, history, call)
         if name == 'ask_clarification' and set(args) == {'reason'}:
             return clarification(args['reason'], source['revision']), 'needs_input'
+        if name == 'respond' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.agent.replies import model_reply
+            return model_reply(args, source['revision']), 'answered'
         if name == 'respond' and set(args) == {'topic'}:
             if args['topic'] == 'performance_review':
                 return self.review_tools.explain(db, source, history)

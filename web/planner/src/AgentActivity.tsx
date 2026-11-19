@@ -145,7 +145,7 @@ export function AgentActivity({run, result, status, draftRevision, draftApproved
             <summary>{label} <span className="step-status">{stepStatus}</span></summary>
             <div className="step-observation">
               <p className="revision">{route}</p>
-              {["classify_catalog", "propose_placements"].includes(step.tool) && !rejected && <p className="revision">Simulated classification</p>}
+              {["classify_catalog", "propose_placements"].includes(step.tool) && !rejected && data.route !== "main_model" && <p className="revision">Simulated classification</p>}
               <p>{summarize(step, stepStatus, data, draftSaved)}</p>
               {draftLink && <a href="#draft-heading">Review revision {data.revision as number}</a>}
               {deliveryLink && <a href="#google-ads-delivery">Open delivery panel</a>}

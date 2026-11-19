@@ -57,6 +57,7 @@ type Mode = {
   live: boolean;
   googleAdsReporting?: boolean;
   openrouterAvailable?: boolean;
+  liveInference?: boolean;
   instructionTestLimits: InstructionTestLimits;
   demoRequest: string;
   viewerOrigin: string;
@@ -155,7 +156,7 @@ function App() {
         }
         setDraft(currentDraft);
         const savedModel = sessionStorage.getItem("campaign-planner:model");
-        const selectedModel = workspace.previewScope ? "simulated"
+        const selectedModel = workspace.liveInference ? "" : workspace.previewScope ? "simulated"
           : workspace.agentPlanner?.models.some(item => item.id === savedModel) ? savedModel!
           : workspace.agentPlanner?.default ?? "simulated";
         if (!workspace.previewScope && savedModel && selectedModel !== savedModel && ["simulated", "simulated-inspect"].includes(savedModel)) {
@@ -308,7 +309,7 @@ function App() {
       if (source?.kind === "placement_request") {
         const remote = !["simulated", "simulated-inspect"].includes(source.model);
         const chosen = openrouter.snapshot().selection;
-        if (remote && (!mode.openrouterAvailable || mode.previewScope || !chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
+        if (remote && (!mode.openrouterAvailable || !chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
           throw new RequestError("Reconnect and select an eligible planner model before sending. Your typed text is retained.", 409, "waiting_for_credentials");
         }
         start = {path: "/api/agent/placements", body: {
@@ -406,7 +407,7 @@ function App() {
     setConversations(chats);
   }
 
-  function newConversation(model = mode?.previewScope ? "simulated" : mainModel, preserveText = false) {
+  function newConversation(model = mode?.liveInference ? "" : mode?.previewScope ? "simulated" : mainModel, preserveText = false) {
     viewEpoch.current++;
     pendingProviderStart.current = null;
     setMainModel(model);
@@ -498,7 +499,7 @@ function App() {
     ? {mode: "openrouter" as const, model: mainModel, budget: account.selection?.max_run_cost_usd} : {mode: "offline" as const};
   const capabilityScope = JSON.stringify([mode?.previewScope, mode?.workspace?.actor, mode?.workspace?.client_id,
     mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
-  const providerAvailable = Boolean(mode?.openrouterAvailable && !mode.previewScope);
+  const providerAvailable = Boolean(mode?.openrouterAvailable);
   const composer = mode?.agentPlanner && draft && <AgentComposer preview={Boolean(mode.previewScope)} capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
     providerSelection={account.selection} providerConnected={openrouter.canUse(account.selection ?? undefined)} providerAvailable={providerAvailable}
     onProviderSettings={() => newConversation(mainModel, true)}
@@ -573,7 +574,7 @@ function App() {
              aria-current={home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> New request</a>
           <a href="/campaign" onClick={event => follow(event, "/campaign")}
              aria-current={!home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4ZM3 12l9 4 9-4M3 17l9 4 9-4" /></svg>Campaign</a>
-          {!mode?.workspace && <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>}
+          {!mode?.workspace && !mode?.liveInference && <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>}
         </nav>
         {conversations.length > 0 && <label className="saved-conversations">Saved conversations
           <select aria-label="Saved conversations" value={conversation?.id ?? ""} disabled={busy || !!packageAction}
@@ -585,7 +586,7 @@ function App() {
         <div className="rail-footer">
           <div className="rail-environment"><span className="rail-label">{mode?.previewScope ? "Protected preview" : mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
-              : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Authored delivery fixtures. Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
+              : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
           {mode && <WorkspaceAccount name={mode.previewScope ? "Demo reviewer" : mode.workspace?.actor ?? "Local operator"}
             initials={mode.previewScope ? "DP" : mode.workspace ? "SF" : "LO"}
@@ -606,7 +607,7 @@ function App() {
               <p className="intake-intro">Describe the campaign task. Your agent chooses tools and prepares a draft for review.</p>
               {composer}
               {error && mode && <p className="error" role="alert">{error}</p>}
-              {mode && !mode.live && (
+              {mode && !mode.live && !mode.liveInference && (
                 <>
                   <button className="example-action" onClick={openExample}>
                     {exampleAction} <span aria-hidden="true">↗</span>
@@ -632,7 +633,7 @@ function App() {
                   <h2 id="request-heading">Conversation</h2>
                   <CampaignChat conversation={conversation} busy={busy} draftRevision={needsLatest ? undefined : draftRevision} />
                   {composer}
-                  {mode && !mode.live && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
+                  {mode && !mode.live && !mode.liveInference && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
                   {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
                   {Boolean(run?.steps.length) && <a className="compact-activity" href="#activity-heading">View agent activity</a>}
                   {!mode && !error && <p role="status">Loading the workspace…</p>}
@@ -759,9 +760,9 @@ function App() {
                     </ul>
                     {historyError && <p className="error" role="alert">{historyError}</p>}
                   </details>}
-                  {draft && !mode?.workspace && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
+                  {draft && !mode?.workspace && !mode?.liveInference && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
-                {activePackage?.approval && !needsLatest && !busy && (
+                {!mode?.liveInference && activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onSetupChanged={() => setDeliveryRefresh(current => current + 1)}
@@ -779,7 +780,7 @@ function App() {
                       setPackageError(message);
                     }} />
                 )}
-                {activePackage?.approval && !needsLatest && !busy && (
+                {!mode?.liveInference && activePackage?.approval && !needsLatest && !busy && (
                   <PerformanceReview key={`performance:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}

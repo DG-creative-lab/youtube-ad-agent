@@ -24,7 +24,7 @@ export function OpenRouterAccount({onChange, ready}: {ready: boolean; onChange: 
     <dialog ref={dialog} className="openrouter-account" aria-labelledby="openrouter-account-title" onClose={() => {if (input.current) input.current.value = "";}}>
       <div className="account-heading"><h2 id="openrouter-account-title">OpenRouter account</h2>
         <button type="button" aria-label="Close OpenRouter account" onClick={() => dialog.current?.close()}>×</button></div>
-      <p>Use your own OpenRouter key for explicit foreground requests. Offline models remain available.</p>
+      <p>Connect your OpenRouter key to choose a model and talk to the campaign agent.</p>
       <p className="revision">The selected campaign context is sent to OpenRouter and the inference provider. No-training routing; safety retention may apply. This is not a zero-retention or residency promise.</p>
       <p role="status">{account.state === "connected" ? "Connected in this tab" : pending ? "Checking connection…" : account.state === "expired" ? "Connection expired" : account.connectionId ? "Reconnect to resume the original operation" : "Disconnected"}</p>
       {account.expiresAt && <p className="revision">Connection expires {new Date(account.expiresAt * 1000).toLocaleTimeString()}. Reloading or leaving this page clears the key.</p>}

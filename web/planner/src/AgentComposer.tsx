@@ -57,7 +57,7 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
   const remote = !["simulated", "simulated-inspect", ""].includes(model);
   const selectedModel = options.models.find(item => item.id === model) ?? (remote ? {id: model, label: model, mode: "openrouter"} : undefined);
   const modelChoices = preview ? options.models.filter(item => item.id === "simulated") : options.models;
-  const displayModel = remote ? selectedModel?.label ?? model : modelLabel(model);
+  const displayModel = !model ? "Choose model" : remote ? selectedModel?.label ?? model : modelLabel(model);
   const providerReady = !remote || providerAvailable && providerConnected && providerSelection?.model === model;
   const selectedCatalog = options.catalogs.find(item => item.id === chosen);
   const disabled = busy || importing;
@@ -135,7 +135,7 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
           <path d="m10 2 8 4-8 4-8-4 8-4Zm-8 8 8 4 8-4M2 14l8 4 8-4" />
         </svg> Catalog <span>{selectedCatalog?.count ?? 0}</span>
       </button>
-      {!preview && <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "import"}
+      {(!preview || providerAvailable) && <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "import"}
         aria-controls={`${panelId}-import`} onClick={() => setPanel(panel === "import" ? null : "import")}>
         <span aria-hidden="true">+</span> Import
       </button>}
@@ -171,6 +171,7 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
         onChange={event => {void importCatalog(event.target.files?.[0]); event.target.value = "";}} /></label>
       <p>Up to 200 permitted descriptions with video_id, description, source and source_reference. Use creator_supplied, licensed or synthetic sources.</p>
     </section>}
+    {providerAvailable && !model && <p className="composer-note">Connect OpenRouter from your account menu, then choose a model above.</p>}
     {remote && !providerReady && <p className="revision" role="status">{providerAvailable ? "Reconnect OpenRouter from the account menu to resume this conversation, or choose another model to start a new one." : "This saved model is unavailable here. Choose Offline demo to start a new conversation."}</p>}
     {followup && <p className="composer-note">A follow-up stops any unfinished request in this conversation.</p>}
     {importing && <p role="status">Importing catalog…</p>}

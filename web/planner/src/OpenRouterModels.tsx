@@ -5,7 +5,7 @@ import type {Budget, Catalogue, Selection} from "./openrouter-session";
 export function OpenRouterModels({onSelect, onSettingsChange}: {onSelect: (selection: Selection) => void; onSettingsChange: () => void}) {
   const account = useSyncExternalStore(openrouter.subscribe, openrouter.snapshot);
   const [search, setSearch] = useState("");
-  const [budget, setBudget] = useState<Budget>(account.selection?.max_run_cost_usd ?? "0");
+  const [budget, setBudget] = useState<Budget>(account.selection?.max_run_cost_usd ?? "0.25");
   const [catalogue, setCatalogue] = useState<Catalogue>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
