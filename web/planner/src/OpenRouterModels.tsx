@@ -1,5 +1,5 @@
 import {useEffect, useId, useRef, useState, useSyncExternalStore} from "react";
-import {openrouter} from "./openrouter-session";
+import {openrouter, modelAvailabilityReason, RequestError} from "./openrouter-session";
 import type {Budget, Catalogue, Selection, ModelSort} from "./openrouter-session";
 
 export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
@@ -18,11 +18,12 @@ export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [routeErrors, setRouteErrors] = useState<Record<string, string>>({});
   const generation = useRef(0);
   const loading = useRef(false);
   const searchButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    generation.current++; loading.current = false; setCatalogue(undefined); setError(""); setBusy(false);
+    generation.current++; loading.current = false; setCatalogue(undefined); setRouteErrors({}); setError(""); setBusy(false);
     if (account.state === "connected") void load();
     return () => {generation.current++; loading.current = false;};
   }, [account.epoch, account.state]);
@@ -35,7 +36,7 @@ export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
     // Pagination removes its own button. Keep focus on a stable control only when this action owned it.
     if (trigger && document.activeElement === trigger) searchButton.current?.focus();
     const current = ++generation.current;
-    setBusy(true); setError(""); setDirty(true);
+    setBusy(true); setError(""); setRouteErrors({}); setDirty(true);
     try {
       const rows = await openrouter.models(search, cursor, {max_input_price: maxInput || null,
         max_output_price: maxOutput || null, sort});
@@ -53,7 +54,12 @@ export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
     try {
       const selection = await openrouter.select(model, catalogue.catalogue_revision, budget);
       if (current === generation.current) onSelect(selection);
-    } catch (failure) {if (current === generation.current) setError(failure instanceof Error ? failure.message : "Could not select this model.");}
+    } catch (failure) {if (current === generation.current) {
+      const reason = failure instanceof RequestError && failure.code === "budget_exhausted"
+        ? "The maximum cost of one call exceeds this budget. Increase the budget or choose a cheaper model."
+        : failure instanceof Error ? failure.message : "Could not select this model.";
+      setRouteErrors(previous => ({...previous, [model]: reason})); setError(`${model}: ${reason}`);
+    }}
     finally {if (current === generation.current) {loading.current = false; setBusy(false);}}
   }
   return <section className="provider-models" aria-label="OpenRouter models">
@@ -61,10 +67,10 @@ export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
     {account.state !== "connected" ? <p>Connect OpenRouter from the account menu.</p> : <>
       <label htmlFor={`${filterId}-budget`}>Per-run local budget (USD)</label>
         <select id={`${filterId}-budget`} value={budget} disabled={busy || disabled} onChange={event => {
-          setBudget(event.target.value as Budget); openrouter.resetSelection(); onSettingsChange();
+          setRouteErrors({}); setError(""); setBudget(event.target.value as Budget); openrouter.resetSelection(); onSettingsChange();
         }}><option value="0">$0 · free qualified routes</option><option value="0.25">$0.25</option><option value="1.00">$1.00</option></select>
       <p className="revision">Changing the model or budget starts a new conversation with Review only. Your typed message is retained.</p>
-      <p className="revision">Only text models with tool calling and required tool choice are listed. Prices are per million tokens.</p>
+      <p className="revision">Only models advertising text output, tool calling and tool choice are listed. Required tool choice is checked on the provider route. Prices are per million tokens.</p>
       <search>
         <form action="/api/openrouter/models" method="post" aria-label="Filter model catalogue"
           onSubmit={event => {event.preventDefault(); void load();}}>
@@ -100,13 +106,16 @@ export function OpenRouterModels({onSelect, onSettingsChange, disabled}: {
         <ul className="provider-model-list">{catalogue.models.map(model => <li key={model.id}>
           <strong>{model.name}</strong><span className="model-id">{model.id}</span>
           <p>Input ${model.input_usd_per_million ?? "unknown"} / million tokens · Output ${model.output_usd_per_million ?? "unknown"} / million tokens</p>
-          <p>{model.state === "eligible" ? "Available · route and prices checked on selection" : model.state === "candidate" ? "Unavailable · route has not been enabled for this application" : "Unavailable · capabilities or pricing are unsupported"}</p>
-          <button type="button" disabled={busy || dirty || disabled || model.state !== "eligible"} onClick={event => void choose(model.id, event.currentTarget)}>Use {model.name}</button>
+          <p>{routeErrors[model.id] ?? (model.state === "eligible" ? "Available · route and prices rechecked on selection"
+            : model.state === "candidate" && catalogue.route_check_available ? "Tool use supported · check provider route on selection"
+            : model.state === "candidate" ? "No enabled provider route in this environment."
+            : model.reason_codes.map(modelAvailabilityReason).join(" "))}</p>
+          <button type="button" disabled={busy || dirty || disabled || !(model.state === "eligible" || model.state === "candidate" && catalogue.route_check_available)} onClick={event => void choose(model.id, event.currentTarget)}>Use {model.name}</button>
         </li>)}</ul>
         {catalogue.next_cursor && <button type="button" disabled={busy || dirty || disabled} onClick={event => void load(catalogue.next_cursor, event.currentTarget)}>Next 20 models</button>}
       </>}
       <p className="revision">The budget reserves a local maximum for a run. Set a spending limit on your OpenRouter key as well.</p>
-      {account.selection && <p role="status" className="revision">Selected {account.selection.model} · ${account.selection.max_run_cost_usd} local ceiling · No-training routing; safety retention may apply. No model fallback.</p>}
+      {account.selection && <p role="status" className="revision">Selected {account.selection.model} · Provider route checked · ${account.selection.max_run_cost_usd} local ceiling · No-training routing; safety retention may apply. No model fallback.</p>}
     </>}
   </section>;
 }

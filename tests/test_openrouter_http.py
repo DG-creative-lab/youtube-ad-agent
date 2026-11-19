@@ -412,7 +412,7 @@ class OpenRouterHttpTests(unittest.TestCase):
                 connection=self.connect()['connection_id'];catalogue=self.models(connection)
                 data=self.selection(connection,catalogue['catalogue_revision'])
                 if change=='modalities':self.metadata.rows[0]['architecture']['output_modalities']=['audio']
-                elif change=='pricing':self.metadata.rows[0]['pricing']['input_cache_read']='0.1'
+                elif change=='pricing':self.metadata.rows[0]['pricing']['unknown_unit']='0.1'
                 else:self.metadata.rows=[]
                 self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
                 refreshed=self.models(connection)

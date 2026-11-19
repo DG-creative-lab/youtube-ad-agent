@@ -4,7 +4,7 @@ from decimal import Decimal
 import json
 from time import time
 
-from .application.catalogue_policy import fingerprint, price
+from .application.catalogue_policy import fingerprint, price, maximum_cost
 from .ports.inference import ProviderError
 
 NANOS=1_000_000_000
@@ -71,9 +71,7 @@ class InferenceLedger:
             else:
                 raise ProviderError('inference_outcome_unknown')
         now=self.clock();day=datetime.fromtimestamp(now,timezone.utc).date().isoformat()
-        rates=settings['prices']
-        amount=nanos(format(price(rates['prompt'])*settings['max_input_tokens']+
-            price(rates['completion'])*settings['max_output_tokens']+price(rates.get('request','0')),'f'))
+        amount=nanos(format(maximum_cost(settings),'f'))
         installation=identity['installation_id'];actor=identity['actor_id'];tenant=identity['client_id']
         if db.execute('SELECT 1 FROM inference_ledger WHERE installation_id=? AND (actor_id=? OR client_id=?) AND anomaly=1 LIMIT 1',
                       (installation,actor,tenant)).fetchone(): raise ProviderError('budget_exhausted')

@@ -218,6 +218,22 @@ class LivePreviewTests(TestCase):
         self.assertEqual(start.status_code, 200, start.text)
         return run, session
 
+    def test_dynamic_route_and_cached_prices_survive_fresh_preview_instances(self):
+        from campaign_agent.application.catalogue_policy import select_live_endpoint
+        self.metadata.profiles=()
+        self.metadata.select_route=lambda credential,model,task,now,previous=None: select_live_endpoint(
+            model,task,self.metadata.endpoints(credential,model),now,previous=previous)
+        self.metadata.endpoint['supported_parameters'].remove('parallel_tool_calls')
+        self.metadata.endpoint['pricing'].update(input_cache_read='0',discount=0)
+        run,session=self.prepare()
+        response=self.post(self.client(),'/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['status'],'answered')
+        self.assertEqual(self.post(self.client(),'/api/agent/run',{'run_id':run},credential=False).status_code,200)
+        self.assertEqual(len(self.calls),1)
+        self.assertNotIn('parallel_tool_calls',json.loads(self.calls[0].data))
+        self.assertIn('What audience',self.client().get('/api/agent/conversation',params={'id':session}).json()['messages'][-1]['content'])
+
     def test_live_reply_cold_instance_checkpoint_and_secret_exclusion(self):
         run, session = self.prepare()
         response = self.post(self.client(), "/api/agent/run", {"run_id": run})

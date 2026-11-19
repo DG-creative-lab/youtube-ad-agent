@@ -185,6 +185,9 @@ def planner_request_body(context: dict, history: list[dict]) -> dict:
             ' For conversational replies, provide your own helpful wording in respond.message. '
             'State campaign facts only when supported by tool results. Distinguish your suggestions from saved actions. '
             'When answering freely, choose a matching topic and use message to respond directly to the user.')
-    return {'messages': messages,
-            'tools': tools,
-            'tool_choice': 'required', 'parallel_tool_calls': False}
+    body = {'messages': messages, 'tools': tools, 'tool_choice': 'required'}
+    if not context.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+        body['parallel_tool_calls'] = False
+    # Live routes need not advertise the optional parallel flag. The dispatcher
+    # still accepts exactly one tool call per model response.
+    return body

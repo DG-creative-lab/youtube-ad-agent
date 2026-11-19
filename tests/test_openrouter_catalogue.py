@@ -80,6 +80,30 @@ class OpenRouterMetadataTests(unittest.TestCase):
         self.assertEqual(result['fixture/conditional']['input_usd_per_million'],'1.000000')
         with self.assertRaises(ProviderError):select_endpoint('fixture/tool-model','planner',[self.fixture.endpoint],(),__import__('time').time())
 
+    def test_live_catalogue_defers_aggregate_pricing_to_actual_endpoint(self):
+        raw={**self.fixture.rows[0], 'pricing':{'prompt':'0','completion':'0','overrides':[{'min_prompt_tokens':100000,'prompt':'1'}]}}
+        self.assertEqual(normalize([raw],now=0)[0]['state'],'blocked')
+        self.assertEqual(normalize([raw],now=0,live_routes=True)[0]['state'],'candidate')
+
+    def test_live_route_uses_viable_cheapest_provider_and_never_switches_after_selection(self):
+        from campaign_agent.application.catalogue_policy import select_live_endpoint, maximum_cost
+        from copy import deepcopy
+        from decimal import Decimal
+        base=deepcopy(self.fixture.endpoint)
+        base['supported_parameters'].remove('parallel_tool_calls')
+        cheap={**base,'tag':'vendor/cheap','pricing':{'prompt':'0.000001','completion':'0.000002','input_cache_read':'0.0000001','input_cache_write':'0.000002','discount':0}}
+        expensive={**base,'tag':'vendor/other','pricing':{'prompt':'0.000004','completion':'0.000002'}}
+        unusable={**cheap,'tag':'vendor/no-required','supports_tool_choice':{'required':False}}
+        selected=select_live_endpoint('fixture/tool-model','planner',[unusable,expensive,cheap],100)
+        self.assertEqual(selected['routing']['only'],['vendor/cheap'])
+        self.assertEqual(maximum_cost(selected),Decimal('0.095488'))
+        self.assertEqual(selected['charging_profile_expires_at'],3700)
+        self.assertEqual(select_live_endpoint('fixture/tool-model','planner',[cheap,expensive],101,previous=selected),selected)
+        for endpoints,now in (([expensive],102),([cheap],3700),([{**cheap,'pricing':{'prompt':'0','completion':'0'}}],103)):
+            with self.subTest(now=now),self.assertRaises(ProviderError) as raised:
+                select_live_endpoint('fixture/tool-model','planner',endpoints,now,previous=selected)
+            self.assertEqual(raised.exception.code,'selection_stale')
+
 
 class ModelSearchTests(unittest.TestCase):
     def test_preview_catalogue_keeps_models_outside_enabled_routes_visible(self):

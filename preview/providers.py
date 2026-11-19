@@ -7,30 +7,9 @@ import sys
 from pathlib import Path
 
 from campaign_agent.adapters.openrouter_models import OpenRouterMetadata
-from campaign_agent.application.catalogue_policy import endpoint_fingerprint
-from campaign_agent.ports.inference import ChargingProfile, ProviderError
+from campaign_agent.application.catalogue_policy import select_live_endpoint
+from campaign_agent.ports.inference import ProviderError
 
-# Exact public endpoint observations reviewed on 19 November 2026.
-# The text-only request enables custom function tools and excludes web search.
-ROUTES = {
-    "openai/gpt-4.1-mini": {
-        "tag": "openai",
-        "observed_hash": "ae91de17fc803b74392274d73533a1d557000aab09137c717b7052e37f86a747",
-        "projected_hash": "7b001e306b9c1a374ece74f5ecc8056a763a2e1452b4c5b8ca6459a3cd558aee",
-        "cap": "max_tokens",
-        "prompt_ceiling": "0.4000000",
-        "completion_ceiling": "1.6000000"
-    },
-    "openai/gpt-4.1-nano": {
-        "tag": "azure",
-        "observed_hash": "fd40812eec10cf773351839f0f0c11d94fae52a39c19f80589c6e7a99686ecc8",
-        "projected_hash": "5c04834a0e6ac63d3c67e39981d4b41a07414a9121b53256837abd4ed5bbde1a",
-        "cap": "max_completion_tokens",
-        "prompt_ceiling": "0.1000000",
-        "completion_ceiling": "0.4000000"
-    }
-}
-EXPIRES = 1797638400
 
 
 def send(request, *, timeout):
@@ -64,42 +43,15 @@ class LiveMetadata(OpenRouterMetadata):
         super().__init__(transport=send)
 
     def models(self, credential, *, sort=None):
-        rows = super().models(credential, sort=sort, tools_only=True)
-        selected = []
-        for row in rows:
-            if row.get("id") in ROUTES and "text" in row.get("architecture", {}).get("input_modalities", []):
-                selected.append({**row, "architecture": {**row["architecture"], "input_modalities": ["text"]},
-                                 "pricing": {k: row["pricing"][k] for k in ("prompt", "completion")}})
-            else:
-                selected.append(row)
-        return selected
+        return super().models(credential, sort=sort, tools_only=True)
 
-    def endpoints(self, credential, model):
-        if model not in ROUTES:
-            raise ProviderError("route_unqualified")
-        route = ROUTES[model]
-        rows = super().endpoints(credential, model)
-        for row in rows:
-            if row.get("tag") == route["tag"] and endpoint_fingerprint(row) == route["observed_hash"]:
-                return [project_endpoint(row)]
-        raise ProviderError("route_unqualified")
-
-
-def project_endpoint(row):
-    # OpenRouter's OpenAI-compatible tool API accepts parallel_tool_calls=false.
-    # Keep the exact observed fingerprint fence before projecting used prices.
-    return {**row, "pricing": {k: row["pricing"][k] for k in ("prompt", "completion")},
-            "supported_parameters": [*row["supported_parameters"], "parallel_tool_calls"]}
+    def select_route(self, credential, model, task, *, now, previous=None):
+        return select_live_endpoint(model, task, self.endpoints(credential, model), now, previous=previous)
 
 
 def profiles():
-    return tuple(ChargingProfile(model=model, endpoint=row["tag"], version="preview-text-tools/2026-11-19",
-        endpoint_hash=row["projected_hash"], expires_at=EXPIRES,
-        max_prompt_usd_per_million=row["prompt_ceiling"],
-        max_completion_usd_per_million=row["completion_ceiling"],
-        output_cap_parameter=row["cap"],
-        evidence="Exact OpenRouter endpoint metadata, 19 November 2026; text/custom tools only")
-        for model, row in ROUTES.items())
+    # Live routes are qualified from current metadata rather than a model list.
+    return ()
 
 
 def sessions(path, **options):
@@ -143,6 +95,7 @@ def sessions(path, **options):
 
     service = create_provider_sessions(path, **options)
     service.cache = SnapshotCache()
+    service.route_selector = getattr(service.metadata, "select_route", None)
     return service
 
 
