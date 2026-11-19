@@ -49,6 +49,8 @@ jobs:
           if test -f "$RUNNER_TEMP/demo-evals/report.md"; then
             cat "$RUNNER_TEMP/demo-evals/report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Publish live capability contract without model calls
+        run: .venv/bin/python scripts/evaluate_live_capability.py plan --split all --output "$RUNNER_TEMP/demo-evals/live-capability-plan.json"
       - name: Upload sanitized demo eval evidence
         if: ${{ always() && steps.demo-evals.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

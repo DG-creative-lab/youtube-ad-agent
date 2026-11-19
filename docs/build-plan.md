@@ -2,10 +2,17 @@
 
 ## Current demo slice · #123 eval release gate, 19 November 2026
 
+PR #130 delivered the deterministic gate and CI evidence. The next slice is the
+[live capability benchmark](live-capability-benchmark.md): 20 frozen campaign tasks,
+repeatable isolated foreground trials, explicit whole-batch authorization and
+separate automated outcome checks and human quality grades. CI validates the
+contract without live calls; real samples and rubric calibration retain their
+credential, budget and review requirements.
+
 PR #129 delivered live OpenRouter configuration, route qualification and safe
-execution diagnostics. The next build is the [deterministic demo eval gate](demo-release-evals.md):
-retain the 11 frozen behavior cases, report the 312 paired policy simulations with
-the keep/no-change baseline, add explicit learning-reuse safety cases, and publish
+execution diagnostics. The [deterministic demo eval gate](demo-release-evals.md)
+retains the 11 frozen behavior cases, reports the 312 paired policy simulations
+with the keep/no-change baseline, checks learning-reuse safety, and publishes
 sanitized revision-bound evidence in CI. Hosted smoke and live model quality stay
 separate gates. This does not close the wider eval or functional MVP roadmap.
 
