@@ -34,8 +34,8 @@ ARMS = ("original", "revised")
 COHORTS = ("participant", "rehearsal", "fixture", "unknown")
 
 
-def load_spec():
-    spec = json.loads(SPEC_PATH.read_text())
+def load_spec(raw=None):
+    spec = json.loads(SPEC_PATH.read_bytes() if raw is None else raw)
     if (spec["bayesian_policy"] != POLICY_V1
             or (spec["initial_visits"], spec["batch_visits"], spec["sample_cap"]) !=
             (INITIAL_SAMPLE_SIZE, ADDITIONAL_BATCH_SIZE, SAMPLE_CAP)
@@ -189,11 +189,11 @@ def compare(spec):
             "assessment_version": ASSESSMENT_VERSION, "runs": runs}
 
 
-def walkthrough(path):
-    """Use the real application commands with authored eligible participant outcomes."""
+def prepare_walkthrough(path, media_dir=DEMO_MEDIA_DIR):
+    """Prepare the reviewed learning example for both walkthrough and safety evals."""
     if path.exists():
         raise ValueError("Choose a new walkthrough database so existing state is preserved.")
-    runtime = AgentRuntime(path, media_dir=DEMO_MEDIA_DIR)
+    runtime = AgentRuntime(path, media_dir=media_dir)
     drafts, viewer = runtime.drafts, runtime.performance.viewer
     runtime.resume(runtime.start(DEMO_REQUEST))
     campaign = drafts.campaign_id
@@ -229,10 +229,18 @@ def walkthrough(path):
     fresh = drafts.start_brief(campaign, 3, fingerprint, title="Offline comparison walkthrough",
                                goal="Review tested editing instructions on a fresh brief.", context="video-editing")
     target = (campaign, fresh["revision"], drafts.review_package(campaign, fresh["revision"])["fingerprint"])
-    reopened = AgentRuntime(path, media_dir=DEMO_MEDIA_DIR)
+    reopened = AgentRuntime(path, media_dir=media_dir)
     eligible = reopened.instruction_findings.read(*target)
     if eligible is None or eligible["finding"] != finding:
         raise ValueError("The finding did not survive restart.")
+    return reopened, target, finding, test
+
+
+def walkthrough(path):
+    """Use the real application commands with authored eligible participant outcomes."""
+    reopened, target, finding, _ = prepare_walkthrough(path)
+    campaign, fresh_revision, _ = target
+    eligible = reopened.instruction_findings.read(*target)
     saved = reopened.instruction_findings.apply(
         *target, finding_id=finding["id"], correction_id=eligible["correction"]["id"], draft_permission="instruction_test",
     )
@@ -241,7 +249,7 @@ def walkthrough(path):
         raise ValueError("The walkthrough did not produce the expected unapproved wording draft.")
     return {"source_counts": [[2, 20], [18, 20]], "action": finding["decision"]["action"],
             "probability_worthwhile": finding["decision"]["probability_worthwhile"],
-            "fresh_brief_revision": fresh["revision"], "draft_revision": saved["revision"],
+            "fresh_brief_revision": fresh_revision, "draft_revision": saved["revision"],
             "finding_survived_restart": True, "package_requires_approval": True}
 
 

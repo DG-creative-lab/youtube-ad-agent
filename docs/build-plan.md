@@ -1,5 +1,19 @@
 # Campaign agent build plan
 
+## Current demo slice · #123 eval release gate, 19 November 2026
+
+PR #129 delivered live OpenRouter configuration, route qualification and safe
+execution diagnostics. The next build is the [deterministic demo eval gate](demo-release-evals.md):
+retain the 11 frozen behavior cases, report the 312 paired policy simulations with
+the keep/no-change baseline, add explicit learning-reuse safety cases, and publish
+sanitized revision-bound evidence in CI. Hosted smoke and live model quality stay
+separate gates. This does not close the wider eval or functional MVP roadmap.
+
+After the functional MVP, implement the [owner's next UI direction](design-direction.md#next-ui-build--owner-direction-19-november-2026):
+softer controls, dark mode, collapsible navigation, artefact-only auxiliary panels
+and inline expandable activity for the single campaign agent. Keep this redesign
+separate from the eval runner and existing runtime/authority contracts.
+
 The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.

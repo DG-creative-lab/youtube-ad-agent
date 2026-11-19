@@ -165,6 +165,16 @@ the work; executable checks establish the properties they exercise.
 
 ## Verification
 
+For #123, run the [demo eval release gate](demo-release-evals.md) from a clean
+committed checkout using a new output directory:
+
+```sh
+.venv/bin/python scripts/evaluate_demo_release.py --output-dir /tmp/demo-evals
+```
+
+CI publishes its authored report, policy scores and per-case traces. A passing
+offline gate does not replace the deployed-revision browser smoke or human review.
+
 Run the offline suite locally for behavior changes. GitHub Actions runs the same
 Python checks and a separate planner build on pushes to main and pull requests.
 
