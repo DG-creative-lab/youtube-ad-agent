@@ -3,6 +3,7 @@ import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
 import {AgentComposer} from "./AgentComposer";
+import {activityFailureStatus} from "./activity-status";
 import {AgentActivity} from "./AgentActivity";
 import type {Run, RunResult} from "./AgentActivity";
 import type {DraftPermission} from "./AgentComposer";
@@ -101,6 +102,7 @@ function App() {
   const [draftPermission, setDraftPermission] = useState<DraftPermission>("none");
   const [draft, setDraft] = useState<Draft>();
   const [run, setRun] = useState<Run | null>(null);
+  const [runFailure, setRunFailure] = useState<{code: string; message: string} | null>(null);
   const [pendingId, setPendingId] = useState(() => sessionStorage.getItem(runKey));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -149,7 +151,7 @@ function App() {
             setConversationId(nextConversation);
             sessionStorage.setItem("campaign-planner:conversation", nextConversation);
             setPendingId(null);
-            setRun(null);
+            setRun(null); setRunFailure(null);
             setDraftPermission("none");
             sessionStorage.setItem("staff-workspace-scope", scope);
           }
@@ -184,7 +186,7 @@ function App() {
           if (pendingStart) {
             const marker = JSON.parse(pendingStart);
             if (marker.provider && !marker.run_id) {
-              setRun(null); setPendingId(null); sessionStorage.removeItem(runKey);
+              setRun(null); setRunFailure(null); setPendingId(null); sessionStorage.removeItem(runKey);
               setError(`The original start receipt is unavailable. Operation ${marker.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`);
               setMode(workspace); return;
             }
@@ -298,7 +300,7 @@ function App() {
     const providerEpoch = openrouter.snapshot().epoch;
     const guard = () => {openrouter.assertCurrent(providerEpoch); if (epoch !== viewEpoch.current) throw new RequestError("The conversation changed. Open its saved history to continue.", 409, "client_context_changed");};
     const id = !source && pendingId ? pendingId : crypto.randomUUID().replaceAll("-", "");
-    setBusy(true); setError(""); setStale(false);
+    setBusy(true); setError(""); setRunFailure(null); setStale(false);
     const originalSettings = run?.planner?.settings ?? run?.inference?.settings;
     const attempt: RunAttempt = {kind: originalSettings?.mode === "openrouter" ? "provider" : originalSettings ? "offline" : "unknown",
       phase: "read", acknowledged: run?.run_id === id};
@@ -345,9 +347,9 @@ function App() {
         sessionStorage.setItem(pendingStartKey, openrouter.serializeStart(start));
         if (remote) {
           pendingProviderStart.current = {...start, uncertain: true};
-          if (!start.body.run_id) {setPendingId(null); setRun(null); sessionStorage.removeItem(runKey);}
+          if (!start.body.run_id) {setPendingId(null); setRun(null); setRunFailure(null); sessionStorage.removeItem(runKey);}
         }
-        if (start.body.run_id) {setPendingId(String(start.body.run_id)); sessionStorage.setItem(runKey, String(start.body.run_id)); if (run?.run_id !== start.body.run_id) setRun(null);}
+        if (start.body.run_id) {setPendingId(String(start.body.run_id)); sessionStorage.setItem(runKey, String(start.body.run_id)); if (run?.run_id !== start.body.run_id) setRun(null); setRunFailure(null);}
         current = await request<Run>(start.path, start.body, remote); guard();
         sessionStorage.removeItem(pendingStartKey); pendingProviderStart.current = null;
       } else if (pendingId) {
@@ -382,8 +384,17 @@ function App() {
       // A definitive denied offline start has no saved run to resume. Saved/provider/uncertain operations keep their original identity.
       if (forgetFailedOfflineRun(failure, attempt)) {
         sessionStorage.removeItem(pendingStartKey); sessionStorage.removeItem(runKey);
-        setPendingId(null); setRun(null); setStale(false);
+        setPendingId(null); setRun(null); setRunFailure(null); setStale(false);
       }
+      // Refresh the owned run without a key. This reads saved diagnostics and
+      // cannot repeat inference, even after an uncertain provider response.
+      const failedRunId = sessionStorage.getItem(runKey);
+      if (failedRunId) {
+        try {const saved = await request<Run>("/api/agent/run?id=" + encodeURIComponent(failedRunId)); guard(); setRun(saved);}
+        catch { /* Keep the original failure if its diagnostic read is unavailable. */ }
+      }
+      setRunFailure({code: failure instanceof RequestError ? failure.code : "request_outcome_unavailable",
+        message: failure instanceof Error ? failure.message : "The request outcome is unavailable."});
       const lostStructuredStart = pendingProviderStart.current;
       setError(lostStructuredStart && !lostStructuredStart.body.run_id
         ? `The original start receipt is unavailable. Operation ${lostStructuredStart.body.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`
@@ -419,7 +430,7 @@ function App() {
     sessionStorage.removeItem(pendingStartKey);
     setConversation(null);
     setDraftPermission("none");
-    setRun(null);
+    setRun(null); setRunFailure(null);
     setPendingId(null);
     if (!preserveText) setMessageText("");
     setStale(false);
@@ -512,7 +523,8 @@ function App() {
   const waiting = run?.status === "waiting_for_evidence";
   const reviewingTest = run?.request === "Review the original and revised instruction test.";
   const draftApproved = activePackage && !needsLatest ? Boolean(activePackage.approval) : undefined;
-  const runStatus = result?.needs_verification ? "Earlier reply needs verification"
+  const failureStatus = activityFailureStatus(busy, run?.diagnostics?.status, runFailure?.code);
+  const runStatus = failureStatus ?? (result?.needs_verification ? "Earlier reply needs verification"
     : run?.status === "superseded" ? "Request superseded by a follow-up"
     : run?.status === "answered" ? "Reply saved"
     : run?.status === "needs_input" ? "Agent needs input"
@@ -521,7 +533,7 @@ function App() {
       : result.revision === draftRevision && !needsLatest ? (draftApproved === undefined ? "Draft saved" : draftApproved ? "Draft approved" : "Draft ready for review")
       : `Prepared revision ${result.revision}`)
     : busy || run?.status === "running" ? "Preparing the campaign"
-    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request";
+    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request");
   const evidenceMessage = conversation?.messages.find(message =>
     message.run_id === run?.run_id && (message.review || message.experiment_review));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";

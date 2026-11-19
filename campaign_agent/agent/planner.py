@@ -8,6 +8,7 @@ from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
 from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
 from campaign_agent.ports.inference import ProviderError
+from campaign_agent.application.inference_diagnostics import trace_projection, FAILURES
 from campaign_agent.ports.placement_commit import PlacementCommitUnit, PlacementCommitStorage, PlacementRepositories
 from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage, PlannerReceiptStorage
 from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
@@ -265,7 +266,9 @@ class PlacementAgent:
                     if (not source['settings'].get('foreground') and usage.get('cost_usd') is not None and usage['cost_usd'] > 0
                             or usage.get('output_tokens') is not None and usage['output_tokens'] > 512):
                         raise ValueError('Exceeded inference limit')
-                except ProviderError:
+                except ProviderError as error:
+                    if error.code in FAILURES:
+                        self.receipt_storage.fail_turn(run_id,position,error.code)
                     raise
                 except Exception:
                     self.receipt_storage.fail_turn(
@@ -532,6 +535,7 @@ class PlacementAgent:
                      for position, state, receipt in records.turn_rows(run_id)]
             return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(records, run_id),
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
+                    **({'diagnostics': trace_projection(run_id,status,source['settings'],records.inference_trace_rows(run_id))} if source['settings'].get('foreground') else {}),
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
                                 'draft_permission': source.get('draft_permission', 'none'),
                                 'execution': 'application' if source.get('delivery_request') else 'model',

@@ -48,3 +48,34 @@ prices do not block text requests because those provider features are not enable
 Unknown, conditional or separately billed reasoning rates remain unsupported and
 are explained in the model list when route selection fails. Keys remain only in
 the current tab and request, with verifiers and immutable selections in storage.
+
+## MVP run diagnostics
+
+The campaign agent uses its own Python tool loop and application-owned authority,
+receipts and replay controls. It does not currently use OpenAI Agents SDK or
+Claude Agent SDK. The protected preview exposes a versioned, scoped diagnostic
+projection from the existing inference journal: model/provider, call position,
+execution and accounting states, HTTP status, error category, finish reason,
+token counts, recorded duration, cost and provider request identifier when known.
+Agent activity shows failures and uncertain outcomes separately from completed
+work. Save diagnostic JSON exports only those metadata fields.
+
+A separate logging database or in-memory session cache is unnecessary for this
+slice. Function memory cannot provide reliable history across cold starts.
+Conversation records and recovery receipts must remain durable across tab closes
+and sign-out, including unknown calls and reservations; deleting them at session
+end could cause repeated requests or lose accounting. Optional debug UI state is
+in memory and clears with the view. The existing invite reset is the explicit
+whole-workspace cleanup operation.
+
+The diagnostic projection and export exclude prompts, replies, tool arguments,
+credentials and private reasoning. Existing model tool receipts remain private
+recovery records. Future eval curation should require a reviewed, redacted example
+with the relevant permitted transcript, expected behavior and outcome; a metadata
+trace alone cannot measure answer quality. Do not automatically promote live
+customer conversations or failed model output into the authored eval corpus.
+
+The SDKs provide useful tracing conventions, but adopting a new agent runtime
+would require preserving the existing scope, approval, budget, receipt and replay
+contracts. For now, keep this small trace contract and consider OpenTelemetry
+export through an adapter when we need cross-service tracing or a hosted collector.

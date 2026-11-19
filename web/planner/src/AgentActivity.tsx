@@ -8,9 +8,15 @@ export type RunResult = {
   revision: number; ambiguous: Placement[]; outcome?: string; message?: string; needs_verification?: boolean;
   delivery_report_id?: string | null;
 };
+export type InferenceTrace = {schema_version: number; run_id: string; status: "running" | "completed" | "failed" | "unknown";
+  model: string; provider: string[]; calls: {position: number; state: string; billing_state: string | null;
+    code: string | null; message: string | null; http_status: number | null; provider_error_code: number | null; finish_reason: string | null;
+    request_id: string | null; input_tokens: number | null; output_tokens: number | null;
+    cost_usd: string | null; recorded_duration_ms: number | null}[]};
 export type Run = {
   run_id: string;
   request: string;
+  diagnostics?: InferenceTrace | null;
   status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
   result?: RunResult | null;
   planner?: {
@@ -108,6 +114,13 @@ type Props = {
   evidenceMessageId?: number;
 };
 
+function saveDiagnostics(trace: InferenceTrace) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(trace, null, 2)], {type: "application/json"}));
+  const link = document.createElement("a"); link.href = url; link.download = `campaign-run-${trace.run_id}.json`;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function AgentActivity({run, result, status, draftRevision, draftApproved, deliveryRevision, evidenceMessageId}: Props) {
   const planner = run?.planner;
   const model = planner?.execution === "model" ? planner.settings : run?.inference?.settings;
@@ -156,6 +169,23 @@ export function AgentActivity({run, result, status, draftRevision, draftApproved
         </li>;
       })}
     </ol>}
+    {run?.diagnostics && <details className="inference-diagnostics">
+      <summary>Run diagnostics · {run.diagnostics.status}</summary>
+      <p className="revision">Run {run.run_id}<br />Provider {run.diagnostics.provider.join(", ") || "Not selected"}</p>
+      <p className="revision">Protocol and usage metadata only. Prompts, replies, keys and private reasoning are excluded from this diagnostic view.</p>
+      <button type="button" className="quiet" onClick={() => saveDiagnostics(run.diagnostics!)}>Save diagnostic JSON</button>
+      <ol>{run.diagnostics.calls.map(call => <li key={call.position}>
+        <strong>Model call {call.position + 1} · {call.state}</strong>
+        {call.message && <p className="error">{call.message}</p>}
+        <p className="revision">{call.code && <>Code {call.code}<br /></>}
+          HTTP {call.http_status ?? "not recorded"}{call.provider_error_code && <> · Provider error {call.provider_error_code}</>} · Finish {call.finish_reason ?? "not recorded"}<br />
+          Input {call.input_tokens ?? "unknown"} · Output {call.output_tokens ?? "unknown"} tokens<br />
+          Cost {call.cost_usd === null ? "unconfirmed" : `$${call.cost_usd}`} · Accounting {call.billing_state ?? "not dispatched"}<br />
+          Recorded duration {call.recorded_duration_ms === null ? "unknown" : `${call.recorded_duration_ms} ms`}
+          {call.request_id && <><br />Provider request {call.request_id}</>}
+        </p>
+      </li>)}</ol>
+    </details>}
     {result?.ambiguous?.length ? <details>
       <summary>{result.ambiguous.length} entries held for review</summary>
       <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>

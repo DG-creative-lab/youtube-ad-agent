@@ -132,6 +132,55 @@ class ForegroundHttpTests(unittest.TestCase):
         self.assertEqual(response.json()['code'],'budget_exhausted')
         self.assertEqual(len(self.calls),1)
 
+    def test_provider_failure_is_explained_and_trace_survives_keyless_read_without_resend(self):
+        self.reply={'error':{'code':404,'message':'No endpoints found that support your data policy.'}}
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,502,response.text)
+        self.assertEqual(response.json()['code'],'provider_privacy_unavailable')
+        saved=self.client.get('/api/agent/run',params={'id':run}).json()
+        trace=saved['diagnostics']
+        self.assertEqual(trace['status'],'failed')
+        self.assertEqual(trace['calls'][0]['code'],'provider_privacy_unavailable')
+        self.assertEqual(trace['calls'][0]['provider_error_code'],404)
+        self.assertNotIn(self.key,json.dumps(trace))
+        self.assertNotIn('messages',json.dumps(trace))
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['code'],'provider_privacy_unavailable')
+        self.assertEqual(len(self.calls),1)
+        # The same-shaped foreign principal cannot read this trace.
+        self.client.post('/fixture',json={'profile':'buyer-b'})
+        self.assertEqual(self.client.get('/api/agent/run',params={'id':run}).status_code,403)
+
+    def test_rate_limit_response_has_specific_status_and_excludes_provider_echoes(self):
+        self.reply={'error':{'code':429,'message':'Rate limit exceeded '+self.key,'metadata':{'raw':self.key}}}
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,429,response.text)
+        self.assertEqual(response.json()['code'],'provider_rate_limited')
+        trace=self.client.get('/api/agent/run',params={'id':run}).json()['diagnostics']
+        self.assertEqual(trace['calls'][0]['provider_error_code'],429)
+        self.assertEqual(trace['calls'][0]['http_status'],200)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertNotIn(self.key,'\n'.join(db.iterdump()))
+        self.assertEqual(len(self.calls),1)
+
+    def test_truncated_model_response_is_distinct_from_provider_error_and_never_repeated(self):
+        self.reply['choices'][0]['finish_reason']='length'
+        self.reply['choices'][0]['message']={'content':'Incomplete reply, not a valid action'}
+        self.reply['usage']['completion_tokens']=512
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,502,response.text)
+        self.assertEqual(response.json()['code'],'model_output_limit')
+        trace=self.client.get('/api/agent/run',params={'id':run}).json()['diagnostics']
+        self.assertEqual(trace['status'],'failed')
+        self.assertEqual(trace['calls'][0]['finish_reason'],'length')
+        self.assertEqual(trace['calls'][0]['output_tokens'],512)
+        self.assertEqual(trace['calls'][0]['cost_usd'],'0')
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['code'],'model_output_limit')
+        self.assertEqual(len(self.calls),1)
+
     def test_planner_receipt_accounting_and_no_internal_or_secret_prompt(self):
         run=self.start();self.assertEqual(self.calls,[])
         response=self.post('/api/agent/run',{'run_id':run})

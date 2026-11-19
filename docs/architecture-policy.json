@@ -44,6 +44,7 @@
     "campaign_agent/application/access.py": "application",
     "campaign_agent/application/campaigns.py": "application",
     "campaign_agent/application/catalogue_policy.py": "application",
+    "campaign_agent/application/inference_diagnostics.py": "application",
     "campaign_agent/application/planner_context.py": "application",
     "campaign_agent/application/planner_runtime.py": "application",
     "campaign_agent/assets.py": "application",
