@@ -1,5 +1,30 @@
 # Campaign agent design direction
 
+## Next UI build · owner direction, 19 November 2026
+
+After the functional MVP and #123 eval gate, refine the planner around a quieter
+conversation and artefact workspace. This direction supersedes the square-control
+and separate activity-inspector prescriptions below; those sections retain their
+historical implementation evidence.
+
+- Use modest corner radii on buttons, inputs, menus, dialogs and artefact surfaces,
+  with fewer visible boxes and less administrative copy in the conversation.
+- Add light, dark and system appearance settings using shared semantic colors.
+- Make the navigation sidebar collapsible. Keep account and invite administration
+  behind the avatar in a compact, rounded, accessible account surface.
+- Reserve the auxiliary panel for artefacts. Show agent progress, tool results and
+  concise explanations within the relevant dialogue, expandable on demand, with
+  typography that distinguishes activity from the final response. Do not present
+  private model reasoning as an audit trail or fabricate thinking text.
+- Explore a restrained animation of the existing nested-square mark during active
+  work, with a static reduced-motion alternative and a textual execution status.
+- Keep one campaign agent. Future specialist activity can use the same inline
+  pattern without requiring the user to select or manage agents in the composer.
+
+Acceptance should cover desktop and narrow layouts, keyboard and focus behavior,
+both color schemes, reduced motion, long artefact titles and provider failures.
+These are queued design requirements; this eval build does not change the UI.
+
 6 November 2026 · Working direction for the independent application project. [Product brief](product-brief.md) · [Architecture](architecture-plan.md)
 
 ## Brand foundations
