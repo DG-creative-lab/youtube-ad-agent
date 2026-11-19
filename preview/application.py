@@ -11,6 +11,7 @@ import re
 import secrets
 from tempfile import TemporaryDirectory
 from time import time
+from traceback import extract_tb
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -191,7 +192,9 @@ class PreviewApplication:
         except WorkspaceConflict as error:
             response = payload(409, {"error": str(error)})
         except Exception as error:
-            LOG.warning("Demo request failed: %s", type(error).__name__)
+            frames = extract_tb(error.__traceback__)
+            locations = " > ".join(f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}" for frame in frames)
+            LOG.warning("Demo request failed: %s (%s)", type(error).__name__, locations)
             response = payload(503, {"error": "The workspace is unavailable. Refresh and try again."})
         status, body, headers = response
         headers.extend([
@@ -264,7 +267,7 @@ class PreviewApplication:
             return redirect("/", ("Clear-Site-Data", '"storage"'))
         body = read_body(environ, MAX_BODY) if method == "POST" else b""
         database = workspace.snapshot if workspace.snapshot is not None else self.seed
-        with TemporaryDirectory(prefix="youtube-preview-") as directory:
+        with TemporaryDirectory(prefix="youtube-preview-", dir="/tmp") as directory:
             database_path = Path(directory) / "workspace.sqlite"
             database_path.write_bytes(database)
             result = serve_command(path, query, method, self.origin, environ, body, database_path)

@@ -111,6 +111,7 @@
     "campaign_agent/workspaces.py": "application",
     "preview/application.py": "bootstrap",
     "preview/build_seed.py": "developer_tool",
+    "preview/stage.py": "developer_tool",
     "preview/storage.py": "outbound",
     "scripts/campaign_drafts.py": "application",
     "scripts/check_architecture.py": "developer_tool",
