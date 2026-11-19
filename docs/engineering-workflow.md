@@ -175,6 +175,12 @@ committed checkout using a new output directory:
 CI publishes its authored report, policy scores and per-case traces. A passing
 offline gate does not replace the deployed-revision browser smoke or human review.
 
+The [live capability benchmark](live-capability-benchmark.md) defaults to a keyless
+plan with `python scripts/evaluate_live_capability.py`. Run its focused runner and
+grader regressions through `test_live_capability_benchmark.py`, then the full suite.
+Only the explicit `run-live` command can spend an authorized batch envelope; keys
+are entered through its hidden prompt, and quality reviews remain separate.
+
 Run the offline suite locally for behavior changes. GitHub Actions runs the same
 Python checks and a separate planner build on pushes to main and pull requests.
 

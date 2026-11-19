@@ -72,6 +72,11 @@ are part of review; the candidate workflow cannot certify itself as tamper-proof
 
 ## Separate gates still required
 
+The [live capability benchmark](live-capability-benchmark.md) adds a separate
+20-task corpus, optional repeated real-provider trials and explicit human grading.
+Its keyless plan is published beside this gate's CI evidence. No live call runs
+in required CI, and an unreviewed reply cannot count as a capability pass.
+
 The report labels hosted smoke and live model quality as **not run**. It does not
 import an old deployment pass or equate offline success to release approval. The
 pitch release still needs review, CI and a browser check against the deployed

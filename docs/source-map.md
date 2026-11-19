@@ -1,5 +1,14 @@
 # Source-code map
 
+The [live capability benchmark](live-capability-benchmark.md) is owned by
+`scripts/evaluate_live_capability.py` (planning, isolated preview command trials,
+private evidence and CLI) and `scripts/capability_grading.py` (frozen task contract,
+outcome checks, human rubric and matched-report comparison). Its 20 tasks live in
+`examples/live-capability-tasks.v1.json`; `tests/test_live_capability_benchmark.py`
+exercises the real foreground path with authored provider responses. It reuses
+`preview/application.py:serve_command` and the existing foreground ledger rather
+than implementing another agent loop or changing product authority.
+
 The [demo eval gate](demo-release-evals.md) is owned by
 `scripts/evaluate_demo_release.py`, with the frozen companion manifest in
 `examples/demo-release-evals.v1.json` and gate regression tests in
