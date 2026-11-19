@@ -1,5 +1,10 @@
 # Offline agent behavior portfolio
 
+The [demo release gate](demo-release-evals.md) runs this unchanged corpus alongside
+the policy simulation and six learning-reuse cases, then publishes a combined CI
+report with per-case traces. Canonical portfolio acceptance below remains scoped
+to #51; hosted readiness and live model quality are separate results.
+
 The [v1 corpus](../examples/agent-behavior-evals.v1.json) independently specifies
 11 authored scenarios for existing campaign commands. The corpus was frozen
 before runner implementation at version `1.0.0`, schema `1`, SHA-256

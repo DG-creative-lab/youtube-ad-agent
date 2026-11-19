@@ -1,5 +1,12 @@
 # Source-code map
 
+The [demo eval gate](demo-release-evals.md) is owned by
+`scripts/evaluate_demo_release.py`, with the frozen companion manifest in
+`examples/demo-release-evals.v1.json` and gate regression tests in
+`tests/test_demo_release_evals.py`. It reuses `scripts/evaluate_agent_behavior.py`
+and `scripts/compare_instruction_policies.py`; application runtime ownership is
+unchanged.
+
 The staged map includes #87 foundation contracts/offline injection before #86;
 #86 owns every pilot native participant and its minimal factory, with #87 final
 external adoption and #88 consolidation afterward.

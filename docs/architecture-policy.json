@@ -120,6 +120,7 @@
     "scripts/check_project_access_contract.py": "developer_tool",
     "scripts/compare_instruction_policies.py": "support",
     "scripts/evaluate_agent_behavior.py": "support",
+    "scripts/evaluate_demo_release.py": "support",
     "scripts/google_ads_sandbox.py": "inbound",
     "scripts/hosted_access_fixture.py": "bootstrap",
     "scripts/placement_review.py": "bootstrap",

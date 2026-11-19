@@ -40,6 +40,23 @@ jobs:
       - run: python3 -m venv .venv
       - run: .venv/bin/python -m pip install -r requirements-test.txt
       - run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Evaluate deterministic demo release gate
+        id: demo-evals
+        run: .venv/bin/python scripts/evaluate_demo_release.py --output-dir "$RUNNER_TEMP/demo-evals"
+      - name: Publish demo eval summary
+        if: ${{ always() && steps.demo-evals.outcome != 'skipped' }}
+        run: |
+          if test -f "$RUNNER_TEMP/demo-evals/report.md"; then
+            cat "$RUNNER_TEMP/demo-evals/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload sanitized demo eval evidence
+        if: ${{ always() && steps.demo-evals.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: demo-evals-${{ github.sha }}
+          path: ${{ runner.temp }}/demo-evals/
+          if-no-files-found: error
+          retention-days: 14
 
   planner:
     name: Planner build
