@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app.py": {
+      "includeFiles": "{campaign_agent/**,scripts/placement_review.py,preview/**,examples/placement-review/**,examples/viewer-media/**,placement-review/index.html,web/brand/**,web/viewer/**,web/planner/dist/**}"
+    }
+  }
+}

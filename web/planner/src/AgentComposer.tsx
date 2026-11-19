@@ -16,6 +16,7 @@ export type PlannerOptions = {
   specialist_label: string;
 };
 type Props = {
+  preview: boolean;
   capabilityScope: string;
   providerSelection: Selection | null;
   providerConnected: boolean;
@@ -37,7 +38,7 @@ type Props = {
   request: <T>(path: string, body?: Record<string, unknown>) => Promise<T>;
 };
 
-export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText,
+export function AgentComposer({preview, options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText,
   draftPermission, onDraftPermission, request, capabilityScope, providerSelection, providerConnected, onProviderSettings, onProviderSelect}: Props) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
@@ -111,7 +112,7 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
             onChange={() => {onModel(item.id); setPanel(null); modelButton.current?.focus();}} />
           <span><strong>{item.label}</strong><small>{item.mode === "openrouter" ? "Live · enabled on this server" : "Offline · authored simulation"}</small></span>
         </label>)}
-        <OpenRouterModels onSettingsChange={onProviderSettings} onSelect={selection => {onProviderSelect(selection); setPanel(null); modelButton.current?.focus();}} />
+        {!preview && <OpenRouterModels onSettingsChange={onProviderSettings} onSelect={selection => {onProviderSelect(selection); setPanel(null); modelButton.current?.focus();}} />}
         <p>Changing the model starts a new conversation in this campaign.</p>
         <p>{options.specialist_label}</p>
       </div>}
@@ -127,10 +128,10 @@ export function AgentComposer({options, model, onModel, onSubmit, onCatalogs, ca
           <path d="m10 2 8 4-8 4-8-4 8-4Zm-8 8 8 4 8-4M2 14l8 4 8-4" />
         </svg> Catalog <span>{selectedCatalog?.count ?? 0}</span>
       </button>
-      <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "import"}
+      {!preview && <button type="button" className="composer-pill" disabled={disabled} aria-expanded={panel === "import"}
         aria-controls={`${panelId}-import`} onClick={() => setPanel(panel === "import" ? null : "import")}>
         <span aria-hidden="true">+</span> Import
-      </button>
+      </button>}
       <button ref={capabilityButton} type="button" className="composer-pill" aria-expanded={panel === "capabilities"}
         aria-controls={`${panelId}-capabilities`} onClick={() => setPanel(panel === "capabilities" ? null : "capabilities")}>
         Capabilities

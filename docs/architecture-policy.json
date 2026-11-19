@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "roles": {
+    "app.py": "bootstrap",
     "campaign_agent/access.py": "application",
     "campaign_agent/adapters/catalogue_cache.py": "outbound",
     "campaign_agent/adapters/demo_delivery.py": "outbound",
@@ -47,8 +48,8 @@
     "campaign_agent/application/planner_runtime.py": "application",
     "campaign_agent/assets.py": "application",
     "campaign_agent/bootstrap/__init__.py": "marker",
-    "campaign_agent/bootstrap/google_ads_cli.py": "bootstrap",
     "campaign_agent/bootstrap/evidence.py": "bootstrap",
+    "campaign_agent/bootstrap/google_ads_cli.py": "bootstrap",
     "campaign_agent/bootstrap/hosted.py": "bootstrap",
     "campaign_agent/bootstrap/local.py": "bootstrap",
     "campaign_agent/bootstrap/placement_router.py": "bootstrap",
@@ -108,6 +109,9 @@
     "campaign_agent/recovery.py": "application",
     "campaign_agent/staff.py": "application",
     "campaign_agent/workspaces.py": "application",
+    "preview/application.py": "bootstrap",
+    "preview/build_seed.py": "developer_tool",
+    "preview/storage.py": "outbound",
     "scripts/campaign_drafts.py": "application",
     "scripts/check_architecture.py": "developer_tool",
     "scripts/check_project_access_contract.py": "developer_tool",

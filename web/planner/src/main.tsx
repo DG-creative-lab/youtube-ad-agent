@@ -50,6 +50,7 @@ type PackageReview = {
   approval: {actor_id: string; approved_at: string} | null;
 };
 type Mode = {
+  previewScope?: string;
   workspace?: {actor: string; client_id: string; brand_id: string; id: string; fixture: boolean};
   live: boolean;
   googleAdsReporting?: boolean;
@@ -527,9 +528,9 @@ function App() {
   const remoteModel = !["simulated", "simulated-inspect", ""].includes(mainModel);
   const inheritedModel = remoteModel
     ? {mode: "openrouter" as const, model: mainModel, budget: account.selection?.max_run_cost_usd} : {mode: "offline" as const};
-  const capabilityScope = JSON.stringify([mode?.workspace?.actor, mode?.workspace?.client_id,
+  const capabilityScope = JSON.stringify([mode?.previewScope, mode?.workspace?.actor, mode?.workspace?.client_id,
     mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
-  const composer = mode?.agentPlanner && draft && <AgentComposer capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
+  const composer = mode?.agentPlanner && draft && <AgentComposer preview={Boolean(mode.previewScope)} capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
     providerSelection={account.selection} providerConnected={account.state === "connected"}
     onProviderSettings={() => newConversation(mainModel, true)}
     onProviderSelect={selection => {newConversation(selection.model, true);}}
@@ -608,18 +609,19 @@ function App() {
           </select>
         </label>}
         <div className="rail-footer">
-          <div className="rail-environment"><span className="rail-label">{mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
+          <div className="rail-environment"><span className="rail-label">{mode?.previewScope ? "Protected preview" : mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
-              : mode?.live ? "Check source labels when reviewing evidence." : "Authored delivery fixtures. Local viewer activity."}</p>
+              : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Authored delivery fixtures. Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
-          <OpenRouterAccount ready={Boolean(mode && draft)} onChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />
-          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">{mode?.workspace ? "SF" : "LO"}</span><span>{mode?.workspace?.actor ?? "Local operator"}<small>{mode?.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : "Trusted local workspace"}</small></span></div>
+          {mode?.previewScope ? <a className="text-action" href="/invite">Manage invite</a>
+            : <OpenRouterAccount ready={Boolean(mode && draft)} onChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />}
+          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">{mode?.previewScope ? "DP" : mode?.workspace ? "SF" : "LO"}</span><span>{mode?.previewScope ? "Demo reviewer" : mode?.workspace?.actor ?? "Local operator"}<small>{mode?.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : mode?.previewScope ? "Invite workspace" : "Trusted local workspace"}</small></span></div>
         </div>
       </aside>
       <main id="workspace-main" tabIndex={-1}>
         <div className="topline">
           <span>Workspace <span className="crumb-separator" aria-hidden="true">›</span> {home ? "New request" : "Campaign"}</span>
-          {mode && <span className="mode">{mode.workspace ? "Offline access fixture" : mode.live ? "Live catalog" : mode.googleAdsReporting ? "Local workspace" : "Local demo"}</span>}
+          {mode && <span className="mode">{mode.previewScope ? "Protected demo" : mode.workspace ? "Offline access fixture" : mode.live ? "Live catalog" : mode.googleAdsReporting ? "Local workspace" : "Local demo"}</span>}
         </div>
         {home ? (
           <div className="home">
@@ -715,6 +717,9 @@ function App() {
                     const viewerPath = mode?.workspace
                       ? activePackage?.public_comparisons?.find(link => link.creative_ref === example?.creative)?.url
                       : group?.viewer_path ?? (example && "/viewer?ad=" + encodeURIComponent(example.creative));
+                    const previewPath = mode?.previewScope
+                      ? group?.preview_path?.replace("/viewer/media/", `/viewer/media/${mode.previewScope}/`)
+                      : group?.preview_path;
                     return (
                       <section className="context" key={key} aria-label={context.title}>
                         <div className="context-heading">
@@ -723,8 +728,8 @@ function App() {
                             Open comparison <span aria-hidden="true">↗</span>
                           </a>}
                         </div>
-                        {mode && group?.preview_path && <a className="creative-preview" href={mode.viewerOrigin + group.preview_path}
-                            target="_blank" rel="noreferrer">Preview {group.creative_version} ↗</a>}
+                        {mode && previewPath && <a className="creative-preview" href={mode.viewerOrigin + previewPath}
+                            target="_blank" rel="noreferrer">Preview {group?.creative_version} ↗</a>}
                         {rows.length ? <ul className="placements">{rows.map(row => (
                           <li key={row.id}><span>{row.title}</span><small>{row.source.replaceAll("_", " ")}</small></li>
                         ))}</ul> : <p className="empty">No placements saved yet.</p>}
