@@ -77,7 +77,9 @@ class ProtectedPreviewTests(TestCase):
         second = self.client(CODES[1])
         self.assertEqual(self.client().get("/api/campaign").status_code, 401)
         run_id = "9" * 32
-        request = first.get("/api/mode").json()["demoRequest"]
+        mode = first.get("/api/mode").json()
+        self.assertIs(mode["openrouterAvailable"], False)
+        request = mode["demoRequest"]
         initial = first.post("/api/agent/run", json={"run_id": run_id, "request": request})
         self.assertEqual(initial.status_code, 200, initial.text)
         run = initial.json()

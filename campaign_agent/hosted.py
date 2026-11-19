@@ -266,7 +266,8 @@ class HostedApplication:
             return Response(data, media_type='text/vtt' if take == 'captions' else 'video/mp4' if name.endswith('.mp4') else 'audio/mpeg')
         if path in {'/api/config', '/api/mode'}:
             return {'live': False, 'demoRequest': DEMO_REQUEST, 'viewerOrigin': '', 'publicViewerOrigin': self.viewer_origin,
-                'googleAdsReporting': False, 'openrouterReviewModels': [], 'openrouterDraftModels': [],
+                'googleAdsReporting': False, 'openrouterAvailable': self.provider_sessions.metadata is not None,
+                'openrouterReviewModels': [], 'openrouterDraftModels': [],
                 'instructionTestLimits': {'initial': INITIAL_SAMPLE_SIZE, 'batch': ADDITIONAL_BATCH_SIZE,
                     'cap': SAMPLE_CAP, 'batchCost': POLICY_V1['batch_cost']},
                 'agentPlanner': {**r.planner.options(), 'catalogs': r.planner.catalogs.list()},

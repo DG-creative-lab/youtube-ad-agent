@@ -554,6 +554,7 @@ def build_handler(live, draft_path, *, operator_token, openrouter_review_models=
                         "googleAdsReporting": reporting is not None,
                         "instructionTestLimits": {"initial": INITIAL_SAMPLE_SIZE, "batch": ADDITIONAL_BATCH_SIZE,
                                                   "cap": SAMPLE_CAP, "batchCost": POLICY_V1["batch_cost"]},
+                        "openrouterAvailable": provider_metadata is not None,
                         "openrouterReviewModels": [],
                         "openrouterDraftModels": [],
                         "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,

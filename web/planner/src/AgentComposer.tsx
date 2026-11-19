@@ -9,17 +9,23 @@ export const draftPermissionLabels: Record<DraftPermission, string> = {
   none: "Review only", placements: "Placement draft", instruction_test: "Instruction-test draft",
 };
 
+export function modelLabel(model: string) {
+  if (model === "simulated") return "Offline demo";
+  if (model === "simulated-inspect") return "Offline demo · inspect first";
+  return model;
+}
+
 export type PlannerOptions = {
   models: {id: string; label: string; mode: string}[];
   default: string;
   catalogs: {id: string; label: string; count: number}[];
-  specialist_label: string;
 };
 type Props = {
   preview: boolean;
   capabilityScope: string;
   providerSelection: Selection | null;
   providerConnected: boolean;
+  providerAvailable: boolean;
   onProviderSettings: () => void;
   onProviderSelect: (selection: Selection) => void;
   options: PlannerOptions;
@@ -39,7 +45,7 @@ type Props = {
 };
 
 export function AgentComposer({preview, options, model, onModel, onSubmit, onCatalogs, catalogId, onCatalogId, busy, followup, text, onText,
-  draftPermission, onDraftPermission, request, capabilityScope, providerSelection, providerConnected, onProviderSettings, onProviderSelect}: Props) {
+  draftPermission, onDraftPermission, request, capabilityScope, providerSelection, providerConnected, providerAvailable, onProviderSettings, onProviderSelect}: Props) {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
   const [panel, setPanel] = useState<"model" | "catalog" | "import" | "permission" | "capabilities" | null>(null);
@@ -50,7 +56,9 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
   const chosen = catalogId || options.catalogs[0]?.id || "";
   const remote = !["simulated", "simulated-inspect", ""].includes(model);
   const selectedModel = options.models.find(item => item.id === model) ?? (remote ? {id: model, label: model, mode: "openrouter"} : undefined);
-  const providerReady = !remote || providerConnected && providerSelection?.model === model;
+  const modelChoices = preview ? options.models.filter(item => item.id === "simulated") : options.models;
+  const displayModel = remote ? selectedModel?.label ?? model : modelLabel(model);
+  const providerReady = !remote || providerAvailable && providerConnected && providerSelection?.model === model;
   const selectedCatalog = options.catalogs.find(item => item.id === chosen);
   const disabled = busy || importing;
   async function importCatalog(file?: File) {
@@ -73,7 +81,7 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
     }
   }
   return <form className="agent-composer" onKeyDown={event => {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && panel) {
       const trigger = panel === "capabilities" ? capabilityButton : modelButton;
       setPanel(null); trigger.current?.focus();
     }
@@ -89,12 +97,12 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
         placeholder={followup ? "Answer the agent or refine this campaign…" : "Describe what you would like to prepare…"}
         disabled={disabled} required />
       <div className="composer-toolbar">
-        <span className="composer-mode">{selectedModel?.mode === "openrouter" ? "OpenRouter" : "Offline"}</span>
         <div className="composer-actions">
-          <button ref={modelButton} type="button" className="model-trigger" aria-label={`Main model: ${selectedModel?.label ?? model}`}
+          <button ref={modelButton} type="button" className="model-trigger" aria-label={`Model: ${displayModel}`}
             aria-expanded={panel === "model"} aria-controls={`${panelId}-models`} disabled={disabled}
             onClick={() => setPanel(panel === "model" ? null : "model")}>
-            <span>{selectedModel?.label ?? `Unavailable · ${model}`}</span><span aria-hidden="true">⌄</span>
+            <span className="model-caption" aria-hidden="true">Model</span>
+            <span className="model-value">{displayModel}</span><span aria-hidden="true">⌄</span>
           </button>
           <button className="composer-send" aria-label={busy ? "Working" : followup ? "Send follow-up" : "Send request"}
             title={followup ? "Send follow-up" : "Send request"}
@@ -105,16 +113,15 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
           </button>
         </div>
       </div>
-      {panel === "model" && <div id={`${panelId}-models`} className="model-menu" role="group" aria-label="Main model options">
-        <span className="label">Main model</span>
-        {options.models.map(item => <label key={item.id} className="model-option">
+      {panel === "model" && <div id={`${panelId}-models`} className="model-menu" role="group" aria-label="Model options">
+        <span className="label">Model</span>
+        {modelChoices.map(item => <label key={item.id} className="model-option">
           <input type="radio" name={`${panelId}-model`} value={item.id} checked={item.id === model} disabled={disabled}
             onChange={() => {onModel(item.id); setPanel(null); modelButton.current?.focus();}} />
-          <span><strong>{item.label}</strong><small>{item.mode === "openrouter" ? "Live · enabled on this server" : "Offline · authored simulation"}</small></span>
+          <span><strong>{item.mode === "simulated" ? modelLabel(item.id) : item.label}</strong><small>{item.mode === "openrouter" ? "Live · enabled on this server" : "Offline · authored simulation"}</small></span>
         </label>)}
-        {!preview && <OpenRouterModels onSettingsChange={onProviderSettings} onSelect={selection => {onProviderSelect(selection); setPanel(null); modelButton.current?.focus();}} />}
+        {providerAvailable && <OpenRouterModels onSettingsChange={onProviderSettings} onSelect={selection => {onProviderSelect(selection); setPanel(null); modelButton.current?.focus();}} />}
         <p>Changing the model starts a new conversation in this campaign.</p>
-        <p>{options.specialist_label}</p>
       </div>}
     </div>
     <div className="composer-pills" aria-label="Message options">
@@ -164,7 +171,7 @@ export function AgentComposer({preview, options, model, onModel, onSubmit, onCat
         onChange={event => {void importCatalog(event.target.files?.[0]); event.target.value = "";}} /></label>
       <p>Up to 200 permitted descriptions with video_id, description, source and source_reference. Use creator_supplied, licensed or synthetic sources.</p>
     </section>}
-    {remote && !providerReady && <p className="revision" role="status">Reconnect to resume saved work, or select an eligible model for a new request. Offline models remain available.</p>}
+    {remote && !providerReady && <p className="revision" role="status">{providerAvailable ? "Reconnect OpenRouter from the account menu to resume this conversation, or choose another model to start a new one." : "This saved model is unavailable here. Choose Offline demo to start a new conversation."}</p>}
     {followup && <p className="composer-note">A follow-up stops any unfinished request in this conversation.</p>}
     {importing && <p role="status">Importing catalog…</p>}
     {error && <p className="error" role="alert">{error}</p>}
