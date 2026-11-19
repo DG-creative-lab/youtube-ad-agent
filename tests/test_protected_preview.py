@@ -34,6 +34,10 @@ class ProtectedPreviewTests(TestCase):
         return client
 
     def test_agent_approval_viewer_and_isolation_survive_new_gateway(self):
+        anonymous = self.client()
+        self.assertEqual(anonymous.get("/invite").headers["referrer-policy"], "same-origin")
+        self.assertEqual(anonymous.post("/invite", data={"code": CODES[0]},
+                                        headers={"Origin": "null"}).status_code, 403)
         first = self.client(CODES[0])
         second = self.client(CODES[1])
         self.assertEqual(self.client().get("/api/campaign").status_code, 401)

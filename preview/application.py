@@ -196,7 +196,7 @@ class PreviewApplication:
         status, body, headers = response
         headers.extend([
             ("Content-Length", str(len(body))), ("Cache-Control", "no-store"),
-            ("Referrer-Policy", "no-referrer"), ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "same-origin"), ("X-Content-Type-Options", "nosniff"),
             ("Cross-Origin-Resource-Policy", "same-origin"), ("X-Frame-Options", "DENY"),
             ("Content-Security-Policy", "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"),
             ("X-Robots-Tag", "noindex, nofollow"),
