@@ -31,6 +31,9 @@ const prefix = "campaign-openrouter:";
 const keyPaths = new Set(["/api/openrouter/connect", "/api/openrouter/models", "/api/openrouter/select",
   "/api/openrouter/reconcile", "/api/agent/placements", "/api/agent/next-test", "/api/agent/instruction-review",
   "/api/agent/experiment-next-test", "/api/agent/run"]);
+const nullableReads = new Set([
+  "/api/campaign/setup", "/api/campaign/instruction-test", "/api/campaign/instruction-finding",
+]);
 const messages: Record<string, string> = {
   waiting_for_credentials: "Reconnect the original OpenRouter key, then resume this saved operation.",
   inference_outcome_unknown: "The provider outcome is unknown. This operation will not repeat the completion. Saved history remains available.",
@@ -184,7 +187,12 @@ export class OpenRouterSession {
     if ((path === "/api/mode" || path === "/api/config") && responseCsrf) this.#hosted = true;
     this.#csrf = responseCsrf ?? this.#csrf;
     let result: any;
-    try {result = await response.json(); this.assertSafe(result); if (!result || typeof result !== "object") throw new Error();}
+    try {
+      result = await response.json();
+      this.assertSafe(result);
+      const nullable = response.ok && !body && nullableReads.has(path.split("?")[0]);
+      if (typeof result !== "object" || (result === null && !nullable)) throw new Error();
+    }
     catch {throw new RequestError("The response could not be read safely. No automatic retry was made; open saved history before continuing.", 503, "request_outcome_unavailable");}
     if (credential) {this.assertCurrent(epoch); this.#assertCredentialMetadata();}
     if (!response.ok) {

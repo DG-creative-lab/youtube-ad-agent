@@ -269,3 +269,14 @@ test('temporary native proof outage clears memory while retaining original recon
   await connect(session);const command=calls.filter(call=>call.path==='/api/openrouter/connect').at(-1);
   assert.equal(JSON.parse(command.body).resume_connection_id,connection);assert.equal(command.headers['X-CSRF-Token'],'native-session-a');await session.disconnect();
 });
+
+
+test('only successful nullable campaign reads accept a null record', async () => {
+  let status = 200;
+  const {session} = rig(() => new Response('null', {status}));
+  assert.equal(await session.request('/api/campaign/setup?revision=2'), null);
+  await assert.rejects(session.request('/api/campaign'), /could not be read safely/);
+  await assert.rejects(session.request('/api/campaign/setup', {}), /could not be read safely/);
+  status = 500;
+  await assert.rejects(session.request('/api/campaign/setup?revision=2'), /could not be read safely/);
+});

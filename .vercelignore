@@ -1,0 +1,9 @@
+.local
+.git
+.agents
+.github
+docs
+tests
+**/__pycache__
+**/node_modules
+**/.env*

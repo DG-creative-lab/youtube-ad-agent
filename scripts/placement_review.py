@@ -81,14 +81,12 @@ def youtube_search(key, query, page):
         return json.load(response)
 
 
-def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
-          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
-          provider_metadata=None, provider_profiles=(),provider_completion_transport=None,
-          runtime_factory=None, provider_sessions_factory=ProviderSessions, initialize=True, media_dir=None):
-    if not 1 <= viewer_port <= 65535:
-        raise ValueError("Choose a fixed viewer port from 1 to 65535.")
-    if viewer_port == port:
-        raise ValueError("The planner and viewer must use different ports.")
+def build_handler(live, draft_path, *, operator_token, openrouter_review_models=(),
+                  openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
+                  provider_metadata=None, provider_profiles=(), provider_completion_transport=None,
+                  runtime_factory=None, provider_sessions_factory=ProviderSessions, initialize=True,
+                  media_dir=None, register_catalogs=True):
+    """Compose the existing command routes independently of the HTTP listener."""
     if demo_scenario and (live or reporting is not None or openrouter_review_models or openrouter_draft_models or main_models):
         raise ValueError('The portable demo uses offline search, models and reporting.')
     key = None
@@ -123,8 +121,9 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         instruction_tests = agent.instruction_tests
         providers = provider_sessions_factory(draft_path, metadata=provider_metadata, profiles=provider_profiles,
                                              initialize=False)
-        for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
-            agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
+        if register_catalogs:
+            for name, label in (("catalog.json", "Voice comparison demo"), ("catalog-alternate.json", "Alternate creator demo")):
+                agent.planner.catalogs.register(label, json.loads((ROOT / "examples/placement-review" / name).read_text()))
     setup_commands = ({'/api/campaign/setup/validate': agent.setup.validate,
                        '/api/campaign/setup/create': agent.setup.create,
                        '/api/campaign/setup/reconcile': agent.setup.reconcile} if agent else {})
@@ -138,10 +137,21 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         finding_path + '/apply': (agent.instruction_findings.apply, {"finding_id", "correction_id", "draft_permission"}),
         finding_path + '/retire': (agent.instruction_findings.retire, {"finding_id"}),
     } if agent else {})
-    operator_token = secrets.token_urlsafe(32)
     planner_build = ROOT / "web/planner/dist"
 
     class Handler(BaseHTTPRequestHandler):
+        @property
+        def request_origin(self):
+            return self.server.request_origin
+
+        @property
+        def viewer_origin(self):
+            return self.server.viewer_origin
+
+        @property
+        def viewer_request(self):
+            return self.server.viewer_request
+
         def log_message(self, *_args):
             pass
 
@@ -160,7 +170,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             self.wfile.write(content)
 
         def check_host(self):
-            if self.headers.get("Host") != f"127.0.0.1:{self.server.server_port}":
+            if self.headers.get("Host") != urlsplit(self.request_origin).netloc:
                 if self.path.startswith('/api/openrouter/'):
                     error=ProviderError('access_denied');self.send(error.status,error.response())
                     return False
@@ -178,7 +188,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         def do_POST(self):
             if not self.check_host():
                 return
-            if self.server is viewer_server:
+            if self.viewer_request:
                 if self.path in {"/api/viewer/open", "/api/viewer/event", "/api/viewer/test/open"}:
                     self.post_viewer()
                 else:
@@ -208,7 +218,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 return
             if not self.check_operator():
                 return
-            if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
+            if (self.headers.get("Origin") != self.request_origin
                     or self.headers.get("X-Placement-Review") != "campaign"):
                 self.send(403, {"error": "Save drafts from the placement review page."})
                 return
@@ -235,7 +245,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         def post_package(self):
             if not self.check_operator():
                 return
-            if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
+            if (self.headers.get("Origin") != self.request_origin
                     or self.headers.get("X-Placement-Review") != "campaign"):
                 self.send(403, {"error": "Open the package in the local planner."})
                 return
@@ -319,7 +329,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             try:
                 if not secrets.compare_digest(self.headers.get('X-Local-Operator','').encode(),operator_token.encode()):
                     raise ProviderError('access_denied')
-                if self.headers.get('Origin')!=f'http://127.0.0.1:{self.server.server_port}':
+                if self.headers.get('Origin')!=self.request_origin:
                     raise ProviderError('access_denied')
                 if providers is None or '?' in self.path:
                     raise ProviderError('invalid_request')
@@ -349,7 +359,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         def post_catalog(self):
             if not self.check_operator():
                 return
-            if self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}" or agent is None:
+            if self.headers.get("Origin") != self.request_origin or agent is None:
                 self.send(403, {"error": "Import catalogs from the local planner."})
                 return
             try:
@@ -369,7 +379,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
         def post_agent(self):
             if not self.check_operator():
                 return
-            if self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}":
+            if self.headers.get("Origin") != self.request_origin:
                 self.send(403, {"error": "Start the run from the local planner."})
                 return
             if agent is None:
@@ -427,7 +437,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                 self.send(200, result)
 
         def post_viewer(self):
-            if (self.headers.get("Origin") != f"http://127.0.0.1:{self.server.server_port}"
+            if (self.headers.get("Origin") != self.request_origin
                     or self.headers.get("X-Viewer") != "comparison"):
                 self.send(403, {"error": "Open the local comparison page."})
                 return
@@ -509,7 +519,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             if url.path.startswith("/viewer/media/"):
                 self.read_viewer_media(url.path.removeprefix("/viewer/media/"), url.query)
                 return
-            if self.server is viewer_server:
+            if self.viewer_request:
                 if url.path == "/viewer":
                     self.send(200, (ROOT / "web/viewer/index.html").read_bytes(), "text/html; charset=utf-8")
                 else:
@@ -533,7 +543,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                     page = page.replace(b"data-planner-link hidden", b"data-planner-link")
                 else:
                     page = page.replace(b"data-planner-required hidden", b"data-planner-required")
-                viewer_origin = f"http://127.0.0.1:{viewer_server.server_port}".encode()
+                viewer_origin = self.viewer_origin.encode()
                 self.send(200, page.replace(b"VIEWER_ORIGIN_PLACEHOLDER", viewer_origin), "text/html; charset=utf-8")
                 return
             if url.path == "/api/mode":
@@ -547,7 +557,7 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
                         "openrouterReviewModels": [],
                         "openrouterDraftModels": [],
                         "agentPlanner": {**agent.planner.options(), "catalogs": agent.planner.catalogs.list()} if agent else None,
-                        "viewerOrigin": f"http://127.0.0.1:{viewer_server.server_port}",
+                        "viewerOrigin": self.viewer_origin,
                         "examples": [{"creative": item.creative_ref, "ref": item.ref, "title": item.title}
                                      for item in EXAMPLES],
                     })
@@ -755,10 +765,33 @@ def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEW
             else:
                 self.send(200, draft)
 
+    return Handler
+
+
+def serve(port, live, draft_path=DEFAULT_DRAFT_PATH, *, viewer_port=DEFAULT_VIEWER_PORT,
+          openrouter_review_models=(), openrouter_draft_models=(), main_models=(), reporting=None, demo_scenario=None,
+          provider_metadata=None, provider_profiles=(),provider_completion_transport=None,
+          runtime_factory=None, provider_sessions_factory=ProviderSessions, initialize=True, media_dir=None):
+    if not 1 <= viewer_port <= 65535:
+        raise ValueError("Choose a fixed viewer port from 1 to 65535.")
+    if viewer_port == port:
+        raise ValueError("The planner and viewer must use different ports.")
+    operator_token = secrets.token_urlsafe(32)
+    Handler = build_handler(live, draft_path, operator_token=operator_token,
+        openrouter_review_models=openrouter_review_models, openrouter_draft_models=openrouter_draft_models,
+        main_models=main_models, reporting=reporting, demo_scenario=demo_scenario,
+        provider_metadata=provider_metadata, provider_profiles=provider_profiles,
+        provider_completion_transport=provider_completion_transport, runtime_factory=runtime_factory,
+        provider_sessions_factory=provider_sessions_factory, initialize=initialize, media_dir=media_dir)
     with (
         ThreadingHTTPServer(("127.0.0.1", port), Handler) as server,
         ThreadingHTTPServer(("127.0.0.1", viewer_port), Handler) as viewer_server,
     ):
+        viewer_origin = f"http://127.0.0.1:{viewer_server.server_port}"
+        for listener, is_viewer in ((server, False), (viewer_server, True)):
+            listener.request_origin = f"http://127.0.0.1:{listener.server_port}"
+            listener.viewer_origin = viewer_origin
+            listener.viewer_request = is_viewer
         viewer_thread = Thread(target=viewer_server.serve_forever)
         viewer_thread.start()
         try:
