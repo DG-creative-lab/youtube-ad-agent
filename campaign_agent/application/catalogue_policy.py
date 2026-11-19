@@ -75,7 +75,12 @@ def normalize(rows, profiles=(), *, now):
             base=raw.get('pricing')
             if not isinstance(base,dict) or not {'prompt','completion'}<=base.keys():
                 raise ProviderError('catalogue_unavailable')
-            amounts={key:decimal_text(price(base[key])) for key in ('prompt','completion')}
+            amounts = {}
+            for key in ("prompt", "completion"):
+                try:
+                    amounts[key] = decimal_text(price(base[key]) * 1_000_000)
+                except ProviderError:
+                    amounts[key] = None
             try:
                 pricing(base)
                 simple_prices=True
@@ -96,11 +101,11 @@ def normalize(rows, profiles=(), *, now):
             elif compatible and any(p.model==ident and p.expires_at>now and p.evidence
                     and any(compatible_model(raw,task) for task in p.tasks) for p in profiles):
                 state,reasons='eligible',[]
-            result.append({'id':ident,'name':name,'input_usd_per_million':decimal_text(price(amounts['prompt'])*1_000_000),
-                           'output_usd_per_million':decimal_text(price(amounts['completion'])*1_000_000),
+            result.append({'id':ident,'name':name,'input_usd_per_million':amounts['prompt'],
+                           'output_usd_per_million':amounts['completion'],
                            'state':state,'reason_codes':reasons})
         except ProviderError as error:
-            # Invalid prices/identities are never invented as zero-priced display rows.
+            # Unsupported identities are omitted. Unknown prices remain unavailable.
             if error.code=='invalid_request':
                 continue
             raise

@@ -1,13 +1,24 @@
 import {useEffect, useRef, useState, useSyncExternalStore} from "react";
+import {OpenRouterModels} from "./OpenRouterModels";
+import type {Selection} from "./openrouter-session";
 import {openrouter} from "./openrouter-session";
 
-export function OpenRouterAccount({onChange, ready}: {ready: boolean; onChange: (fresh: boolean) => void}) {
+type Props = {
+  ready: boolean;
+  onChange: (fresh: boolean) => void;
+  selectionBusy: boolean;
+  onModelSettings: () => void;
+  onModelSelect: (selection: Selection) => void;
+};
+
+export function OpenRouterAccount({onChange, ready, selectionBusy, onModelSettings, onModelSelect}: Props) {
   const account = useSyncExternalStore(openrouter.subscribe, openrouter.snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const generation = useRef(0);
   const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [replace, setReplace] = useState(false);
+  const [opened, setOpened] = useState(false);
   const pending = account.state === "connecting";
   useEffect(() => {
     const clearInput = () => {if (input.current) input.current.value = "";};
@@ -18,12 +29,12 @@ export function OpenRouterAccount({onChange, ready}: {ready: boolean; onChange: 
   useEffect(() => {if (input.current) input.current.value = "";}, [account.epoch]);
   useEffect(() => {if (replace) input.current?.focus();}, [replace]);
   return <>
-    <button className="account-trigger" type="button" disabled={!ready} onClick={() => {setError(""); setReplace(false); dialog.current?.showModal();}}>
+    <button className="account-trigger" type="button" disabled={!ready} onClick={() => {setError(""); setReplace(false); setOpened(true); dialog.current?.showModal();}}>
       OpenRouter <span>{account.state === "connected" ? "Connected" : account.connectionId ? "Reconnect to resume" : "Connect account"}</span>
     </button>
-    <dialog ref={dialog} className="openrouter-account" aria-labelledby="openrouter-account-title" onClose={() => {if (input.current) input.current.value = "";}}>
+    <dialog ref={dialog} className="openrouter-account" aria-labelledby="openrouter-account-title" onClose={() => {setOpened(false); if (input.current) input.current.value = "";}}>
       <div className="account-heading"><h2 id="openrouter-account-title">OpenRouter account</h2>
-        <button type="button" aria-label="Close OpenRouter account" onClick={() => dialog.current?.close()}>×</button></div>
+        <button type="button" autoFocus aria-label="Close OpenRouter account" onClick={() => dialog.current?.close()}>×</button></div>
       <p>Connect your OpenRouter key to choose a model and talk to the campaign agent.</p>
       <p className="revision">The selected campaign context is sent to OpenRouter and the inference provider. No-training routing; safety retention may apply. This is not a zero-retention or residency promise.</p>
       <p role="status">{account.state === "connected" ? "Connected in this tab" : pending ? "Checking connection…" : account.state === "expired" ? "Connection expired" : account.connectionId ? "Reconnect to resume the original operation" : "Disconnected"}</p>
@@ -50,6 +61,8 @@ export function OpenRouterAccount({onChange, ready}: {ready: boolean; onChange: 
         void openrouter.disconnect().catch(() => setError("The key was cleared in this tab. Server disconnect could not be confirmed; sign out to revoke the session."));
       }}>Disconnect</button>}
       {error && <p className="error" role="alert">{error}</p>}
+      {opened && account.state === "connected" && !replace && <OpenRouterModels disabled={selectionBusy}
+        onSettingsChange={onModelSettings} onSelect={onModelSelect} />}
       <p className="revision">Disconnect, replacement, expiry, sign-out or a workspace change clears the active key. Already sent requests may still complete; saved usage and history remain available.</p>
     </dialog>
   </>;

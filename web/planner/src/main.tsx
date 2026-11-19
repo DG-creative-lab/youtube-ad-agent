@@ -502,8 +502,6 @@ function App() {
   const providerAvailable = Boolean(mode?.openrouterAvailable);
   const composer = mode?.agentPlanner && draft && <AgentComposer preview={Boolean(mode.previewScope)} capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
     providerSelection={account.selection} providerConnected={openrouter.canUse(account.selection ?? undefined)} providerAvailable={providerAvailable}
-    onProviderSettings={() => newConversation(mainModel, true)}
-    onProviderSelect={selection => {newConversation(selection.model, true);}}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
     followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
     draftPermission={draftPermission} onDraftPermission={setDraftPermission}
@@ -592,6 +590,8 @@ function App() {
             initials={mode.previewScope ? "DP" : mode.workspace ? "SF" : "LO"}
             workspace={mode.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : mode.previewScope ? "Invite workspace" : "Trusted local workspace"}
             preview={Boolean(mode.previewScope)} providerAvailable={providerAvailable} providerReady={Boolean(draft)}
+            selectionBusy={busy || Boolean(packageAction)} onModelSettings={() => newConversation(mainModel, true)}
+            onModelSelect={selection => newConversation(selection.model, true)}
             onProviderChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />}
         </div>
       </aside>

@@ -1,4 +1,5 @@
 import {useId} from "react";
+import type {Selection} from "./openrouter-session";
 import {OpenRouterAccount} from "./OpenRouterAccount";
 
 type Props = {
@@ -9,9 +10,12 @@ type Props = {
   providerAvailable: boolean;
   providerReady: boolean;
   onProviderChange: (fresh: boolean) => void;
+  selectionBusy: boolean;
+  onModelSettings: () => void;
+  onModelSelect: (selection: Selection) => void;
 };
 
-export function WorkspaceAccount({name, initials, workspace, preview, providerAvailable, providerReady, onProviderChange}: Props) {
+export function WorkspaceAccount({name, initials, workspace, preview, providerAvailable, providerReady, onProviderChange, selectionBusy, onModelSettings, onModelSelect}: Props) {
   const menuId = useId();
   const identity = <>
     <span className="operator-avatar" aria-hidden="true">{initials}</span>
@@ -24,7 +28,7 @@ export function WorkspaceAccount({name, initials, workspace, preview, providerAv
     </button>
     <section id={menuId} popover="auto" className="workspace-account" aria-label="Workspace account">
       {preview && <a href="/invite">Manage invite</a>}
-      {providerAvailable && <OpenRouterAccount ready={providerReady} onChange={onProviderChange} />}
+      {providerAvailable && <OpenRouterAccount ready={providerReady} onChange={onProviderChange} selectionBusy={selectionBusy} onModelSettings={onModelSettings} onModelSelect={onModelSelect} />}
     </section>
   </>;
 }

@@ -43,7 +43,15 @@ class CatalogueCache:
                 if cursor not in entry['cursors'] or entry['cursors'][cursor][0]!=search:
                     raise ProviderError('selection_stale')
                 offset=entry['cursors'][cursor][1]
-            rows=[r for r in entry['models'] if search.casefold() in (r['id']+' '+r['name']).casefold()]
+            query = search.casefold()
+            compact_query = "".join(character for character in query if character.isalnum())
+            rows = []
+            for row in entry["models"]:
+                name = (row["id"] + " " + row["name"]).casefold()
+                compact_name = "".join(character for character in name if character.isalnum())
+                if query in name or compact_query and compact_query in compact_name:
+                    rows.append(row)
+            rows.sort(key=lambda row: (row["state"] != "eligible", row["id"]))
             next_cursor=None
             if offset+20<len(rows):
                 next_cursor=secrets.token_hex(32)

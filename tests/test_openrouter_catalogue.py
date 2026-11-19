@@ -70,9 +70,53 @@ class OpenRouterMetadataTests(unittest.TestCase):
         rows=[base,{**base,'id':'fixture/conditional','pricing':{'prompt':'0.000001','completion':'0.000002','overrides':[{'utc_start':1,'prompt':'0.1'}]}},
               {**base,'id':'fixture/reasoning','pricing':{'prompt':'0','completion':'0','internal_reasoning':'0.1'}},
               {**base,'id':'fixture/new-unit','pricing':{'prompt':'0','completion':'0','unknown_unit':'0.1'}}]
+        rows.append({**base, 'id': 'fixture/dynamic-router', 'pricing': {'prompt': '-1', 'completion': '-1'}})
         result={r['id']:r for r in normalize(rows,self.fixture.profiles,now=0)}
+        self.assertIsNone(result['fixture/dynamic-router']['input_usd_per_million'])
+        self.assertEqual(result['fixture/dynamic-router']['state'], 'blocked')
         self.assertEqual(result['fixture/tool-model']['state'],'eligible')
         for ident in ('fixture/conditional','fixture/reasoning','fixture/new-unit'):
             self.assertEqual(result[ident]['state'],'blocked')
         self.assertEqual(result['fixture/conditional']['input_usd_per_million'],'1.000000')
         with self.assertRaises(ProviderError):select_endpoint('fixture/tool-model','planner',[self.fixture.endpoint],(),__import__('time').time())
+
+
+class ModelSearchTests(unittest.TestCase):
+    def test_preview_catalogue_keeps_models_outside_enabled_routes_visible(self):
+        from unittest.mock import patch
+        from preview.providers import LiveMetadata, profiles
+        fixture = AuthoredProviderMetadata()
+        gptoss = {**fixture.rows[0], "id": "openai/gpt-oss-120b", "name": "OpenAI GPT-OSS 120B"}
+        with patch.object(OpenRouterMetadata, "models", return_value=[gptoss]):
+            rows = LiveMetadata().models(ForegroundCredential("authored-key"))
+        self.assertEqual(rows, [gptoss])
+        normalized = normalize(rows, profiles(), now=0)
+        self.assertEqual(normalized[0]["id"], "openai/gpt-oss-120b")
+        self.assertEqual(normalized[0]["state"], "candidate")
+        with self.assertRaises(ProviderError):
+            select_endpoint(gptoss["id"], "planner", [fixture.endpoint], profiles(), 0)
+
+    def test_search_punctuation_case_pagination_and_selectable_order(self):
+        from campaign_agent.adapters.catalogue_cache import CatalogueCache
+        cache = CatalogueCache()
+        models = [
+            {"id": "openai/gpt-oss-120b", "name": "OpenAI GPT-OSS 120B", "state": "candidate"},
+            {"id": "openai/gpt-4.1-mini", "name": "OpenAI GPT-4.1 Mini", "state": "eligible"},
+        ]
+        models += [{"id": f"vendor/model-{index:02d}", "name": f"Model {index}", "state": "candidate"}
+                   for index in range(25)]
+        entry = {"models": models, "cursors": {}}
+        for query in ("gptoss", "GPT-OSS", "gpt oss", "openai/gpt-oss"):
+            with self.subTest(query=query):
+                rows, cursor = cache.page(entry, query, None)
+                self.assertEqual([row["id"] for row in rows], ["openai/gpt-oss-120b"])
+                self.assertIsNone(cursor)
+        first, cursor = cache.page(entry, "", None)
+        self.assertEqual(first[0]["id"], "openai/gpt-4.1-mini")
+        self.assertEqual(len(first), 20)
+        second, end = cache.page(entry, "", cursor)
+        self.assertEqual(len(second), 7)
+        self.assertIsNone(end)
+        self.assertFalse({row["id"] for row in first} & {row["id"] for row in second})
+        with self.assertRaises(ProviderError):
+            cache.page(entry, "different query", cursor)

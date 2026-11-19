@@ -70,6 +70,8 @@ class LiveMetadata(OpenRouterMetadata):
             if row.get("id") in ROUTES and "text" in row.get("architecture", {}).get("input_modalities", []):
                 selected.append({**row, "architecture": {**row["architecture"], "input_modalities": ["text"]},
                                  "pricing": {k: row["pricing"][k] for k in ("prompt", "completion")}})
+            else:
+                selected.append(row)
         return selected
 
     def endpoints(self, credential, model):
