@@ -2,7 +2,9 @@ import {useEffect, useRef, useState, useSyncExternalStore} from "react";
 import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
-import {AgentComposer, draftPermissionLabels} from "./AgentComposer";
+import {AgentComposer} from "./AgentComposer";
+import {AgentActivity} from "./AgentActivity";
+import type {Run, RunResult} from "./AgentActivity";
 import type {DraftPermission} from "./AgentComposer";
 import {CampaignChat} from "./CampaignChat";
 import {CampaignSetup} from "./CampaignSetup";
@@ -15,7 +17,7 @@ import {BriefLearning} from "./BriefLearning";
 import type {InstructionReuse} from "./BriefLearning";
 import {openrouter, request, RequestError, forgetFailedOfflineRun} from "./openrouter-session";
 import type {Selection, RunAttempt} from "./openrouter-session";
-import {OpenRouterAccount} from "./OpenRouterAccount";
+import {WorkspaceAccount} from "./WorkspaceAccount";
 import "../../brand/tokens.css";
 import "./planner.css";
 
@@ -54,6 +56,7 @@ type Mode = {
   workspace?: {actor: string; client_id: string; brand_id: string; id: string; fixture: boolean};
   live: boolean;
   googleAdsReporting?: boolean;
+  openrouterAvailable?: boolean;
   instructionTestLimits: InstructionTestLimits;
   demoRequest: string;
   viewerOrigin: string;
@@ -62,44 +65,6 @@ type Mode = {
   openrouterDraftModels: string[];
   agentPlanner?: PlannerOptions;
   examples: {creative: string; ref: string; title: string}[];
-};
-type RunResult = {
-  revision: number; ambiguous: Placement[]; outcome?: string; message?: string; needs_verification?: boolean;
-  delivery_report_id?: string | null;
-};
-type Run = {
-  run_id: string;
-  request: string;
-  status: "running" | "ready_for_review" | "waiting_for_evidence" | "needs_input" | "answered" | "superseded";
-  result?: RunResult | null;
-  planner?: {
-    session_id: string; settings: {mode: string; model: string} & Partial<Selection>; draft_permission?: DraftPermission;
-    max_turns: number; turns: unknown[]; routing: {classifier: string};
-    execution: "application" | "model"; delivery_demo_scenario: string | null;
-  };
-  steps: {tool: string; result: unknown}[];
-  inference?: {settings: {mode: string; model?: string} & Partial<Selection>};
-};
-
-const stepLabels = {
-  recommend_delivery_next_test: "Recommend the next test from delivery",
-  review_google_ads_delivery: "Review Google Ads delivery",
-  load_context: "Load campaign brief",
-  propose_placements: "Classify sample placements",
-  save_draft: "Save draft revision",
-  finish: "Prepare for review",
-};
-const nextTestStepLabels = {
-  load_test_context: "Load review evidence and buyer correction",
-  draft_instructions: "Draft revised comparison instructions",
-  save_instruction_test: "Save the next test draft",
-  finish_test: "Prepare for approval",
-};
-const instructionReviewStepLabels = {
-  load_test_evidence: "Load results for both instruction versions",
-  assess_instruction_test: "Assess results and buyer correction",
-  save_test_review: "Save the test assessment",
-  finish_test_review: "Prepare the assessment for review",
 };
 type Preparation = {kind: "placement_request"; request: string; model: string; sessionId: string; catalogId: string; afterMessage: number; draftPermission: DraftPermission}
   | {kind: "next_test"; reviewId: string; selection: ReviewSelection}
@@ -190,9 +155,10 @@ function App() {
         }
         setDraft(currentDraft);
         const savedModel = sessionStorage.getItem("campaign-planner:model");
-        const selectedModel = workspace.agentPlanner?.models.some(item => item.id === savedModel)
-          ? savedModel! : workspace.agentPlanner?.default ?? "simulated";
-        if (savedModel && selectedModel !== savedModel && ["simulated", "simulated-inspect"].includes(savedModel)) {
+        const selectedModel = workspace.previewScope ? "simulated"
+          : workspace.agentPlanner?.models.some(item => item.id === savedModel) ? savedModel!
+          : workspace.agentPlanner?.default ?? "simulated";
+        if (!workspace.previewScope && savedModel && selectedModel !== savedModel && ["simulated", "simulated-inspect"].includes(savedModel)) {
           const nextConversation = crypto.randomUUID().replaceAll("-", "");
           setConversationId(nextConversation);
           sessionStorage.setItem("campaign-planner:conversation", nextConversation);
@@ -234,6 +200,8 @@ function App() {
           if (workspace.live || !savedId) return;
           const previous = await request<Run>("/api/agent/run?id=" + encodeURIComponent(savedId));
           setRun(previous);
+          const recordedModel = previous.planner?.settings.model ?? previous.inference?.settings.model;
+          if (recordedModel) setMainModel(recordedModel);
           openrouter.hydrate(previous.planner?.settings ?? previous.inference?.settings);
         } catch (failure) {
           if (!(failure instanceof RequestError && failure.status === 404)) throw failure;
@@ -340,7 +308,7 @@ function App() {
       if (source?.kind === "placement_request") {
         const remote = !["simulated", "simulated-inspect"].includes(source.model);
         const chosen = openrouter.snapshot().selection;
-        if (remote && (!chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
+        if (remote && (!mode.openrouterAvailable || mode.previewScope || !chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
           throw new RequestError("Reconnect and select an eligible planner model before sending. Your typed text is retained.", 409, "waiting_for_credentials");
         }
         start = {path: "/api/agent/placements", body: {
@@ -438,7 +406,7 @@ function App() {
     setConversations(chats);
   }
 
-  function newConversation(model = mainModel, preserveText = false) {
+  function newConversation(model = mode?.previewScope ? "simulated" : mainModel, preserveText = false) {
     viewEpoch.current++;
     pendingProviderStart.current = null;
     setMainModel(model);
@@ -530,8 +498,9 @@ function App() {
     ? {mode: "openrouter" as const, model: mainModel, budget: account.selection?.max_run_cost_usd} : {mode: "offline" as const};
   const capabilityScope = JSON.stringify([mode?.previewScope, mode?.workspace?.actor, mode?.workspace?.client_id,
     mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
+  const providerAvailable = Boolean(mode?.openrouterAvailable && !mode.previewScope);
   const composer = mode?.agentPlanner && draft && <AgentComposer preview={Boolean(mode.previewScope)} capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
-    providerSelection={account.selection} providerConnected={account.state === "connected"}
+    providerSelection={account.selection} providerConnected={openrouter.canUse(account.selection ?? undefined)} providerAvailable={providerAvailable}
     onProviderSettings={() => newConversation(mainModel, true)}
     onProviderSelect={selection => {newConversation(selection.model, true);}}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
@@ -541,16 +510,21 @@ function App() {
     onCatalogs={catalogs => setMode(current => current?.agentPlanner
       ? {...current, agentPlanner: {...current.agentPlanner, catalogs}} : current)} />;
   const result = review(run);
-  const planner = run?.planner;
-  const applicationRun = planner?.execution === "application";
-  const usedDeliveryFixture = Boolean(planner?.delivery_demo_scenario && run?.result?.delivery_report_id);
   const waiting = run?.status === "waiting_for_evidence";
-  const waitPlanned = (run?.steps[0]?.result as {next_action?: string} | undefined)?.next_action === "wait";
   const reviewingTest = run?.request === "Review the original and revised instruction test.";
-  const activitySteps = reviewingTest ? instructionReviewStepLabels
-    : waitPlanned ? {load_test_context: "Load experiment assessment and buyer correction", wait_for_evidence: "Wait for more evidence"}
-    : run?.request === "Prepare revised comparison instructions." ? nextTestStepLabels : stepLabels;
-  const completed = new Set(run?.steps.map(step => step.tool));
+  const draftApproved = activePackage && !needsLatest ? Boolean(activePackage.approval) : undefined;
+  const runStatus = result?.needs_verification ? "Earlier reply needs verification"
+    : run?.status === "superseded" ? "Request superseded by a follow-up"
+    : run?.status === "answered" ? "Reply saved"
+    : run?.status === "needs_input" ? "Agent needs input"
+    : waiting ? "Waiting for more evidence"
+    : result ? (reviewingTest ? "Test assessment saved"
+      : result.revision === draftRevision && !needsLatest ? (draftApproved === undefined ? "Draft saved" : draftApproved ? "Draft approved" : "Draft ready for review")
+      : `Prepared revision ${result.revision}`)
+    : busy || run?.status === "running" ? "Preparing the campaign"
+    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request";
+  const evidenceMessage = conversation?.messages.find(message =>
+    message.run_id === run?.run_id && (message.review || message.experiment_review));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";
   const home = page === "/";
   const exampleAction = result || busy ? "Open the campaign workspace"
@@ -613,9 +587,11 @@ function App() {
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
               : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Authored delivery fixtures. Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
-          {mode?.previewScope ? <a className="text-action" href="/invite">Manage invite</a>
-            : <OpenRouterAccount ready={Boolean(mode && draft)} onChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />}
-          <div className="operator-identity"><span className="operator-avatar" aria-hidden="true">{mode?.previewScope ? "DP" : mode?.workspace ? "SF" : "LO"}</span><span>{mode?.previewScope ? "Demo reviewer" : mode?.workspace?.actor ?? "Local operator"}<small>{mode?.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : mode?.previewScope ? "Invite workspace" : "Trusted local workspace"}</small></span></div>
+          {mode && <WorkspaceAccount name={mode.previewScope ? "Demo reviewer" : mode.workspace?.actor ?? "Local operator"}
+            initials={mode.previewScope ? "DP" : mode.workspace ? "SF" : "LO"}
+            workspace={mode.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : mode.previewScope ? "Invite workspace" : "Trusted local workspace"}
+            preview={Boolean(mode.previewScope)} providerAvailable={providerAvailable} providerReady={Boolean(draft)}
+            onProviderChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />}
         </div>
       </aside>
       <main id="workspace-main" tabIndex={-1}>
@@ -654,19 +630,17 @@ function App() {
                 <section className="request" aria-labelledby="request-heading">
                   <span className="label">01 / Prepare</span>
                   <h2 id="request-heading">Conversation</h2>
-                  <CampaignChat conversation={conversation} busy={busy} />
+                  <CampaignChat conversation={conversation} busy={busy} draftRevision={needsLatest ? undefined : draftRevision} />
                   {composer}
                   {mode && !mode.live && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
                   {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
-                  {busy && <p className="compact-progress" role="status">
-                    {Object.entries(activitySteps).find(([tool]) => !completed.has(tool))?.[1] ?? "Loading the saved draft"}
-                  </p>}
+                  {Boolean(run?.steps.length) && <a className="compact-activity" href="#activity-heading">View agent activity</a>}
                   {!mode && !error && <p role="status">Loading the workspace…</p>}
                   {error && <p className="error" role="alert">{error}</p>}
                 </section>
                 <section aria-labelledby="draft-heading" className="draft">
                   <span className="label">02 / Review</span>
-                  <h2 id="draft-heading">Campaign draft</h2>
+                  <h2 id="draft-heading" tabIndex={-1}>Campaign draft</h2>
                   {draft && <p className="revision">Revision {draft.revision} · {draft.placements.length} placements</p>}
                   {draft && activePackage && !needsLatest && <BriefLearning<Draft>
                     key={`brief:${activePackage.fingerprint}:${deliveryRefresh}:${reviewRefresh}`}
@@ -830,50 +804,9 @@ function App() {
                     }} />
                 )}
               </div>
-              <aside className="activity" aria-label="Run details">
-                <span className="label">Run details</span>
-                <h2>Agent activity</h2>
-                <p role="status" className="run-status">
-                  {result?.needs_verification ? "Earlier reply needs verification" : run?.status === "superseded" ? "Request superseded by a follow-up" : run?.status === "answered" ? "Reply saved" : run?.status === "needs_input" ? "Agent needs input" : waiting ? "Waiting for more evidence" : result ? (reviewingTest ? "Test assessment saved"
-                    : result.revision === draftRevision ? "Draft ready for review" : `Prepared revision ${result.revision}`)
-                    : busy ? (reviewingTest ? "Reviewing the instruction test" : "Preparing the campaign")
-                    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request"}
-                </p>
-                {run && planner ? <><p className="revision">
-                  {!applicationRun && <>Main model · {planner.settings.model}<br /></>}
-                  Allowed changes · {draftPermissionLabels[planner.draft_permission ?? "none"]}<br />
-                  {applicationRun ? "0 model turns" : <>
-                    Automatic specialist · {planner.routing.classifier}<br />
-                    {planner.turns.length} of {planner.max_turns} model turns
-                  </>}</p>
-                  <ol>{run.steps.map((step, index) => <li key={index} className="done">
-                    <span className="step-number" aria-hidden="true">✓</span>
-                    {step.tool === "review_google_ads_delivery" && planner.delivery_demo_scenario
-                      ? "Review demo delivery" : step.tool.replaceAll("_", " ")}
-                    {(step.result as {error?: string}).error && <span> · Tool rejected</span>}
-                  </li>)}</ol>
-                </> : <ol>
-                  {Object.entries(activitySteps).map(([tool, label], index) => (
-                    <li key={tool} className={completed.has(tool) ? "done" : ""}>
-                      <span className="step-number" aria-hidden="true">{completed.has(tool) ? "✓" : index + 1}</span>
-                      {label}
-                    </li>
-                  ))}
-                </ol>}
-                {result && result.ambiguous.length > 0 && (
-                  <details>
-                    <summary>{result.ambiguous.length} entries held for review</summary>
-                    <ul>{result.ambiguous.map(row => <li key={row.id}>{row.title}</li>)}</ul>
-                  </details>
-                )}
-                <p className="provenance">{planner ? (applicationRun
-                  ? (usedDeliveryFixture ? "Application command · Authored delivery fixture" : "Application command")
-                  : `${planner.settings.mode === "simulated" ? "Simulated main model" : "OpenRouter main model"} · Simulated specialist responses`)
-                  : waiting ? "No draft or drafting inference requested"
-                  : run?.inference?.settings.mode === "openrouter"
-                  ? `OpenRouter inference · ${run.inference.settings.model} · Fictional placements`
-                  : "Recorded model decisions · Fictional catalog"}</p>
-              </aside>
+              <AgentActivity run={run} result={result} status={runStatus} draftRevision={needsLatest ? undefined : draftRevision} draftApproved={draftApproved}
+                evidenceMessageId={evidenceMessage?.id}
+                deliveryRevision={mode && activePackage?.approval && !needsLatest && !busy ? draftRevision : undefined} />
             </div>
           </div>
         )}

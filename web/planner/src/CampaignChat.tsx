@@ -56,7 +56,7 @@ function ExperimentEvidence({review, needsRefresh}: {review: ExperimentReview; n
   </details>;
 }
 
-export function CampaignChat({conversation, busy}: {conversation: Conversation | null; busy: boolean}) {
+export function CampaignChat({conversation, busy, draftRevision}: {conversation: Conversation | null; busy: boolean; draftRevision?: number}) {
   const messages = useRef<HTMLOListElement>(null);
   const latest = conversation?.latest_message;
   useEffect(() => {
@@ -64,7 +64,7 @@ export function CampaignChat({conversation, busy}: {conversation: Conversation |
   }, [latest]);
   return <div className="campaign-chat" aria-label="Campaign conversation">
     {conversation?.messages.length ? <ol ref={messages} aria-label="Saved messages" tabIndex={0}>
-      {conversation.messages.map(message => <li key={message.id} className={`message message-${message.role}`}>
+      {conversation.messages.map(message => <li id={`message-${message.id}`} tabIndex={-1} key={message.id} className={`message message-${message.role}`}>
         <div className="message-heading">
           <strong>{message.role === "user" ? "You" : "Campaign agent"}</strong>
           <span>{message.role === "user" ? "From" : "At"} revision {message.revision}
@@ -74,6 +74,8 @@ export function CampaignChat({conversation, busy}: {conversation: Conversation |
                   : message.kind === "waiting_for_evidence" ? " · Waiting for evidence" : ""}</span>
         </div>
         <p>{message.content}</p>
+        {message.kind === "ready_for_review" && message.revision === draftRevision &&
+          <a href="#draft-heading">Review draft revision {message.revision}</a>}
         {message.review && <details className="chat-evidence">
           <summary>Review evidence · revision {message.review.revision}{message.review_needs_refresh ? " · Refresh needed" : ""}</summary>
           <h3>Sample delivery · Fictional</h3>

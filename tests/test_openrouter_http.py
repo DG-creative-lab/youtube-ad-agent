@@ -54,6 +54,7 @@ class OpenRouterHttpTests(unittest.TestCase):
                     model_id='fixture/tool-model',catalogue_revision=catalogue,profile='planner',max_run_cost_usd='0',**extra)
 
     def test_connect_catalogue_selection_replay_and_no_domain_or_secret_write(self):
+        self.assertIs(self.buyer.get('/api/mode').json()['openrouterAvailable'], True)
         before=self.buyer.get('/api/campaign').json()
         op=uuid4().hex;args={'operation_id':op,'tab_id':self.tab}
         connected=self.post('connect',args)

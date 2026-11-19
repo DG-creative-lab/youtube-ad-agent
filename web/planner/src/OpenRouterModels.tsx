@@ -39,7 +39,7 @@ export function OpenRouterModels({onSelect, onSettingsChange}: {onSelect: (selec
   }
   return <section className="provider-models" aria-label="OpenRouter models">
     <h3>OpenRouter models</h3>
-    {account.state !== "connected" ? <p>Connect or reconnect from OpenRouter in the account controls. Offline models work without a key.</p> : <>
+    {account.state !== "connected" ? <p>Connect OpenRouter from the account menu.</p> : <>
       <label>Per-run local budget (USD)
         <select value={budget} disabled={busy} onChange={event => {
           setBudget(event.target.value as Budget); openrouter.resetSelection(); onSettingsChange();
