@@ -18,7 +18,7 @@ def response_failure(receipt):
     if reason!='tool_calls' or not isinstance(message,dict):
         return 'model_tool_call_missing'
     calls=message.get('tool_calls')
-    if not isinstance(calls,list) or len(calls)!=1:
+    if not isinstance(calls,list) or len(calls)!=1 and (info.get('diagnostic') or {}).get('first_call_only') is not True:
         return 'model_tool_call_multiple' if isinstance(calls,list) and len(calls)>1 else 'model_tool_call_missing'
     return None
 
@@ -40,7 +40,7 @@ def trace_projection(run_id, status, settings, rows):
         failed=turn_state=='failed' or code is not None
         unknown=state in ('dispatching','unknown') and not receipt
         item={'position':position,'state':'failed' if failed else 'unknown' if unknown else 'received' if receipt else 'not_sent',
-              'billing_state':state,'code':code,'message':str(ProviderError(code)) if code else None,
+              'billing_state':state,'additional_tool_calls':diagnostic.get('additional_tool_calls',0),'code':code,'message':str(ProviderError(code)) if code else None,
               'http_status':diagnostic.get('http_status'),'provider_error_code':diagnostic.get('provider_error_code'),'finish_reason':receipt.get('finish_reason'),
               'request_id':info.get('request_id'),'input_tokens':usage.get('input_tokens'),
               'output_tokens':usage.get('output_tokens'),'cost_usd':cost,

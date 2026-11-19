@@ -79,3 +79,10 @@ The SDKs provide useful tracing conventions, but adopting a new agent runtime
 would require preserving the existing scope, approval, budget, receipt and replay
 contracts. For now, keep this small trace contract and consider OpenTelemetry
 export through an adapter when we need cross-service tracing or a hosted collector.
+
+A live model may propose several tool calls in one response. The adapter records
+the extra-proposal count, evaluates only the first call, and supplies only that
+call/result to the next model turn. The remaining proposals are never executed.
+The shared dispatcher still validates one command with current permissions per
+step; receipt recovery cannot execute a discarded proposal. Optional parallel-call
+request settings are omitted when live routing cannot qualify them from metadata.

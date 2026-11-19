@@ -132,6 +132,34 @@ class ForegroundHttpTests(unittest.TestCase):
         self.assertEqual(response.json()['code'],'budget_exhausted')
         self.assertEqual(len(self.calls),1)
 
+    def test_live_parallel_proposal_evaluates_one_action_and_replans_without_executing_extra_write(self):
+        self.dynamic_routes();self.selection=self.select()
+        self.reply['choices'][0]['message']['tool_calls']=[
+            {'id':'read-first','type':'function','function':{'name':'read_campaign','arguments':'{}'}},
+            {'id':'unexecuted-write','type':'function','function':{'name':'save_placement_draft','arguments':'{"ids":["SAMPLE00001"]}'}}]
+        run=self.start()
+        first=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(first.status_code,200,first.text)
+        self.assertEqual([s['tool'] for s in first.json()['steps']],['read_campaign'])
+        self.assertEqual(first.json()['diagnostics']['calls'][0]['additional_tool_calls'],1)
+        self.assertEqual(first.json()['diagnostics']['status'],'running')
+        self.reply['choices'][0]['message']['tool_calls']=[
+            {'id':'answer-next','type':'function','function':{'name':'respond',
+             'arguments':'{"topic":"campaign_summary","message":"Here are recommendations for review."}'}}]
+        second=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(second.status_code,200,second.text)
+        self.assertEqual(second.json()['status'],'answered')
+        self.assertEqual([s['tool'] for s in second.json()['steps']],['read_campaign','respond'])
+        # The follow-up model sees only the evaluated call/result pair.
+        wire=json.loads(self.calls[1].data)
+        assistant=[m for m in wire['messages'] if m['role']=='assistant']
+        self.assertEqual(len(assistant[0]['tool_calls']),1)
+        self.assertEqual(assistant[0]['tool_calls'][0]['id'],'read-first')
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['status'],'answered')
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.client.get('/api/campaign').json()['revision'],1)
+
     def test_provider_failure_is_explained_and_trace_survives_keyless_read_without_resend(self):
         self.reply={'error':{'code':404,'message':'No endpoints found that support your data policy.'}}
         run=self.start()

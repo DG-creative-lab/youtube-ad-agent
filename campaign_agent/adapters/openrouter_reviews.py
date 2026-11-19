@@ -194,6 +194,10 @@ class OpenRouterInference:
             if choice.get("finish_reason") in {"stop", "tool_calls", "length", "content_filter"}:
                 message = choice.get("message")
                 finish_reason = choice.get("finish_reason")
+        if (settings.get('foreground') and settings.get('charging_profile','').startswith('preview-text-tools/')
+                and isinstance(message,dict) and isinstance(message.get('tool_calls'),list) and len(message['tool_calls'])>1):
+            metadata['diagnostic']['additional_tool_calls']=len(message['tool_calls'])-1
+            metadata['diagnostic']['first_call_only']=True
         result={"message": message, "finish_reason": finish_reason, "inference": metadata}
         if settings.get('foreground'):
             result=json.loads(json.dumps(result,default=lambda v:str(v) if isinstance(v,Decimal) else None))
@@ -264,6 +268,8 @@ class OpenRouterPlanner(OpenRouterInference):
             if settings.get('foreground'): raise ProviderError('model_tool_call_missing')
             raise ValueError('The main model did not return a tool request.')
         calls = message.get('tool_calls')
+        if receipt['inference'].get('diagnostic',{}).get('first_call_only') is True:
+            calls=calls[:1]
         if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
             if settings.get('foreground'): raise ProviderError('model_tool_call_multiple')
             raise ValueError('The main model must return one tool request.')

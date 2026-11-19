@@ -188,6 +188,6 @@ def planner_request_body(context: dict, history: list[dict]) -> dict:
     body = {'messages': messages, 'tools': tools, 'tool_choice': 'required'}
     if not context.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
         body['parallel_tool_calls'] = False
-    # Live routes need not advertise the optional parallel flag. The dispatcher
-    # still accepts exactly one tool call per model response.
+    # Live endpoint metadata can omit this optional parameter. The adapter
+    # narrows a multi-call proposal to one action; the application checks it.
     return body
