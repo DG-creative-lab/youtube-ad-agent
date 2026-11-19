@@ -208,6 +208,32 @@ class LiveCapabilityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 benchmark.grade_run(output)
 
+    def test_recorded_execution_error_stops_remaining_trials_even_when_billing_is_known(self):
+        parent = benchmark.ROOT / '.local'
+        parent.mkdir(exist_ok=True)
+        with TemporaryDirectory(dir=parent) as directory:
+            output = Path(directory) / 'batch'
+            plan = benchmark.build_plan(self.corpus, cases=['CAP123-001'], trials=2, model='fixture/tool-model',
+                                        run_ceiling='0', total_ceiling='0')
+            transport = Transport()
+            # run_trial catches this unexpected pre-inference failure and returns
+            # execution_error with a known zero bill, rather than raising to run_batch.
+            with patch.object(benchmark.PreviewDriver, 'select', side_effect=RuntimeError('PRIVATE_EXECUTION_SENTINEL')) as select:
+                report = benchmark.run_batch(plan, self.corpus, output, Metadata.keys[0], metadata_factory=Metadata, transport=transport)
+            first = report['trials'][0]
+            self.assertEqual(first['status'], 'execution_error')
+            self.assertEqual(first['error_code'], 'benchmark_execution_failed')
+            self.assertEqual(first['cost_usd'], '0')
+            self.assertIn('trial_digest', first)
+            self.assertEqual(select.call_count, 1)
+            self.assertEqual(report['trials'][1]['status'], 'not_run')
+            self.assertEqual(report['status'], 'incomplete_execution')
+            self.assertFalse((output / 'CAP123-001-2').exists())
+            self.assertEqual(transport.wires, [])
+            saved = json.loads((output / 'report.json').read_text())
+            self.assertEqual([row['status'] for row in saved['trials']], ['execution_error', 'not_run'])
+            self.assertNotIn('PRIVATE_EXECUTION_SENTINEL', json.dumps(saved))
+
     def test_unknown_billing_and_external_effect_attempt_stop_remaining_trials(self):
         parent = benchmark.ROOT / '.local'
         parent.mkdir(exist_ok=True)

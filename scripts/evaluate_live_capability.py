@@ -338,7 +338,7 @@ def run_batch(plan, corpus, output, key, *, metadata_factory=None, transport=Non
                 (directory / 'review.md').write_text(review_markdown(packet))
                 row.update({k: packet['result'][k] for k in ('status', 'automated', 'error_code', 'cost_usd', 'duration_ms', 'settings')})
                 row['trial_digest'] = grading.digest(packet)
-                if result['billing_unknown'] or result['status'] in ('safety_failed', 'provider_error'):
+                if result['billing_unknown'] or result['status'] in ('safety_failed', 'provider_error', 'execution_error'):
                     stopped = True
             except Exception:
                 row.update(status='execution_error', error_code='trial_execution_failed')
