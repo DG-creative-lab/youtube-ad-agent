@@ -289,6 +289,11 @@ class PlacementRuntime:
         name, args = call['tool'], call['arguments']
         if name not in PILOT_TOOLS or (name == 'respond' and args.get('topic') in {'performance_review', 'experiment_review', 'capabilities'}):
             raise RetainedWorkflow('Continue the received tool through its retained workflow.')
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/') and name in {'review_performance', 'validate_campaign_setup'}:
+            raise ValueError('This tool uses evaluation fixtures and is unavailable for live requests.')
+        if name == 'classify_catalog' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.placement_discovery import model_assignments
+            return model_assignments(args, history, self.drafts.read_from(unit.drafts)['brief']['contexts']), 'running'
         if name in {'read_campaign', 'inspect_catalog', 'classify_catalog'} and args:
             raise ValueError('Unexpected fields')
         if name == 'read_campaign':
@@ -303,6 +308,9 @@ class PlacementRuntime:
             return self._save_placement_tool(unit, source, history, call)
         if name == 'ask_clarification' and set(args) == {'reason'}:
             return clarification(args['reason'], source['revision']), 'needs_input'
+        if name == 'respond' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.agent.replies import model_reply
+            return model_reply(args, source['revision']), 'answered'
         if name == 'respond' and set(args) == {'topic'} and args['topic'] not in {'performance_review', 'experiment_review', 'capabilities'}:
             draft = self.drafts.read_from(unit.drafts)
             approved = context.package_review(unit.context, unit.drafts, draft['revision'])['approval'] is not None if args['topic'] == 'approval_and_launch' else False

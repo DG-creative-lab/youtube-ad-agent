@@ -13,7 +13,7 @@ REQUIRED = {
 }
 RUNTIME_PREFIXES = ("campaign_agent/", "web/brand/", "web/viewer/",
                     "examples/placement-review/", "examples/tts-performance/")
-RUNTIME_PREVIEW = {"preview/application.py", "preview/storage.py", "preview/build_seed.py"}
+RUNTIME_PREVIEW = {"preview/application.py", "preview/storage.py", "preview/build_seed.py", "preview/providers.py"}
 
 
 def stage(destination):

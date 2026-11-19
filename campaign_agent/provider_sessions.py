@@ -11,7 +11,7 @@ import sqlite3
 from time import time
 
 from campaign_agent.domain.scope import WorkspaceContext
-from .application.catalogue_policy import fingerprint, normalize, select_endpoint, compatible_model, model_id, price
+from .application.catalogue_policy import fingerprint, normalize, select_endpoint, compatible_model, model_id, price, maximum_cost
 from .ports.access import AccessRequest, AccessUnavailable
 from .ports.inference import CatalogueState, ForegroundCredential, ProviderError
 
@@ -19,7 +19,7 @@ SHORT_ID=re.compile(r'[0-9a-f]{32}')
 LONG_ID=re.compile(r'[0-9a-f]{64}')
 FIELDS={
     'connect':({'operation_id','tab_id'},{'resume_connection_id'}),
-    'models':({'connection_id','tab_id','search','cursor'},set()),
+    'models':({'connection_id','tab_id','search','cursor'},{'tools_only','max_input_price','max_output_price','sort'}),
     'select':({'operation_id','connection_id','tab_id','model_id','catalogue_revision','profile','max_run_cost_usd'},set()),
     'disconnect':({'connection_id','tab_id'},set()),
     'reconcile':({'run_id','inference_position'},set()),
@@ -57,6 +57,17 @@ def validate_fields(action, data):
     if action=='models' and (not isinstance(data['search'],str) or len(data['search'])>100
             or data['cursor'] is not None and (not isinstance(data['cursor'],str) or not LONG_ID.fullmatch(data['cursor']))):
         raise ProviderError('invalid_request')
+    if action == "models":
+        if "tools_only" in data and type(data["tools_only"]) is not bool:
+            raise ProviderError("invalid_request")
+        if not isinstance(data.get("sort", "available"), str) or data.get("sort", "available") not in {"available", "pricing-low-to-high", "pricing-high-to-low", "most-popular", "intelligence-high-to-low"}:
+            raise ProviderError("invalid_request")
+        for field in ("max_input_price", "max_output_price"):
+            if data.get(field) is not None:
+                try:
+                    price(data[field])
+                except ProviderError:
+                    raise ProviderError("invalid_request") from None
     if action=='select':
         model_id(data['model_id'])
         if data['profile'] not in ('planner','structured_review') or data['max_run_cost_usd'] not in ('0','0.25','1.00'):
@@ -81,8 +92,9 @@ def parse_command(raw):
 
 
 class ProviderSessions:
-    def __init__(self,path,*,metadata=None,profiles=(),clock=time, cache: CatalogueState, access_reader):
+    def __init__(self,path,*,metadata=None,profiles=(),clock=time, cache: CatalogueState, access_reader, route_selector=None):
         self.path=Path(path);self.metadata=metadata;self.profiles=tuple(profiles);self.clock=clock
+        self.route_selector = route_selector
         self.cache = cache
         self.access_reader = access_reader
 
@@ -227,17 +239,26 @@ class ProviderSessions:
         ident=data['connection_id']
         with closing(sqlite3.connect(self.path)) as db:
             row=self._owned(db,ident,data['tab_id'],context,credential)
+        sort = data.get("sort", "available")
         entry=self.cache.get(ident,self.clock())
+        if entry is not None and (entry.get("route_policy") != ("live-v2" if self.route_selector is not None else "profiles-v1")
+                or entry.get("sort", "available") != sort
+                or data.get("tools_only") and any("supports_tools" not in row for row in entry["models"])):
+            entry = None
         if entry is None:
             if data['cursor'] is not None:
                 raise ProviderError('selection_stale')
             self.cache.begin(ident)
             try:
                 self.metadata.validate_key(credential)
-                rows=self._safe(normalize(self.metadata.models(credential),self.profiles,now=self.clock()),credential)
+                raw = self.metadata.models(credential, sort=sort) if sort != "available" else self.metadata.models(credential)
+                rows=self._safe(normalize(raw,self.profiles,now=self.clock(),live_routes=self.route_selector is not None),credential)
+                visible_ids = {row["id"] for row in rows}
+                provider_order = [row["id"] for row in raw
+                                  if isinstance(row.get("id"), str) and row["id"] in visible_ids]
                 now=self.clock()
-                entry={'models':rows,'observed_at':now,'expires_at':min(now+300,row[13]),
-                       'catalogue_revision':fingerprint({'connection':ident,'models':rows,'observed_at':now}),'cursors':{}}
+                entry={'route_policy': 'live-v2' if self.route_selector is not None else 'profiles-v1', 'sort': sort, 'provider_order': provider_order, 'models':rows,'observed_at':now,'expires_at':min(now+300,row[13]),
+                       'catalogue_revision':fingerprint({'connection':ident,'models':rows,'observed_at':now,'sort':sort}),'cursors':{}}
                 permits=self._authorize(context,access)
                 with closing(sqlite3.connect(self.path)) as db:
                     self._check(db,context,access,permits);self._owned(db,ident,data['tab_id'],context,credential)
@@ -247,9 +268,16 @@ class ProviderSessions:
         # A cache hit still got fresh authority and local ownership/key proof above.
         with closing(sqlite3.connect(self.path)) as db:
             self._check(db,context,access,permits);self._owned(db,ident,data['tab_id'],context,credential)
-        rows,cursor=self.cache.page(entry,data['search'],data['cursor'])
+        rows,cursor=self.cache.page(entry,data['search'],data['cursor'], tools_only=data.get("tools_only", False),
+                                   max_input_price=data.get("max_input_price"), max_output_price=data.get("max_output_price"),
+                                   sort=sort)
         return self._safe({'schema_version':1,'catalogue_revision':entry['catalogue_revision'],
-            'observed_at':entry['observed_at'],'expires_at':entry['expires_at'],'models':rows,'next_cursor':cursor},credential)
+            'observed_at':entry['observed_at'],'expires_at':entry['expires_at'],'route_check_available':self.route_selector is not None,'models':rows,'next_cursor':cursor},credential)
+
+    def select_route(self, credential, model, task, *, previous=None):
+        if self.route_selector is not None:
+            return self.route_selector(credential,model,task,now=self.clock(),previous=previous)
+        return select_endpoint(model,task,self.metadata.endpoints(credential,model),self.profiles,self.clock())
 
     def select(self,data,credential,context,access,permits):
         ident=data['connection_id'];request_hash=fingerprint(data)
@@ -270,12 +298,12 @@ class ProviderSessions:
         try:
             self.metadata.validate_key(credential)
             current_models=self.metadata.models(credential)
-            current_rows=self._safe(normalize(current_models,self.profiles,now=self.clock()),credential)
+            current_rows=self._safe(normalize(current_models,self.profiles,now=self.clock(),live_routes=self.route_selector is not None),credential)
             current=next((row for row in current_rows if row['id']==data['model_id']),None)
             raw=next((row for row in current_models if row.get('id')==data['model_id']),None)
             if current is None or current['state']=='blocked' or raw is None or not compatible_model(raw,data['profile']):
                 self.cache.invalidate(ident)
-                raise ProviderError('route_unqualified')
+                raise ProviderError(current['reason_codes'][0] if current and current['state']=='blocked' and self.route_selector is not None else 'route_unqualified')
             cached=next((row for row in entry['models'] if row['id']==data['model_id']),None) if entry else None
             if entry is not None and current!=cached:
                 self.cache.invalidate(ident)
@@ -284,12 +312,11 @@ class ProviderSessions:
         finally:
             self.cache.finish(ident)
         try:
-            selected=select_endpoint(data['model_id'],data['profile'],self.metadata.endpoints(credential,data['model_id']),self.profiles,self.clock())
+            selected=self.select_route(credential,data['model_id'],data['profile'],previous=json.loads(existing[1]) if existing else None)
         except ProviderError as error:
             if error.code=='route_unqualified':self.cache.invalidate(ident)
             raise
-        rates=selected['prices']
-        maximum=price(rates['prompt'])*selected['max_input_tokens']+price(rates['completion'])*selected['max_output_tokens']+price(rates.get('request','0'))
+        maximum=maximum_cost(selected)
         if maximum>price(data['max_run_cost_usd']):
             raise ProviderError('budget_exhausted')
         selected.update(connection_id=ident,max_run_cost_usd=data['max_run_cost_usd'],catalogue_revision=data['catalogue_revision'])

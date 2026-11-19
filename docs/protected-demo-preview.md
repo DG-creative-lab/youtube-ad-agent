@@ -1,6 +1,6 @@
 # Protected contextual YouTube demo
 
-This preview runs the portable React planner and Python campaign commands over HTTPS with fictional video editing and audiobook contexts. The simulator, placement catalogue, viewer media, setup and delivery fixtures are the authored offline configuration. The preview blocks provider credential headers, provider connection routes and uploads through catalog import.
+This preview runs the portable React planner and Python campaign commands over HTTPS with fictional video editing and audiobook contexts. The simulator, placement catalogue, viewer media, setup and delivery fixtures are the authored offline configuration. The live preview accepts a foreground OpenRouter connection through the sidebar account menu. Local runs still default to the offline demo. Catalog imports accept permitted user-supplied metadata.
 
 ## Reproduce the build
 
@@ -26,3 +26,63 @@ The seed is generated from the tracked schema and catalogues. On each request th
 4. Manage an invite at `/invite`. **Reset workspace** clears only the current invite's demo data. **Disable invite** blocks that code across deployments connected to this same database. The invite expiry also applies across those deployments. To stop all access immediately, pause the dedicated Vercel project or revoke its deployment access.
 
 The snapshot store is bounded to 4 MiB per SQLite workspace and 768 KiB compressed. This preview is intended for disposable authored campaigns and has a single-writer decision per invite. Enterprise persistence and real provider activation have separate release gates.
+
+## Live model availability
+
+The account menu owns the OpenRouter key, model, filters and local run budget.
+Model metadata comes from OpenRouter, with the catalogue restricted to text-output
+models advertising tools and tool choice. Multimodal models may be used for text
+input. Catalogue prices are advisory; a selectable candidate receives a fresh
+endpoint check when the buyer presses Use. There is no model allowlist.
+
+A usable planner endpoint must advertise tools, required tool choice, an output
+token cap and sufficient token/context limits. The app chooses the compatible
+route with the lowest conservative per-call reservation, pins its provider tag,
+prices, capabilities and one-hour qualification deadline, and revalidates before
+new inference. A changed or missing route requires reselection; no fallback is
+silently substituted. Account/provider restrictions can still reject a request.
+
+Cache-read rates are retained. Reservations include a conservative all-input
+cache-write allowance and never assume a cache hit. Optional media and web-search
+prices do not block text requests because those provider features are not enabled.
+Unknown, conditional or separately billed reasoning rates remain unsupported and
+are explained in the model list when route selection fails. Keys remain only in
+the current tab and request, with verifiers and immutable selections in storage.
+
+## MVP run diagnostics
+
+The campaign agent uses its own Python tool loop and application-owned authority,
+receipts and replay controls. It does not currently use OpenAI Agents SDK or
+Claude Agent SDK. The protected preview exposes a versioned, scoped diagnostic
+projection from the existing inference journal: model/provider, call position,
+execution and accounting states, HTTP status, error category, finish reason,
+token counts, recorded duration, cost and provider request identifier when known.
+Agent activity shows failures and uncertain outcomes separately from completed
+work. Save diagnostic JSON exports only those metadata fields.
+
+A separate logging database or in-memory session cache is unnecessary for this
+slice. Function memory cannot provide reliable history across cold starts.
+Conversation records and recovery receipts must remain durable across tab closes
+and sign-out, including unknown calls and reservations; deleting them at session
+end could cause repeated requests or lose accounting. Optional debug UI state is
+in memory and clears with the view. The existing invite reset is the explicit
+whole-workspace cleanup operation.
+
+The diagnostic projection and export exclude prompts, replies, tool arguments,
+credentials and private reasoning. Existing model tool receipts remain private
+recovery records. Future eval curation should require a reviewed, redacted example
+with the relevant permitted transcript, expected behavior and outcome; a metadata
+trace alone cannot measure answer quality. Do not automatically promote live
+customer conversations or failed model output into the authored eval corpus.
+
+The SDKs provide useful tracing conventions, but adopting a new agent runtime
+would require preserving the existing scope, approval, budget, receipt and replay
+contracts. For now, keep this small trace contract and consider OpenTelemetry
+export through an adapter when we need cross-service tracing or a hosted collector.
+
+A live model may propose several tool calls in one response. The adapter records
+the extra-proposal count, evaluates only the first call, and supplies only that
+call/result to the next model turn. The remaining proposals are never executed.
+The shared dispatcher still validates one command with current permissions per
+step; receipt recovery cannot execute a discarded proposal. Optional parallel-call
+request settings are omitted when live routing cannot qualify them from metadata.

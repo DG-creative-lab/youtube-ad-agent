@@ -131,7 +131,7 @@ class OpenRouterInference:
             data = parse_json(raw,exact=settings.get("foreground",False))
             if not isinstance(data, dict) or data.get("error") and not settings.get('foreground'):
                 raise ValueError("Invalid completion")
-            return self._receipt(context,settings,data)
+            return self._receipt(context,settings,data,http_status=200)
         except HTTPError as exc:
             if settings.get('foreground'):
                 try:
@@ -140,7 +140,7 @@ class OpenRouterInference:
                     data=parse_json(raw,exact=True)
                     if not isinstance(data,dict): raise ValueError()
                     # A complete HTTP error can still report charge/generation.
-                    return self._receipt(context,settings,{**data,'choices':None})
+                    return self._receipt(context,settings,{**data,'choices':None},http_status=exc.code)
                 except (ValueError,TypeError,RecursionError,OSError,OverflowError):
                     pass
                 finally: exc.close()
@@ -153,7 +153,7 @@ class OpenRouterInference:
         except (ValueError, TypeError, RecursionError, OverflowError):
             raise ReviewInferenceError("OpenRouter returned an invalid response. Start a new operation to retry.") from None
 
-    def _receipt(self,context,settings,data):
+    def _receipt(self,context,settings,data,*,http_status=200):
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         tokens = {}
         for label, field in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
@@ -173,13 +173,31 @@ class OpenRouterInference:
             "response_model": self._identifier(data.get("model")),
             "usage": {**tokens, "cost_usd": cost},
         }
+        error=data.get('error')
+        status=error.get('code') if isinstance(error,dict) and type(error.get('code')) is int and 400<=error['code']<=599 else http_status
+        if error or http_status>=400:
+            detail=str(error.get('message','')).casefold() if isinstance(error,dict) else ''
+            code=('provider_payment_required' if status==402 else 'provider_rate_limited' if status==429
+                else 'provider_privacy_unavailable' if status==404 and ('data policy' in detail or 'data collection' in detail)
+                else 'provider_no_route' if status==404
+                else 'provider_tools_rejected' if status==400 and ('tool_choice' in detail or 'tool choice' in detail or 'tools' in detail)
+                else 'provider_unavailable' if status>=500 else 'provider_request_rejected')
+            metadata['diagnostic']={'code':code,'http_status':http_status,'provider_error_code':status}
+        else:
+            metadata['diagnostic']={'http_status':http_status}
+        if not settings.get('foreground'):
+            metadata.pop('diagnostic',None)
         message, finish_reason = None, None
         choices = None if data.get("error") else data.get("choices")
         if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict):
             choice = choices[0]
-            if choice.get("finish_reason") in {"stop", "tool_calls"}:
+            if choice.get("finish_reason") in {"stop", "tool_calls", "length", "content_filter"}:
                 message = choice.get("message")
                 finish_reason = choice.get("finish_reason")
+        if (settings.get('foreground') and settings.get('charging_profile','').startswith('preview-text-tools/')
+                and isinstance(message,dict) and isinstance(message.get('tool_calls'),list) and len(message['tool_calls'])>1):
+            metadata['diagnostic']['additional_tool_calls']=len(message['tool_calls'])-1
+            metadata['diagnostic']['first_call_only']=True
         result={"message": message, "finish_reason": finish_reason, "inference": metadata}
         if settings.get('foreground'):
             result=json.loads(json.dumps(result,default=lambda v:str(v) if isinstance(v,Decimal) else None))
@@ -237,16 +255,36 @@ class OpenRouterPlanner(OpenRouterInference):
         receipt['inference'].update(conversation_truncated=context.get('conversation_truncated', False),
                                     tool_history_truncated=context.get('tool_history_truncated', False),
                                     conversation_message_ids=[item.get('id') for item in context['conversation']])
+        if settings.get('foreground'):
+            from campaign_agent.ports.inference import ProviderError
+            reason=receipt.get('finish_reason')
+            diagnostic=receipt['inference'].get('diagnostic',{})
+            if diagnostic.get('code'): raise ProviderError(diagnostic['code'])
+            if reason=='length': raise ProviderError('model_output_limit')
+            if reason=='content_filter' or isinstance(receipt.get('message'),dict) and receipt['message'].get('refusal'):
+                raise ProviderError('model_refused')
         message = receipt['message']
         if receipt['finish_reason'] != 'tool_calls' or not isinstance(message, dict) or message.get('refusal'):
+            if settings.get('foreground'): raise ProviderError('model_tool_call_missing')
             raise ValueError('The main model did not return a tool request.')
         calls = message.get('tool_calls')
+        if receipt['inference'].get('diagnostic',{}).get('first_call_only') is True:
+            calls=calls[:1]
         if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
+            if settings.get('foreground'): raise ProviderError('model_tool_call_multiple')
             raise ValueError('The main model must return one tool request.')
         call = calls[0]
         function = call.get('function')
         if call.get('type') != 'function' or not isinstance(function, dict):
+            if settings.get('foreground'): raise ProviderError('model_arguments_invalid')
             raise ValueError('The main model returned an unsupported call.')
-        arguments = parse_json(function['arguments']) if isinstance(function.get('arguments'), str) else None
+        try:
+            arguments = parse_json(function['arguments']) if isinstance(function.get('arguments'), str) else None
+        except (ValueError,TypeError,RecursionError):
+            if settings.get('foreground'): raise ProviderError('model_arguments_invalid') from None
+            raise
+        if settings.get('foreground') and (not isinstance(arguments,dict) or not isinstance(call.get('id'),str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',call['id']) or not isinstance(function.get('name'),str)):
+            raise ProviderError('model_arguments_invalid')
         return {'call_id': call.get('id'), 'tool': function.get('name'), 'arguments': arguments,
                 'inference': receipt['inference']}

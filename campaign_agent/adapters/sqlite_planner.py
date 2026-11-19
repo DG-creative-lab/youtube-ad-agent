@@ -114,6 +114,13 @@ class SQLitePlannerStore:
     def job_result_row(self, run_id):
         return self.connection.execute('SELECT snapshot,outcome FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
 
+    def inference_trace_rows(self, run_id):
+        return self.connection.execute(
+            'SELECT t.position,t.state,t.error,l.state,l.receipt,l.created_at,l.updated_at,l.actual_cost '
+            'FROM planner_turns t LEFT JOIN inference_ledger l ON l.run_id=t.run_id AND l.position=t.position '
+            'WHERE t.run_id=? ORDER BY t.position LIMIT 8', (run_id,),
+        ).fetchall()
+
     def turn_rows(self, run_id):
         return self.connection.execute(
             'SELECT position,state,receipt FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,),
@@ -226,6 +233,9 @@ class _SQLitePlannerReader:
 
     def job_result_row(self, run_id):
         return self._store.job_result_row(run_id)
+
+    def inference_trace_rows(self, run_id):
+        return self._store.inference_trace_rows(run_id)
 
     def turn_rows(self, run_id):
         return self._store.turn_rows(run_id)

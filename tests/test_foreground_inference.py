@@ -36,10 +36,10 @@ class ForegroundHttpTests(unittest.TestCase):
     def post(self,path,data,key=True):
         return self.client.post(path,json=data,headers={'X-OpenRouter-Key':self.key} if key else {})
 
-    def select(self,profile='planner'):
+    def select(self,profile='planner',budget='0'):
         connection=self.post('/api/openrouter/connect',{'operation_id':uuid4().hex,'tab_id':self.tab}).json()['connection_id']
         catalogue=self.post('/api/openrouter/models',{'connection_id':connection,'tab_id':self.tab,'search':'','cursor':None}).json()
-        response=self.post('/api/openrouter/select',{'operation_id':uuid4().hex,'connection_id':connection,'tab_id':self.tab,'model_id':'fixture/tool-model','catalogue_revision':catalogue['catalogue_revision'],'profile':profile,'max_run_cost_usd':'0'})
+        response=self.post('/api/openrouter/select',{'operation_id':uuid4().hex,'connection_id':connection,'tab_id':self.tab,'model_id':'fixture/tool-model','catalogue_revision':catalogue['catalogue_revision'],'profile':profile,'max_run_cost_usd':budget})
         self.assertEqual(response.status_code,200,response.text)
         return response.json()
 
@@ -53,6 +53,161 @@ class ForegroundHttpTests(unittest.TestCase):
     def ledger(self):
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute('SELECT state,reserved_nanos,actual_cost,in_flight,receipt FROM inference_ledger ORDER BY position').fetchall()
+
+    def dynamic_routes(self):
+        from campaign_agent.application.catalogue_policy import select_live_endpoint
+        self.app.provider_sessions.route_selector = lambda credential,model,task,now,previous=None: select_live_endpoint(
+            model,task,self.meta.endpoints(credential,model),now,previous=previous)
+
+    def test_live_route_accepts_non_allowlisted_model_cache_rates_and_replays_pinned_selection(self):
+        self.dynamic_routes()
+        self.meta.rows[0]['architecture']['input_modalities']=['text','image']
+        rates={'prompt':'0','completion':'0','input_cache_read':'0','discount':0,'web_search':'0.01'}
+        self.meta.rows[0]['pricing']=rates
+        self.meta.endpoint['pricing']=rates
+        self.meta.endpoint['supported_parameters'].remove('parallel_tool_calls')
+        self.selection=self.select()
+        saved=deepcopy(self.selection)
+        with closing(sqlite3.connect(self.path)) as db:
+            operation=db.execute('SELECT operation_id FROM provider_selections WHERE id=?',(saved['selection_id'],)).fetchone()[0]
+        retry=self.post('/api/openrouter/select',dict(operation_id=operation,connection_id=saved['connection_id'],tab_id=self.tab,
+            model_id=saved['model'],catalogue_revision=saved['catalogue_revision'],profile='planner',max_run_cost_usd='0'))
+        self.assertEqual(retry.status_code,200,retry.text)
+        self.assertEqual(retry.json(),saved)
+        run=self.start()
+        # Live replies use the LLM's tool result, not the authored summary.
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments']='{"topic":"campaign_summary","message":"Your campaign summary."}'
+        result=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(len(self.calls),1)
+        wire=json.loads(self.calls[0].data)
+        self.assertNotIn('parallel_tool_calls',wire)
+        self.assertEqual(wire['provider']['only'],['fixture/qualified'])
+        self.assertEqual(wire['provider']['allow_fallbacks'],False)
+        self.assertEqual(self.ledger()[0][:4],('settled',0,'0',0))
+
+    def test_live_route_selection_explains_endpoint_failure_without_a_completion(self):
+        self.dynamic_routes()
+        connection=self.selection['connection_id']
+        catalogue=self.post('/api/openrouter/models',dict(connection_id=connection,tab_id=self.tab,search='',cursor=None)).json()
+        self.assertTrue(catalogue['route_check_available'])
+        original=deepcopy(self.meta.endpoint)
+        cases=[({'supports_tool_choice':{'required':False}},'route_required_choice_unsupported'),
+            ({'supported_parameters':['tools','tool_choice']},'route_output_cap_unsupported'),
+            ({'context_length':None},'route_context_unsupported'),
+            ({'pricing':{'prompt':'0','completion':'0','unknown_fee':'1'}},'route_unknown_pricing')]
+        for changed,code in cases:
+            with self.subTest(code=code):
+                self.meta.endpoint={**original,**changed}
+                response=self.post('/api/openrouter/select',dict(operation_id=uuid4().hex,connection_id=connection,tab_id=self.tab,
+                    model_id='fixture/tool-model',catalogue_revision=catalogue['catalogue_revision'],profile='planner',max_run_cost_usd='0'))
+                self.assertEqual(response.status_code,409,response.text)
+                self.assertEqual(response.json()['code'],code)
+        self.assertEqual(self.calls,[])
+        self.assertEqual(self.ledger(),[])
+
+    def test_live_pinned_endpoint_drift_stops_before_completion(self):
+        self.dynamic_routes();self.selection=self.select();run=self.start()
+        self.meta.endpoint['pricing']={'prompt':'0.000001','completion':'0'}
+        result=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(result.status_code,409,result.text)
+        self.assertEqual(result.json()['code'],'selection_stale')
+        self.assertEqual(self.calls,[]);self.assertEqual(self.ledger(),[])
+
+    def test_cache_write_cost_is_reserved_and_zero_budget_cannot_select_it(self):
+        self.dynamic_routes()
+        rates={'prompt':'0','completion':'0','input_cache_write':'0.000001','input_cache_read':'0.0000001'}
+        self.meta.endpoint['pricing']=rates;self.meta.rows[0]['pricing']=rates
+        self.selection=self.select(budget='0.25')
+        self.assertEqual(self.selection['prices']['input_cache_write'],'0.000001')
+        run=self.start()
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments']='{"topic":"campaign_summary","message":"Summary."}'
+        result=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(self.ledger()[0][1],31488000)
+        connection=self.selection['connection_id']
+        response=self.post('/api/openrouter/select',dict(operation_id=uuid4().hex,connection_id=connection,tab_id=self.tab,
+            model_id='fixture/tool-model',catalogue_revision=self.selection['catalogue_revision'],profile='planner',max_run_cost_usd='0'))
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.json()['code'],'budget_exhausted')
+        self.assertEqual(len(self.calls),1)
+
+    def test_live_parallel_proposal_evaluates_one_action_and_replans_without_executing_extra_write(self):
+        self.dynamic_routes();self.selection=self.select()
+        self.reply['choices'][0]['message']['tool_calls']=[
+            {'id':'read-first','type':'function','function':{'name':'read_campaign','arguments':'{}'}},
+            {'id':'unexecuted-write','type':'function','function':{'name':'save_placement_draft','arguments':'{"ids":["SAMPLE00001"]}'}}]
+        run=self.start()
+        first=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(first.status_code,200,first.text)
+        self.assertEqual([s['tool'] for s in first.json()['steps']],['read_campaign'])
+        self.assertEqual(first.json()['diagnostics']['calls'][0]['additional_tool_calls'],1)
+        self.assertEqual(first.json()['diagnostics']['status'],'running')
+        self.reply['choices'][0]['message']['tool_calls']=[
+            {'id':'answer-next','type':'function','function':{'name':'respond',
+             'arguments':'{"topic":"campaign_summary","message":"Here are recommendations for review."}'}}]
+        second=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(second.status_code,200,second.text)
+        self.assertEqual(second.json()['status'],'answered')
+        self.assertEqual([s['tool'] for s in second.json()['steps']],['read_campaign','respond'])
+        # The follow-up model sees only the evaluated call/result pair.
+        wire=json.loads(self.calls[1].data)
+        assistant=[m for m in wire['messages'] if m['role']=='assistant']
+        self.assertEqual(len(assistant[0]['tool_calls']),1)
+        self.assertEqual(assistant[0]['tool_calls'][0]['id'],'read-first')
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['status'],'answered')
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.client.get('/api/campaign').json()['revision'],1)
+
+    def test_provider_failure_is_explained_and_trace_survives_keyless_read_without_resend(self):
+        self.reply={'error':{'code':404,'message':'No endpoints found that support your data policy.'}}
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,502,response.text)
+        self.assertEqual(response.json()['code'],'provider_privacy_unavailable')
+        saved=self.client.get('/api/agent/run',params={'id':run}).json()
+        trace=saved['diagnostics']
+        self.assertEqual(trace['status'],'failed')
+        self.assertEqual(trace['calls'][0]['code'],'provider_privacy_unavailable')
+        self.assertEqual(trace['calls'][0]['provider_error_code'],404)
+        self.assertNotIn(self.key,json.dumps(trace))
+        self.assertNotIn('messages',json.dumps(trace))
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['code'],'provider_privacy_unavailable')
+        self.assertEqual(len(self.calls),1)
+        # The same-shaped foreign principal cannot read this trace.
+        self.client.post('/fixture',json={'profile':'buyer-b'})
+        self.assertEqual(self.client.get('/api/agent/run',params={'id':run}).status_code,403)
+
+    def test_rate_limit_response_has_specific_status_and_excludes_provider_echoes(self):
+        self.reply={'error':{'code':429,'message':'Rate limit exceeded '+self.key,'metadata':{'raw':self.key}}}
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,429,response.text)
+        self.assertEqual(response.json()['code'],'provider_rate_limited')
+        trace=self.client.get('/api/agent/run',params={'id':run}).json()['diagnostics']
+        self.assertEqual(trace['calls'][0]['provider_error_code'],429)
+        self.assertEqual(trace['calls'][0]['http_status'],200)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertNotIn(self.key,'\n'.join(db.iterdump()))
+        self.assertEqual(len(self.calls),1)
+
+    def test_truncated_model_response_is_distinct_from_provider_error_and_never_repeated(self):
+        self.reply['choices'][0]['finish_reason']='length'
+        self.reply['choices'][0]['message']={'content':'Incomplete reply, not a valid action'}
+        self.reply['usage']['completion_tokens']=512
+        run=self.start()
+        response=self.post('/api/agent/run',{'run_id':run})
+        self.assertEqual(response.status_code,502,response.text)
+        self.assertEqual(response.json()['code'],'model_output_limit')
+        trace=self.client.get('/api/agent/run',params={'id':run}).json()['diagnostics']
+        self.assertEqual(trace['status'],'failed')
+        self.assertEqual(trace['calls'][0]['finish_reason'],'length')
+        self.assertEqual(trace['calls'][0]['output_tokens'],512)
+        self.assertEqual(trace['calls'][0]['cost_usd'],'0')
+        self.assertEqual(self.post('/api/agent/run',{'run_id':run},key=False).json()['code'],'model_output_limit')
+        self.assertEqual(len(self.calls),1)
 
     def test_planner_receipt_accounting_and_no_internal_or_secret_prompt(self):
         run=self.start();self.assertEqual(self.calls,[])

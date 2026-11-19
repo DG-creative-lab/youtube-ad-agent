@@ -150,6 +150,7 @@ details li + li { margin-top: 8px; }
 .agent-composer textarea { display: block; width: 100%; min-height: 86px; padding: 17px 18px 9px; font: 400 .9rem/1.5 var(--sans); border: 0; border-radius: 0; background: transparent; color: inherit; resize: vertical; }
 .agent-composer textarea:focus-visible { outline: none; }
 .composer-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 0 10px 10px 20px; }
+.composer-current-model { color: var(--muted); font-size: .75rem; max-width: min(270px, 50vw); overflow-wrap: anywhere; }
 .composer-actions { display: flex; align-items: center; gap: 7px; min-width: 0; max-inline-size: 100%; margin-inline-start: auto; }
 .agent-composer button { margin: 0; }
 .agent-composer .model-trigger { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; max-width: min(270px, 47vw); padding: 0 10px; border: 0; background: transparent; color: var(--muted); font-size: .79rem; font-weight: 400; }
@@ -220,14 +221,14 @@ textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px
 .account-trigger:hover { text-decoration: underline; }
 .account-trigger span {font-size:12px; color:#d0d0cc; margin-top:4px;}
 .openrouter-account {width:min(560px, calc(100vw - 32px)); max-height:calc(100dvh - 32px); box-sizing:border-box; border:1px solid var(--ink, #171717); padding:24px; background:#faf9f6; color:#171717; overflow:auto; overscroll-behavior:contain;}
-.openrouter-account::backdrop {background:rgb(0 0 0 / .5); overscroll-behavior:contain;}
-.account-heading {display:flex; align-items:start; justify-content:space-between; gap:16px;}
+.openrouter-account::backdrop {overflow:hidden; background:rgb(0 0 0 / .5); overscroll-behavior:contain;}
+.account-heading {position:sticky; top:0; z-index:1; background:#faf9f6; display:flex; align-items:start; justify-content:space-between; gap:16px;}
 .account-heading h2 {margin:0;}
 .openrouter-account button {min-height:44px; margin:8px 8px 8px 0;}
 .account-heading button {margin:0; min-width:44px; font-size:24px;}
 .openrouter-account label, .provider-models label {display:block; font-size:13px; line-height:1.5; font-weight:600;}
 .openrouter-account input, .provider-models input, .provider-models select {display:block; box-sizing:border-box; width:100%; min-height:44px; padding:10px; margin:6px 0 10px; border:1px solid #888; border-radius:0; background:#fff; color:#171717; font:inherit;}
-.provider-models {border-top:1px solid #deddd9; margin-top:16px; padding-top:12px; max-height:50dvh; overflow:auto; overscroll-behavior:contain;}
+.provider-models {border-top:1px solid #deddd9; margin-top:16px; padding-top:12px;}
 .provider-models h3 {margin:0 0 12px; font-size:16px;}
 .provider-models button {min-height:44px; white-space:normal; text-align:left; max-width:100%;}
 .provider-model-list {list-style:none; margin:12px 0; padding:0;}
@@ -236,6 +237,9 @@ textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px
 .provider-model-list p, .provider-models p {font-size:12px; line-height:1.6;}
 .model-id {font:11px ui-monospace, monospace; color:#626262; margin-top:4px;}
 .model-menu {max-width:calc(100vw - 48px); box-sizing:border-box;}
-@media (max-width:600px) {.openrouter-account {padding:18px;} .provider-models {max-height:45dvh;}}
+@media (max-width:600px) {.openrouter-account {padding:18px;}}
 
 .provider-models button[aria-disabled="true"] {opacity:.6; cursor:wait;}
+
+.model-price-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 420px) { .model-price-filters { grid-template-columns: minmax(0, 1fr); } }

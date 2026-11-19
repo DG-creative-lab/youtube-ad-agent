@@ -102,20 +102,44 @@ def read_body(environ, maximum):
 
 def handler_headers(environ, body):
     headers = Message()
-    for key in ("Host", "Origin", "Range", "X-Placement-Review", "X-Viewer"):
+    for key in ("Host", "Origin", "Range", "X-Placement-Review", "X-Viewer", "X-OpenRouter-Key"):
         value = environ.get("HTTP_" + key.replace("-", "_").upper())
         if value is not None:
             headers[key] = value
     if body:
         headers["Content-Length"] = str(len(body))
         headers["Content-Type"] = environ.get("CONTENT_TYPE", "")
-    headers["X-Local-Operator"] = OPERATOR
+    headers["X-Local-Operator"] = environ.get("preview.operator", OPERATOR)
     return headers
 
 
-def serve_command(path, query, method, origin, environ, body, database_path):
+def serve_command(path, query, method, origin, environ, body, database_path, *, provider_metadata=None, provider_profiles=(), completion_transport=None):
+    from preview.providers import sessions
+    available_catalogs = None
+    if provider_metadata is not None:
+        from campaign_agent.bootstrap.runtime import create_runtime
+        from campaign_agent.ports.catalogs import CatalogRecord
+        runtime = create_runtime(database_path, media_dir=DEMO_MEDIA_DIR, initialize=False)
+        catalogs = runtime.planner.catalogs
+        runtime.drafts.require("youtube:catalog.write")
+        scope = catalogs._catalog_scope
+        empty_id = scope_for(json.dumps(vars(scope), sort_keys=True) + ":empty")[:32]
+        with catalogs.catalog_storage.write() as unit:
+            unit.catalogs.add_catalog(CatalogRecord(empty_id, scope, "Campaign conversation", "[]"))
+            unit.commit()
+        with catalogs.catalog_storage.read() as repository:
+            available_catalogs = [
+                {"id": row.id, "label": row.label, "count": len(json.loads(row.snapshot))}
+                for row in repository.list_catalogs(scope)
+                if all(entry["source"] != "synthetic" for entry in json.loads(row.snapshot))
+            ]
+        if method == "POST" and path == "/api/agent/placements":
+            if json.loads(body).get("catalog_id") not in {row["id"] for row in available_catalogs}:
+                raise RequestRejected(409, "Import a permitted catalog or use the campaign conversation.")
     handler = build_handler(
-        False, database_path, operator_token=OPERATOR, demo_scenario="propose",
+        False, database_path, operator_token=environ.get("preview.operator", OPERATOR), demo_scenario=None if provider_metadata else "propose",
+        provider_metadata=provider_metadata, provider_profiles=provider_profiles, provider_completion_transport=completion_transport,
+        provider_sessions_factory=sessions,
         media_dir=DEMO_MEDIA_DIR, initialize=False, register_catalogs=False,
     )
     response = []
@@ -131,6 +155,11 @@ def serve_command(path, query, method, origin, environ, body, database_path):
             )
 
         def send(self, code, content, content_type="application/json", headers=()):
+            if code == 200 and available_catalogs is not None:
+                if path == "/api/mode":
+                    content["agentPlanner"]["catalogs"] = available_catalogs
+                elif path == "/api/agent/catalog":
+                    content["catalogs"] = [row for row in content["catalogs"] if row["id"] in {item["id"] for item in available_catalogs} or row["id"] == content["id"]]
             encoded = json.dumps(content).encode() if content_type == "application/json" else content
             response.append((code, encoded, [("Content-Type", content_type), *headers]))
 
@@ -156,6 +185,10 @@ def adjust_response(response, path, method, origin, invite):
     if path == "/api/mode":
         data = json.loads(body)
         data["previewScope"] = invite[:32]
+        if data.get("openrouterAvailable"):
+            data["liveInference"] = True
+            data["agentPlanner"]["models"] = []
+            data["agentPlanner"]["default"] = ""
     elif path in {"/api/viewer/open", "/api/viewer/test/open"}:
         data = json.loads(body)
         # Local viewer responses may nest the selected example under a test or an attribution.
@@ -175,13 +208,16 @@ def adjust_response(response, path, method, origin, invite):
 
 
 class PreviewApplication:
-    def __init__(self, store, invites, origin, seed, *, clock=time):
+    def __init__(self, store, invites, origin, seed, *, clock=time, provider_metadata=None, provider_profiles=(), completion_transport=None):
         self.store = store
         self.invites = invites
         self.origin = origin
         self.host = urlsplit(origin).netloc
         self.seed = seed
         self.clock = clock
+        self.provider_metadata = provider_metadata
+        self.provider_profiles = provider_profiles
+        self.completion_transport = completion_transport
 
     def __call__(self, environ, start_response):
         method = environ["REQUEST_METHOD"]
@@ -244,9 +280,12 @@ class PreviewApplication:
             if path in {"/", "/campaign", "/viewer", "/placements"} and method in {"GET", "HEAD"}:
                 return redirect("/invite")
             raise RequestRejected(401, "Open the workspace with your invite.")
-        if path.startswith("/api/openrouter/") or environ.get("HTTP_X_OPENROUTER_KEY") is not None:
+        if self.provider_metadata is None and (path.startswith("/api/openrouter/") or environ.get("HTTP_X_OPENROUTER_KEY") is not None):
             raise RequestRejected(403, "Provider connections are disabled in this preview.")
-        if path == "/api/agent/catalog" and method == "POST":
+        if self.provider_metadata is not None and method == "POST" and (
+                path.startswith("/api/campaign/setup") or path == "/api/campaign/performance"):
+            raise RequestRejected(409, "This rehearsal command is available in evaluation mode.")
+        if self.provider_metadata is None and path == "/api/agent/catalog" and method == "POST":
             raise RequestRejected(403, "Choose one of the authored preview catalogs.")
         media = path.startswith("/viewer/media/")
         if media:
@@ -268,14 +307,52 @@ class PreviewApplication:
             return redirect("/", ("Clear-Site-Data", '"storage"'))
         body = read_body(environ, MAX_BODY) if method == "POST" else b""
         database = workspace.snapshot if workspace.snapshot is not None else self.seed
+        if self.provider_metadata is not None and method == "POST" and path.startswith("/api/agent/"):
+            try:
+                command = json.loads(body)
+            except (ValueError, UnicodeError):
+                raise RequestRejected(400, "Send a valid campaign request.") from None
+            if not isinstance(command, dict):
+                raise RequestRejected(400, "Send a valid campaign request.")
+            if path in {"/api/agent/placements", "/api/agent/next-test", "/api/agent/instruction-review", "/api/agent/experiment-next-test"}:
+                if not command.get("provider_selection_id"):
+                    raise RequestRejected(409, "Connect OpenRouter and select a model before sending.")
+            if path == "/api/agent/run" and set(command) != {"run_id"}:
+                raise RequestRejected(409, "Start a conversation using your selected OpenRouter model.")
         with TemporaryDirectory(prefix="youtube-preview-", dir="/tmp") as directory:
             database_path = Path(directory) / "workspace.sqlite"
             database_path.write_bytes(database)
-            result = serve_command(path, query, method, self.origin, environ, body, database_path)
-            if method == "POST":
+            if self.provider_metadata is not None and method == "POST" and path == "/api/agent/run":
+                import sqlite3
+                with sqlite3.connect(database_path) as db:
+                    row = db.execute("SELECT snapshot FROM planner_jobs WHERE run_id=?", (command.get("run_id"),)).fetchone()
+                if row is None or json.loads(row[0]).get("settings", {}).get("mode") != "openrouter":
+                    raise RequestRejected(409, "This recorded offline run is available in its saved history.")
+            version = workspace.version
+            saved_database = database
+
+            def checkpoint():
+                nonlocal version, saved_database
                 updated = database_path.read_bytes()
-                if updated != database:
-                    self.store.save(invite, workspace.version, updated)
+                self.store.save(invite, version, updated)
+                version = 1 if version is None else version + 1
+                saved_database = updated
+
+            def completion(request, *, timeout):
+                # Publish the committed possibly-sent ledger marker before any external effect.
+                # A conflicting snapshot writer fails here before a completion can be sent.
+                checkpoint()
+                return self.completion_transport(request, timeout=timeout)
+
+            # Stable per-invite identity survives cold starts and remains outside browser input.
+            environ["preview.operator"] = scope_for("provider:" + invite)
+            try:
+                result = serve_command(path, query, method, self.origin, environ, body, database_path,
+                    provider_metadata=self.provider_metadata, provider_profiles=self.provider_profiles,
+                    completion_transport=completion if self.completion_transport is not None else None)
+            finally:
+                if method == "POST" and database_path.read_bytes() != saved_database:
+                    checkpoint()
         return adjust_response(result, path, method, self.origin, invite)
 
     @staticmethod

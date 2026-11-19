@@ -99,3 +99,19 @@ class PlacementDiscovery:
         return self.drafts.save({'campaign_id': self.drafts.campaign_id, 'revision': expected_revision,
                                  'placements': list(chosen.values())},
                                 repository=repositories.drafts)
+
+
+def model_assignments(arguments, history, contexts):
+    assignments = arguments.get("assignments")
+    inspected = next((step["result"] for step in reversed(history)
+                      if step["tool"] == "inspect_catalog" and "error" not in step["result"]), None)
+    known = {row["video_id"] for row in inspected["entries"]} if inspected else set()
+    if (set(arguments) != {"assignments"} or not isinstance(assignments, list)
+            or not assignments or len(assignments) > len(known)
+            or any(not isinstance(row, dict) or set(row) != {"id", "context"}
+                   or not isinstance(row["id"], str) or row["id"] not in known
+                   or row["context"] not in {*contexts, "review"} for row in assignments)
+            or len({row["id"] for row in assignments}) != len(assignments)):
+        raise ValueError("Classify inspected catalog IDs into known campaign contexts.")
+    return {"assignments": assignments, "route": "main_model",
+            "label": "Main-model classification of inspected catalog entries"}

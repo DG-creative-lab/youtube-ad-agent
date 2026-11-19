@@ -8,7 +8,7 @@ import sqlite3
 
 from .access import CommandAccess
 from .inference_ledger import InferenceLedger, actual_cost
-from .application.catalogue_policy import compatible_model, fingerprint, select_endpoint
+from .application.catalogue_policy import compatible_model, fingerprint
 from .ports.inference import ForegroundCredential, ProviderError
 
 class ForegroundInference:
@@ -142,8 +142,7 @@ class ForegroundInference:
         raw=next((r for r in rows if isinstance(r,dict) and r.get('id')==settings['model']),None)
         if raw is None or not compatible_model(raw,settings['profile']):
             self.providers.cache.invalidate(settings['connection_id']);raise ProviderError('route_unqualified')
-        selected=select_endpoint(settings['model'],settings['profile'],
-            self.providers.metadata.endpoints(credential,settings['model']),self.providers.profiles,self.providers.clock())
+        selected=self.providers.select_route(credential,settings['model'],settings['profile'],previous=settings)
         if any(settings.get(k)!=v for k,v in selected.items()):
             self.providers.cache.invalidate(settings['connection_id']);raise ProviderError('selection_stale')
         self.before_commit(settings)

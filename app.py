@@ -20,7 +20,10 @@ def deployment():
     if not re.fullmatch(r"[a-z0-9-]+\.vercel\.app", host):
         raise ValueError("Use the protected Vercel deployment hostname.")
     seed = expand_snapshot((Path(__file__).resolve().parent / "preview" / "seed.data").read_bytes())
-    return PreviewApplication(connected_store(FIXTURE), invites, f"https://{host}", seed)
+    from preview.providers import LiveMetadata, profiles, send
+    return PreviewApplication(connected_store(FIXTURE), invites, f"https://{host}", seed,
+                              provider_metadata=LiveMetadata(), provider_profiles=profiles(),
+                              completion_transport=send)
 
 
 def app(environ, start_response):

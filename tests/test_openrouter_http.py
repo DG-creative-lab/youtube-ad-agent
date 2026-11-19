@@ -53,6 +53,29 @@ class OpenRouterHttpTests(unittest.TestCase):
         return dict(operation_id=uuid4().hex,connection_id=connection,tab_id=self.tab,
                     model_id='fixture/tool-model',catalogue_revision=catalogue,profile='planner',max_run_cost_usd='0',**extra)
 
+    def test_model_filters_validate_and_preserve_source_ranking(self):
+        connection = self.connect()["connection_id"]
+        for invalid in ({"sort": []}, {"sort": "invented-rating"}, {"tools_only": "yes"},
+                        {"max_input_price": "-1"}, {"max_output_price": "NaN"}):
+            self.metadata.requests.clear()
+            self.post("models", {"connection_id": connection, "tab_id": self.tab,
+                                  "search": "", "cursor": None, **invalid}, status=400)
+            self.assertEqual(self.metadata.requests, [])
+        base = self.metadata.rows[0]
+        self.metadata.rows.extend([
+            {**base, "id": "fixture/ranked-first", "name": "Ranking first"},
+            {**base, "id": "fixture/no-tools", "name": "No tools", "supported_parameters": []},
+        ])
+        self.metadata.rows.append({**base, "id": self.key, "name": "Rejected credential echo"})
+        self.metadata.rows.reverse()
+        result = self.models(connection, tools_only=True, sort="most-popular",
+                             max_input_price="0", max_output_price="0")
+        self.assertEqual([row["id"] for row in result["models"]],
+                         ["fixture/ranked-first", "fixture/tool-model"])
+        self.assertNotIn("rating", result["models"][0])
+        entry = self.service.cache.get(connection, self.service.clock())
+        self.assertNotIn(self.key, json.dumps(entry))
+
     def test_connect_catalogue_selection_replay_and_no_domain_or_secret_write(self):
         self.assertIs(self.buyer.get('/api/mode').json()['openrouterAvailable'], True)
         before=self.buyer.get('/api/campaign').json()
@@ -389,7 +412,7 @@ class OpenRouterHttpTests(unittest.TestCase):
                 connection=self.connect()['connection_id'];catalogue=self.models(connection)
                 data=self.selection(connection,catalogue['catalogue_revision'])
                 if change=='modalities':self.metadata.rows[0]['architecture']['output_modalities']=['audio']
-                elif change=='pricing':self.metadata.rows[0]['pricing']['input_cache_read']='0.1'
+                elif change=='pricing':self.metadata.rows[0]['pricing']['unknown_unit']='0.1'
                 else:self.metadata.rows=[]
                 self.assertEqual(self.post('select',data,status=409)['code'],'route_unqualified')
                 refreshed=self.models(connection)

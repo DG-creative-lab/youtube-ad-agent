@@ -166,6 +166,28 @@ def planner_request_body(context: dict, history: list[dict]) -> dict:
                 'function': {'name': step['tool'], 'arguments': json.dumps(step['arguments'])}}]},
             {'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps(step['result'])},
         ])
-    return {'messages': messages,
-            'tools': [item for item in TOOLS if permits(context, item['function']['name'])],
-            'tool_choice': 'required', 'parallel_tool_calls': False}
+    tools = [item for item in TOOLS if permits(context, item['function']['name'])]
+    if context.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+        tools = [json.loads(json.dumps(item)) for item in tools
+                 if item['function']['name'] not in {'review_performance', 'validate_campaign_setup'}]
+        classify = next(item['function'] for item in tools if item['function']['name'] == 'classify_catalog')
+        classify['description'] = 'Classify catalog entries you inspected against the saved campaign contexts. Mark ambiguous entries as review.'
+        classify['parameters'] = {'type': 'object', 'additionalProperties': False,
+            'properties': {'assignments': {'type': 'array', 'minItems': 1, 'maxItems': 200,
+                'items': {'type': 'object', 'additionalProperties': False,
+                    'properties': {'id': {'type': 'string'}, 'context': {'type': 'string'}},
+                    'required': ['id', 'context']}}}, 'required': ['assignments']}
+        respond = next(item['function'] for item in tools if item['function']['name'] == 'respond')
+        respond['description'] = 'Write a reply to the user based on this conversation and observed tool results. This performs no campaign action.'
+        respond['parameters']['required'] = ['topic', 'message']
+        respond['parameters']['properties']['message'] = {'type': 'string', 'minLength': 1, 'maxLength': 3000}
+        messages[0]['content'] += (' Inspect the catalog before classifying. Supply your classifications through classify_catalog.assignments. '
+            ' For conversational replies, provide your own helpful wording in respond.message. '
+            'State campaign facts only when supported by tool results. Distinguish your suggestions from saved actions. '
+            'When answering freely, choose a matching topic and use message to respond directly to the user.')
+    body = {'messages': messages, 'tools': tools, 'tool_choice': 'required'}
+    if not context.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+        body['parallel_tool_calls'] = False
+    # Live endpoint metadata can omit this optional parameter. The adapter
+    # narrows a multi-call proposal to one action; the application checks it.
+    return body

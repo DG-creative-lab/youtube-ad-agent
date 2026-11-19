@@ -11,7 +11,9 @@ export type Selection = {
   max_run_cost_usd: Budget; catalogue_revision: string; privacy?: unknown; routing?: unknown;
   charging_profile_version?: string; prices?: Record<string, string>;
 };
-export type Catalogue = {catalogue_revision: string; observed_at: number; expires_at: number;
+export type ModelSort = "available" | "pricing-low-to-high" | "pricing-high-to-low" | "most-popular" | "intelligence-high-to-low";
+export type ModelFilters = {max_input_price: string | null; max_output_price: string | null; sort: ModelSort};
+export type Catalogue = {route_check_available?: boolean; catalogue_revision: string; observed_at: number; expires_at: number;
   models: {id: string; name: string; input_usd_per_million: string | null; output_usd_per_million: string | null;
     state: "candidate" | "eligible" | "blocked"; reason_codes: string[]}[]; next_cursor: string | null};
 export type AccountSnapshot = {state: "disconnected" | "reconnect" | "connecting" | "connected" | "expired";
@@ -35,6 +37,31 @@ const nullableReads = new Set([
   "/api/campaign/setup", "/api/campaign/instruction-test", "/api/campaign/instruction-finding",
 ]);
 const messages: Record<string, string> = {
+  provider_payment_required: "OpenRouter requires credits or an account billing change for this request.",
+  provider_rate_limited: "OpenRouter or the selected provider rate-limited this request. Wait before starting a new request.",
+  provider_privacy_unavailable: "OpenRouter found no endpoint matching the no-training data policy for this model.",
+  provider_no_route: "OpenRouter found no available endpoint for the selected provider route.",
+  provider_tools_rejected: "The provider rejected the required tool-calling settings despite its advertised capabilities.",
+  provider_unavailable: "OpenRouter or the selected provider is temporarily unavailable.",
+  provider_request_rejected: "OpenRouter rejected the request. Inspect the recorded HTTP status in Agent activity.",
+  model_output_limit: "The model reached its output token limit before completing a tool call. Choose another model or start a new request with a supported larger limit.",
+  model_tool_call_missing: "The model response did not contain the required tool call.",
+  model_tool_call_multiple: "The model returned multiple tool calls; this agent accepts one call per step.",
+  model_arguments_invalid: "The model returned invalid tool arguments.",
+  model_refused: "The model declined this request.",
+  model_input_limit: "The request cannot fit the model input limit. Shorten the message or choose a model with a larger context.",
+  model_response_invalid: "The model response could not be used. No tool action was performed.",
+  unsupported_capabilities: "This model does not support text input, text output and the required tools.",
+  route_conditional_pricing: "The provider publishes conditional price tiers that this app cannot bound yet.",
+  route_unknown_pricing: "The provider publishes an unrecognized billing unit that this app cannot bound.",
+  route_reasoning_pricing: "The provider bills reasoning separately and this app cannot bound that charge yet.",
+  unsupported_pricing: "Unknown or conditional charges prevent a bounded cost check. Choose another model.",
+  route_tools_unsupported: "No provider route advertises both tool calling and tool choice.",
+  route_required_choice_unsupported: "No compatible provider route supports required tool choice.",
+  route_output_cap_unsupported: "No compatible provider route supports an output token limit.",
+  route_context_unsupported: "The provider route has missing or insufficient context or token limits.",
+  route_structured_unsupported: "No provider route supports the required structured output format.",
+  route_unavailable: "OpenRouter reports no compatible provider endpoint for this model.",
   waiting_for_credentials: "Reconnect the original OpenRouter key, then resume this saved operation.",
   inference_outcome_unknown: "The provider outcome is unknown. This operation will not repeat the completion. Saved history remains available.",
   connection_expired: "This connection has expired. Start a new conversation with a new connection; the saved history remains available.",
@@ -50,6 +77,8 @@ const messages: Record<string, string> = {
   operation_conflict: "This operation has different saved inputs. Open its saved history before starting new work.",
   invalid_request: "This request was not accepted. Check the connection and selected settings.",
 };
+
+export function modelAvailabilityReason(code: string) {return messages[code] ?? "This model cannot be used with the current settings.";}
 
 export class OpenRouterSession {
   #key: string | null = null;
@@ -239,13 +268,14 @@ export class OpenRouterSession {
     this.#invalidate("disconnected", true);
     if (connection) await this.request("/api/openrouter/disconnect", {connection_id: connection, tab_id: this.tabId});
   }
-  async models(search: string, cursor: string | null = null) {
+  async models(search: string, cursor: string | null = null, filters?: ModelFilters) {
     const query = ++this.#query; const epoch = this.#snapshot.epoch;
     const result = await this.request<Catalogue>("/api/openrouter/models", {connection_id: this.#snapshot.connectionId,
-      tab_id: this.tabId, search: search.slice(0, 100), cursor}, true);
+      tab_id: this.tabId, search: search.slice(0, 100), cursor, ...(filters && {...filters, tools_only: true})}, true);
     this.assertCurrent(epoch);
     if (query !== this.#query) throw new RequestError("A newer catalogue request replaced this result.", 409, "client_context_changed");
-    if (!Array.isArray(result.models) || result.models.length > 20 || typeof result.catalogue_revision !== "string" || !Number.isFinite(result.observed_at) || !Number.isFinite(result.expires_at)
+    if (result.route_check_available !== undefined && typeof result.route_check_available !== "boolean"
+      || !Array.isArray(result.models) || result.models.length > 20 || typeof result.catalogue_revision !== "string" || !Number.isFinite(result.observed_at) || !Number.isFinite(result.expires_at)
       || result.models.some(row => !row || typeof row.id !== "string" || typeof row.name !== "string" || !["candidate", "eligible", "blocked"].includes(row.state) || !Array.isArray(row.reason_codes) || row.reason_codes.some(code => typeof code !== "string"))) {
       throw new RequestError("The model catalogue response is unavailable. Refresh the catalogue or use an offline model.", 503, "catalogue_unavailable");
     }

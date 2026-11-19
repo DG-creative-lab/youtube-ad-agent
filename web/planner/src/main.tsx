@@ -3,6 +3,7 @@ import type {MouseEvent} from "react";
 import {createRoot} from "react-dom/client";
 import {PerformanceReview} from "./PerformanceReview";
 import {AgentComposer} from "./AgentComposer";
+import {activityFailureStatus} from "./activity-status";
 import {AgentActivity} from "./AgentActivity";
 import type {Run, RunResult} from "./AgentActivity";
 import type {DraftPermission} from "./AgentComposer";
@@ -57,6 +58,7 @@ type Mode = {
   live: boolean;
   googleAdsReporting?: boolean;
   openrouterAvailable?: boolean;
+  liveInference?: boolean;
   instructionTestLimits: InstructionTestLimits;
   demoRequest: string;
   viewerOrigin: string;
@@ -100,6 +102,7 @@ function App() {
   const [draftPermission, setDraftPermission] = useState<DraftPermission>("none");
   const [draft, setDraft] = useState<Draft>();
   const [run, setRun] = useState<Run | null>(null);
+  const [runFailure, setRunFailure] = useState<{code: string; message: string} | null>(null);
   const [pendingId, setPendingId] = useState(() => sessionStorage.getItem(runKey));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -148,14 +151,14 @@ function App() {
             setConversationId(nextConversation);
             sessionStorage.setItem("campaign-planner:conversation", nextConversation);
             setPendingId(null);
-            setRun(null);
+            setRun(null); setRunFailure(null);
             setDraftPermission("none");
             sessionStorage.setItem("staff-workspace-scope", scope);
           }
         }
         setDraft(currentDraft);
         const savedModel = sessionStorage.getItem("campaign-planner:model");
-        const selectedModel = workspace.previewScope ? "simulated"
+        const selectedModel = workspace.liveInference ? "" : workspace.previewScope ? "simulated"
           : workspace.agentPlanner?.models.some(item => item.id === savedModel) ? savedModel!
           : workspace.agentPlanner?.default ?? "simulated";
         if (!workspace.previewScope && savedModel && selectedModel !== savedModel && ["simulated", "simulated-inspect"].includes(savedModel)) {
@@ -183,7 +186,7 @@ function App() {
           if (pendingStart) {
             const marker = JSON.parse(pendingStart);
             if (marker.provider && !marker.run_id) {
-              setRun(null); setPendingId(null); sessionStorage.removeItem(runKey);
+              setRun(null); setRunFailure(null); setPendingId(null); sessionStorage.removeItem(runKey);
               setError(`The original start receipt is unavailable. Operation ${marker.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`);
               setMode(workspace); return;
             }
@@ -297,7 +300,7 @@ function App() {
     const providerEpoch = openrouter.snapshot().epoch;
     const guard = () => {openrouter.assertCurrent(providerEpoch); if (epoch !== viewEpoch.current) throw new RequestError("The conversation changed. Open its saved history to continue.", 409, "client_context_changed");};
     const id = !source && pendingId ? pendingId : crypto.randomUUID().replaceAll("-", "");
-    setBusy(true); setError(""); setStale(false);
+    setBusy(true); setError(""); setRunFailure(null); setStale(false);
     const originalSettings = run?.planner?.settings ?? run?.inference?.settings;
     const attempt: RunAttempt = {kind: originalSettings?.mode === "openrouter" ? "provider" : originalSettings ? "offline" : "unknown",
       phase: "read", acknowledged: run?.run_id === id};
@@ -308,7 +311,7 @@ function App() {
       if (source?.kind === "placement_request") {
         const remote = !["simulated", "simulated-inspect"].includes(source.model);
         const chosen = openrouter.snapshot().selection;
-        if (remote && (!mode.openrouterAvailable || mode.previewScope || !chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
+        if (remote && (!mode.openrouterAvailable || !chosen || chosen.profile !== "planner" || chosen.model !== source.model || !openrouter.canUse(chosen))) {
           throw new RequestError("Reconnect and select an eligible planner model before sending. Your typed text is retained.", 409, "waiting_for_credentials");
         }
         start = {path: "/api/agent/placements", body: {
@@ -344,9 +347,9 @@ function App() {
         sessionStorage.setItem(pendingStartKey, openrouter.serializeStart(start));
         if (remote) {
           pendingProviderStart.current = {...start, uncertain: true};
-          if (!start.body.run_id) {setPendingId(null); setRun(null); sessionStorage.removeItem(runKey);}
+          if (!start.body.run_id) {setPendingId(null); setRun(null); setRunFailure(null); sessionStorage.removeItem(runKey);}
         }
-        if (start.body.run_id) {setPendingId(String(start.body.run_id)); sessionStorage.setItem(runKey, String(start.body.run_id)); if (run?.run_id !== start.body.run_id) setRun(null);}
+        if (start.body.run_id) {setPendingId(String(start.body.run_id)); sessionStorage.setItem(runKey, String(start.body.run_id)); if (run?.run_id !== start.body.run_id) setRun(null); setRunFailure(null);}
         current = await request<Run>(start.path, start.body, remote); guard();
         sessionStorage.removeItem(pendingStartKey); pendingProviderStart.current = null;
       } else if (pendingId) {
@@ -381,8 +384,17 @@ function App() {
       // A definitive denied offline start has no saved run to resume. Saved/provider/uncertain operations keep their original identity.
       if (forgetFailedOfflineRun(failure, attempt)) {
         sessionStorage.removeItem(pendingStartKey); sessionStorage.removeItem(runKey);
-        setPendingId(null); setRun(null); setStale(false);
+        setPendingId(null); setRun(null); setRunFailure(null); setStale(false);
       }
+      // Refresh the owned run without a key. This reads saved diagnostics and
+      // cannot repeat inference, even after an uncertain provider response.
+      const failedRunId = sessionStorage.getItem(runKey);
+      if (failedRunId) {
+        try {const saved = await request<Run>("/api/agent/run?id=" + encodeURIComponent(failedRunId)); guard(); setRun(saved);}
+        catch { /* Keep the original failure if its diagnostic read is unavailable. */ }
+      }
+      setRunFailure({code: failure instanceof RequestError ? failure.code : "request_outcome_unavailable",
+        message: failure instanceof Error ? failure.message : "The request outcome is unavailable."});
       const lostStructuredStart = pendingProviderStart.current;
       setError(lostStructuredStart && !lostStructuredStart.body.run_id
         ? `The original start receipt is unavailable. Operation ${lostStructuredStart.body.operation_id} is retained; no replacement request was sent. Saved conversations remain readable.`
@@ -406,7 +418,7 @@ function App() {
     setConversations(chats);
   }
 
-  function newConversation(model = mode?.previewScope ? "simulated" : mainModel, preserveText = false) {
+  function newConversation(model = mode?.liveInference ? "" : mode?.previewScope ? "simulated" : mainModel, preserveText = false) {
     viewEpoch.current++;
     pendingProviderStart.current = null;
     setMainModel(model);
@@ -418,7 +430,7 @@ function App() {
     sessionStorage.removeItem(pendingStartKey);
     setConversation(null);
     setDraftPermission("none");
-    setRun(null);
+    setRun(null); setRunFailure(null);
     setPendingId(null);
     if (!preserveText) setMessageText("");
     setStale(false);
@@ -498,11 +510,9 @@ function App() {
     ? {mode: "openrouter" as const, model: mainModel, budget: account.selection?.max_run_cost_usd} : {mode: "offline" as const};
   const capabilityScope = JSON.stringify([mode?.previewScope, mode?.workspace?.actor, mode?.workspace?.client_id,
     mode?.workspace?.brand_id, mode?.workspace?.id, draft?.campaign_id]);
-  const providerAvailable = Boolean(mode?.openrouterAvailable && !mode.previewScope);
+  const providerAvailable = Boolean(mode?.openrouterAvailable);
   const composer = mode?.agentPlanner && draft && <AgentComposer preview={Boolean(mode.previewScope)} capabilityScope={capabilityScope} options={mode.agentPlanner} model={mainModel}
     providerSelection={account.selection} providerConnected={openrouter.canUse(account.selection ?? undefined)} providerAvailable={providerAvailable}
-    onProviderSettings={() => newConversation(mainModel, true)}
-    onProviderSelect={selection => {newConversation(selection.model, true);}}
     catalogId={placementCatalog} onCatalogId={id => {setPlacementCatalog(id); sessionStorage.setItem("campaign-planner:catalog", id);}}
     followup={Boolean(conversation?.messages.length)} text={messageText} onText={setMessageText}
     draftPermission={draftPermission} onDraftPermission={setDraftPermission}
@@ -513,7 +523,8 @@ function App() {
   const waiting = run?.status === "waiting_for_evidence";
   const reviewingTest = run?.request === "Review the original and revised instruction test.";
   const draftApproved = activePackage && !needsLatest ? Boolean(activePackage.approval) : undefined;
-  const runStatus = result?.needs_verification ? "Earlier reply needs verification"
+  const failureStatus = activityFailureStatus(busy, run?.diagnostics?.status, runFailure?.code);
+  const runStatus = failureStatus ?? (result?.needs_verification ? "Earlier reply needs verification"
     : run?.status === "superseded" ? "Request superseded by a follow-up"
     : run?.status === "answered" ? "Reply saved"
     : run?.status === "needs_input" ? "Agent needs input"
@@ -522,7 +533,7 @@ function App() {
       : result.revision === draftRevision && !needsLatest ? (draftApproved === undefined ? "Draft saved" : draftApproved ? "Draft approved" : "Draft ready for review")
       : `Prepared revision ${result.revision}`)
     : busy || run?.status === "running" ? "Preparing the campaign"
-    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request";
+    : pendingId && !stale ? "Preparation can be resumed" : "Waiting for a request");
   const evidenceMessage = conversation?.messages.find(message =>
     message.run_id === run?.run_id && (message.review || message.experiment_review));
   const action = busy ? "Preparing draft…" : !stale && pendingId && !result ? "Resume preparation" : "Prepare draft";
@@ -573,7 +584,7 @@ function App() {
              aria-current={home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg> New request</a>
           <a href="/campaign" onClick={event => follow(event, "/campaign")}
              aria-current={!home ? "page" : undefined}><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4ZM3 12l9 4 9-4M3 17l9 4 9-4" /></svg>Campaign</a>
-          {!mode?.workspace && <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>}
+          {!mode?.workspace && !mode?.liveInference && <a href="/placements"><svg className="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" /><path d="m10 9 5 3-5 3Z" /></svg>Placements <span aria-hidden="true">↗</span></a>}
         </nav>
         {conversations.length > 0 && <label className="saved-conversations">Saved conversations
           <select aria-label="Saved conversations" value={conversation?.id ?? ""} disabled={busy || !!packageAction}
@@ -585,12 +596,14 @@ function App() {
         <div className="rail-footer">
           <div className="rail-environment"><span className="rail-label">{mode?.previewScope ? "Protected preview" : mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
-              : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Authored delivery fixtures. Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
+              : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
           </div>
           {mode && <WorkspaceAccount name={mode.previewScope ? "Demo reviewer" : mode.workspace?.actor ?? "Local operator"}
             initials={mode.previewScope ? "DP" : mode.workspace ? "SF" : "LO"}
             workspace={mode.workspace ? `${mode.workspace.client_id} · ${mode.workspace.brand_id}` : mode.previewScope ? "Invite workspace" : "Trusted local workspace"}
             preview={Boolean(mode.previewScope)} providerAvailable={providerAvailable} providerReady={Boolean(draft)}
+            selectionBusy={busy || Boolean(packageAction)} onModelSettings={() => newConversation(mainModel, true)}
+            onModelSelect={selection => newConversation(selection.model, true)}
             onProviderChange={fresh => {viewEpoch.current++; if (fresh) newConversation(mainModel, true);}} />}
         </div>
       </aside>
@@ -606,7 +619,7 @@ function App() {
               <p className="intake-intro">Describe the campaign task. Your agent chooses tools and prepares a draft for review.</p>
               {composer}
               {error && mode && <p className="error" role="alert">{error}</p>}
-              {mode && !mode.live && (
+              {mode && !mode.live && !mode.liveInference && (
                 <>
                   <button className="example-action" onClick={openExample}>
                     {exampleAction} <span aria-hidden="true">↗</span>
@@ -632,7 +645,7 @@ function App() {
                   <h2 id="request-heading">Conversation</h2>
                   <CampaignChat conversation={conversation} busy={busy} draftRevision={needsLatest ? undefined : draftRevision} />
                   {composer}
-                  {mode && !mode.live && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
+                  {mode && !mode.live && !mode.liveInference && pendingId && !result && <button onClick={() => void prepare()} disabled={busy || !!packageAction}>{action}</button>}
                   {waiting && <p role="status" className="revision">Waiting for more evidence. {result?.message}</p>}
                   {Boolean(run?.steps.length) && <a className="compact-activity" href="#activity-heading">View agent activity</a>}
                   {!mode && !error && <p role="status">Loading the workspace…</p>}
@@ -759,9 +772,9 @@ function App() {
                     </ul>
                     {historyError && <p className="error" role="alert">{historyError}</p>}
                   </details>}
-                  {draft && !mode?.workspace && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
+                  {draft && !mode?.workspace && !mode?.liveInference && <a className="text-action" href="/placements">Manage placements and export URLs <span aria-hidden="true">↗</span></a>}
                 </section>
-                {activePackage?.approval && !needsLatest && !busy && (
+                {!mode?.liveInference && activePackage?.approval && !needsLatest && !busy && (
                   <CampaignSetup key={`setup:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint} request={request}
                     onSetupChanged={() => setDeliveryRefresh(current => current + 1)}
@@ -779,7 +792,7 @@ function App() {
                       setPackageError(message);
                     }} />
                 )}
-                {activePackage?.approval && !needsLatest && !busy && (
+                {!mode?.liveInference && activePackage?.approval && !needsLatest && !busy && (
                   <PerformanceReview key={`performance:${activePackage.fingerprint}`} campaignId={activePackage.package.campaign_id}
                     revision={activePackage.package.revision} fingerprint={activePackage.fingerprint}
                     groups={activePackage.package.groups} request={request}
