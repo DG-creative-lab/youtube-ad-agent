@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from httpx import Client, WSGITransport
+from httpx2 import Client, WSGITransport
 
 from preview.application import FIXTURE, PreviewApplication, scope_for
 from preview.build_seed import seed_database
