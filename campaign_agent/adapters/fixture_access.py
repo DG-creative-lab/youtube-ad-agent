@@ -43,7 +43,7 @@ class AuthoredProviderMetadata:
         if credential.key not in self.keys:
             raise ProviderError('credential_mismatch')
 
-    def models(self, credential):
+    def models(self, credential, *, sort=None):
         self.requests.append('models')
         return self.rows
 

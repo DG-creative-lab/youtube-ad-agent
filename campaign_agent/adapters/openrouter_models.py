@@ -1,5 +1,5 @@
 """Bounded fixed-origin OpenRouter metadata probes. No completions or key retention."""
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request
 from urllib.error import HTTPError, URLError
 from time import monotonic, time
@@ -60,8 +60,16 @@ class OpenRouterMetadata:
         if remaining is not None and (type(remaining) not in (int,float) or not __import__('math').isfinite(remaining) or remaining<0):
             raise ProviderError('credential_mismatch')
 
-    def models(self, credential):
-        rows=self._get('/api/v1/models',credential)
+    def models(self, credential, *, sort=None, tools_only=False):
+        query = {}
+        if tools_only:
+            query.update(supported_parameters="tools,tool_choice", output_modalities="text")
+        if sort is not None:
+            if sort not in {"pricing-low-to-high", "pricing-high-to-low", "most-popular", "intelligence-high-to-low"}:
+                raise ProviderError("invalid_request")
+            query["sort"] = sort
+        path = "/api/v1/models" + ("?" + urlencode(query) if query else "")
+        rows=self._get(path,credential)
         if not isinstance(rows,list) or len(rows)>MAX_MODELS:
             raise ProviderError('catalogue_unavailable')
         return rows

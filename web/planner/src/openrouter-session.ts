@@ -11,6 +11,8 @@ export type Selection = {
   max_run_cost_usd: Budget; catalogue_revision: string; privacy?: unknown; routing?: unknown;
   charging_profile_version?: string; prices?: Record<string, string>;
 };
+export type ModelSort = "available" | "pricing-low-to-high" | "pricing-high-to-low" | "most-popular" | "intelligence-high-to-low";
+export type ModelFilters = {max_input_price: string | null; max_output_price: string | null; sort: ModelSort};
 export type Catalogue = {catalogue_revision: string; observed_at: number; expires_at: number;
   models: {id: string; name: string; input_usd_per_million: string | null; output_usd_per_million: string | null;
     state: "candidate" | "eligible" | "blocked"; reason_codes: string[]}[]; next_cursor: string | null};
@@ -239,10 +241,10 @@ export class OpenRouterSession {
     this.#invalidate("disconnected", true);
     if (connection) await this.request("/api/openrouter/disconnect", {connection_id: connection, tab_id: this.tabId});
   }
-  async models(search: string, cursor: string | null = null) {
+  async models(search: string, cursor: string | null = null, filters?: ModelFilters) {
     const query = ++this.#query; const epoch = this.#snapshot.epoch;
     const result = await this.request<Catalogue>("/api/openrouter/models", {connection_id: this.#snapshot.connectionId,
-      tab_id: this.tabId, search: search.slice(0, 100), cursor}, true);
+      tab_id: this.tabId, search: search.slice(0, 100), cursor, ...(filters && {...filters, tools_only: true})}, true);
     this.assertCurrent(epoch);
     if (query !== this.#query) throw new RequestError("A newer catalogue request replaced this result.", 409, "client_context_changed");
     if (!Array.isArray(result.models) || result.models.length > 20 || typeof result.catalogue_revision !== "string" || !Number.isFinite(result.observed_at) || !Number.isFinite(result.expires_at)

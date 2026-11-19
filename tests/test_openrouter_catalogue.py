@@ -120,3 +120,74 @@ class ModelSearchTests(unittest.TestCase):
         self.assertFalse({row["id"] for row in first} & {row["id"] for row in second})
         with self.assertRaises(ProviderError):
             cache.page(entry, "different query", cursor)
+
+
+class CatalogueFilterTests(unittest.TestCase):
+    def setUp(self):
+        from campaign_agent.adapters.catalogue_cache import CatalogueCache
+        self.cache = CatalogueCache()
+        self.rows = [
+            {"id": f"fixture/model-{index:02d}", "name": f"Model {index}", "state": "candidate",
+             "supports_tools": True, "input_usd_per_million": str(index),
+             "output_usd_per_million": str(index * 2)}
+            for index in range(25)
+        ]
+        self.rows.extend([
+            {"id": "fixture/no-tools", "name": "No tools", "state": "eligible", "supports_tools": False,
+             "input_usd_per_million": "0", "output_usd_per_million": "0"},
+            {"id": "fixture/unknown", "name": "Unknown price", "state": "blocked", "supports_tools": True,
+             "input_usd_per_million": None, "output_usd_per_million": None},
+        ])
+        self.entry = {"models": list(reversed(self.rows)), "cursors": {},
+                      "provider_order": [row["id"] for row in reversed(self.rows)]}
+
+    def test_tools_and_price_caps_apply_before_global_sort_and_pagination(self):
+        first, cursor = self.cache.page(self.entry, "", None, tools_only=True, sort="pricing-low-to-high")
+        self.assertEqual([row["id"] for row in first], [f"fixture/model-{index:02d}" for index in range(20)])
+        second, end = self.cache.page(self.entry, "", cursor, tools_only=True, sort="pricing-low-to-high")
+        self.assertEqual([row["id"] for row in second],
+                         [f"fixture/model-{index:02d}" for index in range(20, 25)] + ["fixture/unknown"])
+        self.assertIsNone(end)
+        capped, _ = self.cache.page(self.entry, "", None, tools_only=True,
+                                   max_input_price="2", max_output_price="2", sort="pricing-low-to-high")
+        self.assertEqual([row["id"] for row in capped], ["fixture/model-00", "fixture/model-01"])
+        zero, _ = self.cache.page(self.entry, "", None, tools_only=True,
+                                  max_input_price="0", max_output_price="0")
+        self.assertEqual([row["id"] for row in zero], ["fixture/model-00"])
+        descending, cursor = self.cache.page(self.entry, "", None, tools_only=True, sort="pricing-high-to-low")
+        self.assertEqual(descending[0]["id"], "fixture/model-24")
+        final, _ = self.cache.page(self.entry, "", cursor, tools_only=True, sort="pricing-high-to-low")
+        self.assertEqual(final[-1]["id"], "fixture/unknown")
+
+    def test_cursor_cannot_change_filters_or_order(self):
+        _, cursor = self.cache.page(self.entry, "", None, tools_only=True, sort="pricing-low-to-high")
+        for filters in ({"tools_only": False, "sort": "pricing-low-to-high"},
+                        {"tools_only": True, "sort": "pricing-high-to-low"},
+                        {"tools_only": True, "sort": "pricing-low-to-high", "max_input_price": "20"}):
+            with self.subTest(filters=filters), self.assertRaises(ProviderError):
+                self.cache.page(self.entry, "", cursor, **filters)
+
+    def test_provider_rank_order_is_preserved_without_inventing_scores(self):
+        for sort in ("most-popular", "intelligence-high-to-low"):
+            with self.subTest(sort=sort):
+                rows, _ = self.cache.page(self.entry, "", None, tools_only=True, sort=sort)
+                self.assertEqual(rows[0]["id"], "fixture/unknown")
+                self.assertEqual(rows[1]["id"], "fixture/model-24")
+                self.assertNotIn("rating", rows[0])
+
+    def test_live_metadata_requests_openrouter_tool_filter_and_named_rank(self):
+        from urllib.parse import urlsplit, parse_qs
+        from unittest.mock import patch
+        from preview.providers import LiveMetadata
+        calls = []
+        def transport(request, *, timeout):
+            calls.append(request)
+            return io.BytesIO(b'{"data":[]}')
+        metadata = LiveMetadata()
+        metadata.transport = transport
+        metadata.models(ForegroundCredential("authored-key"), sort="intelligence-high-to-low")
+        query = parse_qs(urlsplit(calls[0].full_url).query)
+        self.assertEqual(query["supported_parameters"], ["tools,tool_choice"])
+        self.assertEqual(query["output_modalities"], ["text"])
+        self.assertEqual(query["sort"], ["intelligence-high-to-low"])
+        self.assertNotIn("authored-key", calls[0].full_url)

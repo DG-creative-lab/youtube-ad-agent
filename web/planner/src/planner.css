@@ -240,3 +240,6 @@ textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px
 @media (max-width:600px) {.openrouter-account {padding:18px;}}
 
 .provider-models button[aria-disabled="true"] {opacity:.6; cursor:wait;}
+
+.model-price-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 420px) { .model-price-filters { grid-template-columns: minmax(0, 1fr); } }

@@ -1,5 +1,6 @@
 """Bounded process-local catalogue entries and cursors."""
 from collections import OrderedDict
+from decimal import Decimal
 import secrets
 from threading import Lock
 
@@ -36,11 +37,12 @@ class CatalogueCache:
                 while len(self.entries)>16:
                     self.entries.popitem(last=False)
 
-    def page(self, entry, search, cursor):
+    def page(self, entry, search, cursor, *, tools_only=False, max_input_price=None, max_output_price=None, sort="available"):
         with self.lock:
+            signature = [search, tools_only, max_input_price, max_output_price, sort]
             offset=0
             if cursor is not None:
-                if cursor not in entry['cursors'] or entry['cursors'][cursor][0]!=search:
+                if cursor not in entry['cursors'] or entry['cursors'][cursor][0]!=signature:
                     raise ProviderError('selection_stale')
                 offset=entry['cursors'][cursor][1]
             query = search.casefold()
@@ -49,13 +51,31 @@ class CatalogueCache:
             for row in entry["models"]:
                 name = (row["id"] + " " + row["name"]).casefold()
                 compact_name = "".join(character for character in name if character.isalnum())
-                if query in name or compact_query and compact_query in compact_name:
-                    rows.append(row)
-            rows.sort(key=lambda row: (row["state"] != "eligible", row["id"]))
+                matches = query in name or compact_query and compact_query in compact_name
+                if not matches or tools_only and not row.get("supports_tools"):
+                    continue
+                if any(limit is not None and (row[field] is None or Decimal(row[field]) > Decimal(limit))
+                       for field, limit in (("input_usd_per_million", max_input_price),
+                                            ("output_usd_per_million", max_output_price))):
+                    continue
+                rows.append(row)
+            if sort in {"pricing-low-to-high", "pricing-high-to-low"}:
+                descending = sort == "pricing-high-to-low"
+                def price_order(row):
+                    values = (row["input_usd_per_million"], row["output_usd_per_million"])
+                    unknown = any(value is None for value in values)
+                    amount = sum(Decimal(value) for value in values) if not unknown else Decimal(0)
+                    return (unknown, -amount if descending else amount, row["id"])
+                rows.sort(key=price_order)
+            elif sort in {"most-popular", "intelligence-high-to-low"}:
+                ranks = {model: index for index, model in enumerate(entry.get("provider_order", []))}
+                rows.sort(key=lambda row: (ranks.get(row["id"], len(ranks)), row["id"]))
+            else:
+                rows.sort(key=lambda row: (row["state"] != "eligible", row["id"]))
             next_cursor=None
             if offset+20<len(rows):
                 next_cursor=secrets.token_hex(32)
-                entry['cursors'][next_cursor]=(search,offset+20)
+                entry['cursors'][next_cursor]=(signature,offset+20)
                 while len(entry['cursors'])>128:
                     entry['cursors'].pop(next(iter(entry['cursors'])))
             return rows[offset:offset+20],next_cursor

@@ -63,8 +63,8 @@ class LiveMetadata(OpenRouterMetadata):
     def __init__(self):
         super().__init__(transport=send)
 
-    def models(self, credential):
-        rows = super().models(credential)
+    def models(self, credential, *, sort=None):
+        rows = super().models(credential, sort=sort, tools_only=True)
         selected = []
         for row in rows:
             if row.get("id") in ROUTES and "text" in row.get("architecture", {}).get("input_modalities", []):
@@ -131,8 +131,8 @@ def sessions(path, **options):
                 with closing(sqlite3.connect(path)) as db, db:
                     db.execute("INSERT OR REPLACE INTO preview_catalogues VALUES (?,?)", (connection, json.dumps(entry)))
 
-        def page(self, entry, search, cursor):
-            rows = super().page(entry, search, cursor)
+        def page(self, entry, search, cursor, **filters):
+            rows = super().page(entry, search, cursor, **filters)
             self.finish(entry["connection"], entry)
             return rows
 

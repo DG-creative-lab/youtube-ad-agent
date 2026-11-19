@@ -103,6 +103,10 @@ def normalize(rows, profiles=(), *, now):
                 state,reasons='eligible',[]
             result.append({'id':ident,'name':name,'input_usd_per_million':amounts['prompt'],
                            'output_usd_per_million':amounts['completion'],
+                           'supports_tools': isinstance(architecture.get("input_modalities"), list)
+                               and "text" in architecture["input_modalities"]
+                               and architecture.get("output_modalities") == ["text"]
+                               and {"tools", "tool_choice"} <= set(parameters),
                            'state':state,'reason_codes':reasons})
         except ProviderError as error:
             # Unsupported identities are omitted. Unknown prices remain unavailable.
