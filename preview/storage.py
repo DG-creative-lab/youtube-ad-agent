@@ -2,12 +2,17 @@
 from contextlib import closing
 from dataclasses import dataclass
 from functools import cached_property
+from http.client import HTTPException, HTTPSConnection
+import json
 import os
 import sqlite3
+from urllib.parse import urlsplit
 import zlib
 
 MAX_SQLITE_BYTES = 4 * 1024 * 1024
 MAX_COMPRESSED_BYTES = 768 * 1024
+HEALTH_TIMEOUT_SECONDS = 2
+MAX_HEALTH_RESPONSE_BYTES = 4096
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS demo_workspaces (
     invite TEXT PRIMARY KEY,
@@ -58,9 +63,19 @@ def expand_snapshot(payload):
 
 
 class WorkspaceStore:
-    def __init__(self, connect, fixture):
+    def __init__(self, connect, fixture, *, health_probe=None):
         self.connect = connect
         self.fixture = fixture
+        self._health_probe = health_probe
+
+    def is_ready(self):
+        if self._health_probe is not None:
+            return self._health_probe()
+        try:
+            with closing(self.connect()) as db:
+                return db.execute("SELECT 1").fetchone() == (1,)
+        except (OSError, sqlite3.Error):
+            return False
 
     @cached_property
     def initialized(self):
@@ -105,6 +120,33 @@ class WorkspaceStore:
             raise WorkspaceConflict("The workspace changed. Refresh and retry.")
 
 
+def _turso_ready(url, token):
+    # The pinned SDK does not expose a timeout. Run and close the read-only
+    # Turso pipeline in one request without following redirects.
+    try:
+        target = urlsplit(url)
+        if not target.hostname:
+            return False
+        with closing(HTTPSConnection(target.hostname, target.port, timeout=HEALTH_TIMEOUT_SECONDS)) as connection:
+            connection.request(
+                "POST", target.path.rstrip("/") + "/v3/pipeline",
+                body=b'{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT 1"}},{"type":"close"}]}',
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            )
+            with connection.getresponse() as response:
+                if response.status != 200:
+                    return False
+                raw = response.read(MAX_HEALTH_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_HEALTH_RESPONSE_BYTES:
+            return False
+        results = json.loads(raw)["results"]
+        return [(item["type"], item["response"]["type"]) for item in results] == [
+            ("ok", "execute"), ("ok", "close"),
+        ]
+    except (OSError, HTTPException, ValueError, KeyError, TypeError):
+        return False
+
+
 def connected_store(fixture):
     import turso_serverless
 
@@ -114,6 +156,7 @@ def connected_store(fixture):
         raise WorkspaceUnavailable("Configure the isolated Turso database.")
     return WorkspaceStore(
         lambda: turso_serverless.connect(url, auth_token=token, isolation_level=None), fixture,
+        health_probe=lambda: _turso_ready(url, token),
     )
 
 

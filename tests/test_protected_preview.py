@@ -1,13 +1,15 @@
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import MagicMock, patch
 
 from httpx import Client, WSGITransport
 
 from preview.application import FIXTURE, PreviewApplication, scope_for
 from preview.build_seed import seed_database
-from preview.storage import WorkspaceConflict, sqlite_store
+from preview.storage import WorkspaceConflict, _turso_ready, sqlite_store
 
 
 ORIGIN = "https://protected.example"
@@ -23,8 +25,10 @@ class ProtectedPreviewTests(TestCase):
         self.invites = {scope_for(code): CLOCK + 600 for code in CODES}
         self.seed = seed_database()
 
-    def client(self, code=None):
-        application = PreviewApplication(sqlite_store(self.path, FIXTURE), self.invites, ORIGIN,
+    def client(self, code=None, *, store=None):
+        if store is None:
+            store = sqlite_store(self.path, FIXTURE)
+        application = PreviewApplication(store, self.invites, ORIGIN,
                                          self.seed, clock=lambda: CLOCK)
         client = self.enterContext(Client(transport=WSGITransport(app=application), base_url=ORIGIN,
                                           headers=HEADERS))
@@ -32,6 +36,37 @@ class ProtectedPreviewTests(TestCase):
             response = client.post("/invite", data={"code": code})
             self.assertEqual(response.status_code, 303, response.text)
         return client
+
+    def test_health_rechecks_storage_after_a_successful_request(self):
+        store = sqlite_store(self.path, FIXTURE)
+        client = self.client(CODES[0], store=store)
+        self.assertEqual(client.get("/health").status_code, 200)
+        with patch.object(store, "connect", side_effect=TimeoutError("synthetic storage failure")):
+            health = client.get("/health")
+            self.assertEqual(health.status_code, 503)
+            self.assertEqual(health.json()["storage"], "unavailable")
+            self.assertEqual(client.head("/health").status_code, 503)
+        health = client.get("/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json()["storage"], "ready")
+
+    def test_turso_health_probe_requires_a_successful_query_with_a_timeout(self):
+        close = {"type": "ok", "response": {"type": "close"}}
+        execute = {"type": "ok", "response": {"type": "execute"}}
+        error = {"type": "error", "error": {"message": "simulated query failure"}}
+        with patch("preview.storage.HTTPSConnection") as connect:
+            connection = connect.return_value
+            response = MagicMock()
+            response.__enter__.return_value = response
+            connection.getresponse.return_value = response
+            for status, result, ready in ((200, execute, True), (200, error, False), (401, error, False)):
+                with self.subTest(status=status, result=result["type"]):
+                    response.status = status
+                    response.read.return_value = json.dumps({"results": [result, close]}).encode()
+                    self.assertIs(_turso_ready("libsql://fixture.example", "test-token"), ready)
+                    connect.assert_called_with("fixture.example", None, timeout=2)
+            connection.getresponse.side_effect = TimeoutError
+            self.assertFalse(_turso_ready("libsql://fixture.example", "test-token"))
 
     def test_agent_approval_viewer_and_isolation_survive_new_gateway(self):
         anonymous = self.client()

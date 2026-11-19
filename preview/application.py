@@ -218,8 +218,9 @@ class PreviewApplication:
         if len(query) > 4096:
             raise RequestRejected(400, "Invalid query.")
         if path == "/health" and method in {"GET", "HEAD"}:
-            return payload(200, {"service": "contextual-youtube-demo", "fixture": FIXTURE,
-                                 "storage": "ready" if self.store.initialized else "unavailable"})
+            ready = self.store.is_ready()
+            return payload(200 if ready else 503, {"service": "contextual-youtube-demo", "fixture": FIXTURE,
+                                                  "storage": "ready" if ready else "unavailable"})
         if path in {"/brand/mark.svg", "/brand/tokens.css"} and method in {"GET", "HEAD"}:
             root = Path(__file__).resolve().parents[1]
             content_type = "text/css" if path.endswith("css") else "image/svg+xml"
