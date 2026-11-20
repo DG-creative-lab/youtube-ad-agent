@@ -128,6 +128,9 @@ class GuidedLearningPreviewTests(TestCase):
     def test_gate_blocks_unavailable_routes_live_credentials_and_revoked_invites(self):
         client = self.client()
         self.assertEqual(self.client(None).get("/exercise/plan/api/campaign").status_code, 401)
+        entry = self.client(None).get("/exercise/plan/")
+        self.assertEqual(entry.status_code, 303)
+        self.assertEqual(entry.headers["location"], "/invite")
         for path in ("/exercise/other/", "/exercise/plan/reset", "/exercise/plan/api/openrouter/models"):
             self.assertEqual(client.get(path).status_code, 404)
         for path in ("/api/agent/run", "/api/campaign/setup", "/api/openrouter/connect"):

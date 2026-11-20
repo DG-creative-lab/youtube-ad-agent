@@ -48,7 +48,7 @@ button {{ border: 1px solid var(--ink); background: var(--ink); color: var(--on-
 {controls}</main></html>"""
 CONTROLS = """<p><a href="/campaign">Return to the campaign</a></p>
 <details><summary>Manage this invite</summary>
-<form action="/invite/reset" method="post"><p>Reset clears this invite’s saved progress.</p>
+<form action="/invite/reset" method="post"><p>Reset clears this invite’s campaign workspace. Learning checkpoints have their own reset controls.</p>
 <label><input type="checkbox" name="confirm" value="yes" required> Reset my demo workspace</label>
 <button type="submit">Reset workspace</button></form>
 <form action="/invite/disable" method="post"><p>Disabling the invite ends access from all preview deployments.</p>
@@ -279,7 +279,8 @@ class PreviewApplication:
             cookie = f"{COOKIE}={code}; Max-Age={self.invites[invite] - now}; Path=/; Secure; HttpOnly; SameSite=Strict"
             return redirect("/", ("Set-Cookie", cookie), ("Clear-Site-Data", '"storage"'))
         if not invite:
-            if path in {"/", "/campaign", "/viewer", "/placements"} and method in {"GET", "HEAD"}:
+            if (path in {"/", "/campaign", "/viewer", "/placements"}
+                    or re.fullmatch(r"/exercise/(plan|wait|learning)(/|/campaign|/viewer)?", path)) and method in {"GET", "HEAD"}:
                 return redirect("/invite")
             raise RequestRejected(401, "Open the workspace with your invite.")
         if path.startswith("/exercise/"):
