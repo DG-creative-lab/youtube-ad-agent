@@ -148,7 +148,9 @@ class PlannerContext:
         corrections = [self.correction_for_comparison(records, package, group['creative_version'])
                        for group in package['groups']]
         return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
-                'measurement_capabilities': measurement_capabilities(),
+                **({'measurement_capabilities': measurement_capabilities()}
+                   if source.get('settings', {}).get('mode') != 'openrouter'
+                   or source['settings'].get('prompt_version') == 'campaign-planner-v9' else {}),
                 'draft_permission': source.get('draft_permission', 'none'),
                 'package_approved': self.package_review(records, draft_repo, draft['revision'])['approval'] is not None,
                 'reporting_scenario': source.get('reporting_scenario', 'balanced'),

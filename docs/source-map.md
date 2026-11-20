@@ -76,9 +76,18 @@ observations or effects. `measurement.py` exposes those definitions beside the
 event/count implementation; `performance.py` supplies an authorized read to the
 retained planner. Both `agent/planner.py` and the typed
 `application/planner_context.py` include the same definitions in campaign reads.
-The live planner includes them before its first model call, so advice does not
+The v9 live planner includes them before its first model call, so advice does not
 require an otherwise unnecessary tool round trip. Existing measurement, delivery
 and experiment commands retain their scoped observation queries and cohort rules.
+
+`planner_request_body` selects v7/v8/v9 from the saved run settings supplied by
+the adapter, independently of the server's latest default. Earlier variants keep
+their prompt/schema/context bytes and omit v9 measurement fields, including in
+campaign-read history. Both retained and typed campaign reads gate those fields
+by the saved version. Unknown or conflicting pins fail before inference; ledger
+request-hash, settings and authority checks remain unchanged. Historical authored
+requests live in `tests/fixtures/planner_prompt_versions.json`; the foreground
+HTTP tests cover paid-ledger recovery across the v8-to-v9 upgrade.
 
 ## Campaign setup and reporting contracts · #87
 

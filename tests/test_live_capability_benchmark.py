@@ -174,7 +174,7 @@ class LiveCapabilityTests(unittest.TestCase):
     def test_context_schema_uses_this_campaign_without_mutating_shared_tools(self):
         from campaign_agent.agent.planning_models import planner_request_body
         def context(ids):
-            return {'settings': {'charging_profile': 'preview-text-tools/test'},
+            return {'settings': {'charging_profile': 'preview-text-tools/test', 'prompt_version': 'campaign-planner-v9'},
                     'draft_permission': 'placements', 'campaign_contexts': ids}
         first = planner_request_body(context({'tutorial-voice': 'Tutorial narration'}), [])
         second = planner_request_body(context({'story-voice': 'Story narration'}), [])

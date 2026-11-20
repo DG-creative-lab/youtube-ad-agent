@@ -221,7 +221,7 @@ class OpenRouterReviews(OpenRouterInference):
 class OpenRouterPlanner(OpenRouterInference):
     prompt_version = 'campaign-planner-v9'
 
-    def __init__(self, models, *, request_body: Callable[[dict, list[dict]], dict], transport=None):
+    def __init__(self, models, *, request_body: Callable[[dict, list[dict], dict], dict], transport=None):
         super().__init__(models, transport=transport)
         self.request_body = request_body
 
@@ -230,7 +230,7 @@ class OpenRouterPlanner(OpenRouterInference):
         context = {**context, 'conversation': list(context.get('conversation', []))}
         visible = list(history)
         while True:
-            body = self.request_body(context, visible)
+            body = self.request_body(context, visible, settings)
             try:
                 self.encode_request(settings, body)
                 return context, body

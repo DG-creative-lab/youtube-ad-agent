@@ -9,6 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.planning_models import planner_request_body
+from campaign_agent.ports.inference import ProviderError
 
 
 MODEL = 'fixture/campaign:free'
@@ -79,6 +81,55 @@ def collect_request_identities():
 
 
 class OpenRouterRequestPolicyTests(unittest.TestCase):
+    def test_adapter_uses_saved_settings_and_v9_measurement_definition_stays_pinned(self):
+        from copy import deepcopy
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        from campaign_agent.domain.measurement import measurement_capabilities
+        fixtures = json.loads((Path(__file__).parent / 'fixtures/planner_prompt_versions.json').read_text())
+        self.assertEqual(measurement_capabilities(), fixtures['versions']['9']['context']['measurement_capabilities'])
+        fixture = fixtures['versions']['8']
+        context = deepcopy(fixture['context'])
+        settings = context.pop('settings')
+        expected = deepcopy(fixture['body'])
+        projected = json.loads(expected['messages'][1]['content'])
+        projected.pop('settings')
+        expected['messages'][1]['content'] = json.dumps(projected)
+        adapter = OpenRouterPlanner((), request_body=planner_request_body)
+        _, body = adapter.prepare_turn(context, [], settings)
+        self.assertEqual(json.dumps(body), json.dumps(expected))
+
+    def test_unsupported_or_mismatched_pins_cannot_silently_use_the_latest_prompt(self):
+        for version in ('campaign-planner-v99', None, []):
+            with self.subTest(version=version), self.assertRaises(ProviderError) as raised:
+                planner_request_body({'settings': {'charging_profile': 'preview-text-tools/test', 'prompt_version': version}}, [])
+            self.assertEqual(raised.exception.code, 'prompt_version_unsupported')
+        with self.assertRaises(ProviderError) as raised:
+            planner_request_body({'settings': {'prompt_version': 'campaign-planner-v8'}}, [],
+                                 {'mode': 'openrouter', 'prompt_version': 'campaign-planner-v9'})
+        self.assertEqual(raised.exception.code, 'operation_conflict')
+
+    def test_pinned_preview_versions_keep_their_historical_request_bytes(self):
+        fixtures = json.loads((Path(__file__).parent / 'fixtures/planner_prompt_versions.json').read_text())
+        for version, fixture in fixtures['versions'].items():
+            with self.subTest(version=version):
+                context = json.loads(json.dumps(fixture['context']))
+                expected = fixture['body']
+                if version in ('7', '8'):
+                    context['measurement_capabilities'] = {'sentinel': 'v9-only facts'}
+                if version == '7':
+                    context['campaign_contexts'] = {'future-context': {'title': 'Not in v7'}}
+                self.assertEqual(json.dumps(planner_request_body(context, [])).encode(), json.dumps(expected).encode())
+
+    def test_old_preview_history_cannot_acquire_new_measurement_fields(self):
+        fixtures = json.loads((Path(__file__).parent / 'fixtures/planner_prompt_versions.json').read_text())
+        for version in ('7', '8'):
+            with self.subTest(version=version):
+                fixture = fixtures['versions'][version]
+                history = [{'call_id': 'read-v8', 'tool': 'read_campaign', 'arguments': {},
+                            'result': {'revision': 1, 'measurement_capabilities': {'sentinel': 'v9-only facts'}}}]
+                body = planner_request_body(fixture['context'], history)
+                self.assertEqual(json.loads(body['messages'][-1]['content']), {'revision': 1})
+
     def test_request_bytes_and_receipt_identity_match_the_recorded_contract(self):
         self.assertEqual(collect_request_identities(), EXPECTED)
 

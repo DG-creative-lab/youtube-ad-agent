@@ -13,6 +13,14 @@ the definitions to real event/count behavior and check that grading criteria nev
 enter provider requests. The frozen capability corpus/rubric stay unchanged;
 future rubric calibration and another authorized live sample remain separate work.
 
+Resumption keeps the run's saved planner version. Historical v7/v8 prompts,
+schemas and context projections remain available; only v9 receives measurement
+facts in the initial context or campaign-read result. Unsupported versions stop
+before reservation/dispatch. A paid v8 ledger receipt interrupted before the
+planner receipt write recovers through the normal hash checks without a key,
+metadata request or another completion call. Authored historical wire fixtures
+and the HTTP recovery regression protect this upgrade boundary.
+
 PR #131 delivered the isolated live capability runner and human grading workflow.
 The preceding harness slice exposes
 scoped current campaign context IDs, makes classification errors actionable, and
