@@ -1,5 +1,30 @@
 # Campaign agent build plan
 
+## Current demo slice · #124 self-guided learning, 20 November 2026
+
+The protected preview offers **Explore the learning exercise** alongside the live
+workspace. Three explicitly loaded authored checkpoints cover the contextual
+placement/package decision and both playable comparisons, an empty instruction
+experiment's Bayesian wait decision, and the prepared 2/20 versus 18/20 reuse
+example. The last checkpoint uses the existing fresh-brief and finding commands
+to prepare a source-linked, unapproved wording draft. Source approvals remain
+historical; incompatible, retired or unauthorized findings cannot write.
+
+Exercise checkpoints use separate versioned snapshots per invite and phase;
+loading or resetting one never replaces the live campaign or its conversations.
+Build-time fixture generation uses the existing reviewed walkthrough through real
+application commands. Runtime exposes no outcome-injection or provider command.
+Exercise test openings are forced into the rehearsal cohort by the preview
+gateway, independent of browser arguments. Viewer state is namespaced by checkpoint.
+
+The exercise labels fictional placements, synthetic media, prepared approvals,
+authored outcomes, cohort counts, window, policy and uncertainty. The live chat
+continues to use its selected OpenRouter model. This is a campaign-scoped teaching
+journey, not project-wide learning promotion or evidence of actual campaign lift.
+See the [browser walkthrough](demo-walkthrough.md#self-guided-protected-preview--124).
+Hosted acceptance must run on the deployed reviewed revision; local browser and
+offline passes do not establish that gate or close #124.
+
 ## Current demo slice · #123 measurement context, 20 November 2026
 
 Campaign advice needs the application's measurement contract to distinguish

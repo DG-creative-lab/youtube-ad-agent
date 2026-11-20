@@ -1,5 +1,20 @@
 # Source-code map
 
+## Self-guided preview learning
+
+`web/planner/src/GuidedJourney.tsx` presents the three authored exercise checkpoints
+and reuses `BriefLearning`, `FindingEvidence` and `SnapshotDecision` for existing
+campaign learning commands. `preview/application.py` owns invite/phase isolation,
+route admission, rehearsal enforcement and snapshot persistence. `preview/build_seed.py`
+captures the existing `scripts/compare_instruction_policies.py` walkthrough's plan,
+wait and learning checkpoints at build time; `preview/stage.py` packages those
+generated snapshots. `web/viewer/index.html` namespaces browser state and API/media
+paths for the exercise without changing the ordinary viewer protocol.
+
+`tests/test_guided_learning_preview.py` covers cold-instance persistence, exact
+approval/export, media isolation, wait/seeded cohort separation, reuse authority,
+compatibility/retirement and route/provider denial through the preview gateway.
+
 The [live capability benchmark](live-capability-benchmark.md) is owned by
 `scripts/evaluate_live_capability.py` (planning, isolated preview command trials,
 private evidence and CLI) and `scripts/capability_grading.py` (frozen task contract,

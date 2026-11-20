@@ -1,4 +1,5 @@
 import {useEffect, useState} from "react";
+import {probabilityLabel} from "./evidence-format";
 
 export type ReviewSelection = {mode: "offline"; operation_id: string}
   | {mode: "openrouter"; model: string; operation_id: string};
@@ -43,7 +44,7 @@ type EvidenceDecision = {action: "unavailable"; reason: "unpinned_policy"}
     batch_cost: number;
   };
 };
-type Test = {
+export type Test = {
   id: string;
   started_at: string;
   viewer_path: string;
@@ -81,7 +82,7 @@ const percentage = new Intl.NumberFormat(undefined, {style: "percent", maximumFr
 const points = new Intl.NumberFormat(undefined, {maximumFractionDigits: 1});
 const label = (arm: string) => arm === "original" ? "Original instructions" : "Revised instructions";
 
-function SnapshotDecision({decision}: {decision: EvidenceDecision}) {
+export function SnapshotDecision({decision}: {decision: EvidenceDecision}) {
   if (decision.action === "unavailable") {
     if (decision.reason === "unpinned_policy") {
       return <p className="revision">This test started without a pinned decision policy. The saved evidence is available without a Bayesian recommendation.</p>;
@@ -105,7 +106,7 @@ function SnapshotDecision({decision}: {decision: EvidenceDecision}) {
     {decision.action === "continue_batch" && <p>Remaining participant visits in this batch: {decision.batch_remaining}. Save a fresh snapshot once the batch outcomes resolve.</p>}
     {(decision.action === "wait_batch" || (decision.action === "wait_for_evidence" && !initialSamplePending)) && <p>Save a fresh snapshot once the outstanding participant outcomes resolve.</p>}
     <p className="revision">Estimated lift over the original wording is {points.format(decision.mean_lift * 100)} percentage points.
-      The probability of exceeding {points.format(policy.minimum_lift * 100)} points is {percentage.format(decision.probability_worthwhile)}.</p>
+      The probability of exceeding {points.format(policy.minimum_lift * 100)} points is {probabilityLabel(decision.probability_worthwhile)}.</p>
     {decision.batch_status === "no_allowance" && <p className="revision">This test has no additional batch allowance.</p>}
     {decision.sample_cap !== null && decision.assigned >= decision.sample_cap && <p className="revision">This test has reached the cap of {decision.sample_cap} participant visits.</p>}
     {initialSamplePending && <p>Save a fresh snapshot once the first {(decision.sample_cap ?? 0) - (decision.batch_size ?? 0)} participant outcomes have resolved.</p>}

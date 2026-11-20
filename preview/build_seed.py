@@ -14,5 +14,16 @@ def seed_database():
         return path.read_bytes()
 
 
+def journey_databases():
+    # Build-time authored outcomes only; no fixture injection command is exposed at runtime.
+    from scripts.compare_instruction_policies import prepare_walkthrough
+    snapshots = {}
+    with TemporaryDirectory() as folder:
+        prepare_walkthrough(Path(folder) / "exercise.sqlite", checkpoint=snapshots.__setitem__)
+    return snapshots
+
+
 if __name__ == "__main__":
     Path(__file__).with_name("seed.data").write_bytes(compress_snapshot(seed_database()))
+    for phase, snapshot in journey_databases().items():
+        Path(__file__).with_name(f"journey-{phase}.data").write_bytes(compress_snapshot(snapshot))

@@ -1,5 +1,43 @@
 # Demo walkthrough
 
+## Self-guided protected preview · #124
+
+From the sidebar, choose **Explore the learning exercise**. This opens authored
+checkpoints with their own saved state in the same invite. Returning to the live
+workspace preserves its campaign, model configuration and conversations; the
+exercise does not send a model request or launch ads.
+
+1. **Context and package:** inspect the two fictional placement contexts and their
+   different comparison tasks. Approve the exact exercise package. Try both viewer
+   links, play both takes and choose one. Download the example handoff. The bundled
+   synthetic speech has a transcript/passage and the video has captions.
+2. **Why the policy waits:** load the separately prepared approved instruction-test
+   checkpoint. Compare original and revised wording using the same recordings.
+   Save the empty evidence snapshot. Inspect the cohort counts, five-minute outcome
+   window and wait decision. Rehearsal interactions cannot become participants or
+   satisfy the initial review point.
+3. **Evidence and reuse:** explicitly load **Authored outcomes: original 2/20,
+   revised 18/20**. These are build-time authored participant-protocol outcomes,
+   never observed campaign results. Inspect the source experiment, snapshot, policy,
+   estimated lift and probability. Open **Start a fresh brief**, select Video editing
+   and create it. Review **Reuse tested wording** and choose **Prepare wording
+   draft**. The saved revision has source lineage and requires a new buyer approval.
+   An Audiobook brief does not match the editing finding; retiring the finding also
+   blocks reuse.
+
+Reloading keeps each checkpoint's saved state. **Restart this checkpoint** requires
+explicit confirmation and resets only that phase to its prepared start. Other
+phases and the live workspace are unchanged. Failed reads have an explicit retry;
+provider setup and enterprise surfaces are absent from this exercise.
+
+Checkpoint loading deliberately does not pretend that earlier clicks generated the
+prepared approvals or seeded outcomes. A short live session often remains waiting:
+its own eligible participant visits need resolved outcomes and sufficient evidence.
+The Beta–Bernoulli policy updates a completion estimate and chooses an action; it
+does not train the conversation model or demonstrate real advertising lift.
+
+The older portable recording recipe below remains available for local development.
+
 11 November 2026 · [Release checkpoint](build-plan.md#release-checkpoint--11-november-2026) · [Comparison report](instruction-policy-comparison.md)
 
 ## Recording plan

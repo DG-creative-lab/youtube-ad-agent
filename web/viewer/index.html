@@ -55,6 +55,16 @@
 <script>
 "use strict";
 const el = (id) => document.getElementById(id);
+const exercisePrefix = location.pathname.match(/^\/exercise\/(plan|wait|learning)(?:\/|$)/)?.[0].replace(/\/$/, "") ?? "";
+if (exercisePrefix) {
+  const banner = document.createElement("p");
+  banner.textContent = "Authored learning exercise · Sample media. Your visits are separate from seeded participant outcomes. ";
+  const back = document.createElement("a");
+  back.href = exercisePrefix + "/";
+  back.textContent = "Return to exercise";
+  banner.append(back);
+  document.getElementById("viewer-main").prepend(banner);
+}
 const defaultCreative = "editing-voiceover-v1";
 const query = new URLSearchParams(location.search);
 const testId = query.get("test");
@@ -72,7 +82,7 @@ let sending = false;
 let queue = [];
 
 async function post(action, payload) {
-  const response = await fetch("/api/viewer/" + action, {
+  const response = await fetch(exercisePrefix + "/api/viewer/" + action, {
     method: "POST",
     headers: {"Content-Type": "application/json", "X-Viewer": "comparison"},
     body: JSON.stringify(payload),
@@ -82,14 +92,18 @@ async function post(action, payload) {
   return data;
 }
 
-function storageKey() {
+function unscopedStorageKey() {
   if (attribution) return "viewer:ad:" + attribution + (rehearsal ? ":rehearsal" : "");
   return testId ? "viewer:test:" + testId + (rehearsal ? ":rehearsal" : "")
     : "viewer:" + creative + (content ? ":" + [content, ...reviewed].join(":") : "");
 }
 
+function storageKey() {
+  return exercisePrefix + unscopedStorageKey();
+}
+
 async function participantReference() {
-  const key = "instruction-test:participant:" + testId + (rehearsal ? ":rehearsal" : "");
+  const key = exercisePrefix + "instruction-test:participant:" + testId + (rehearsal ? ":rehearsal" : "");
   function getOrCreate() {
     try {
       let participant = localStorage.getItem(key);
@@ -277,7 +291,7 @@ el("example").onchange = async () => {
       if (error.status !== 404 || creative === defaultCreative || content || testId || attribution) throw error;
       creative = defaultCreative;
       render(await openExample());
-      history.replaceState(null, "", "/viewer");
+      history.replaceState(null, "", exercisePrefix + "/viewer");
       el("status").textContent = "That comparison link is unavailable. The default example is open.";
     }
   } catch (error) {

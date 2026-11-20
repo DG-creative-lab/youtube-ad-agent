@@ -19,6 +19,7 @@ import type {InstructionReuse} from "./BriefLearning";
 import {openrouter, request, RequestError, forgetFailedOfflineRun} from "./openrouter-session";
 import type {Selection, RunAttempt} from "./openrouter-session";
 import {WorkspaceAccount} from "./WorkspaceAccount";
+import {GuidedJourney} from "./GuidedJourney";
 import "../../brand/tokens.css";
 import "./planner.css";
 
@@ -53,6 +54,7 @@ type PackageReview = {
   approval: {actor_id: string; approved_at: string} | null;
 };
 type Mode = {
+  learningExerciseAvailable?: boolean;
   previewScope?: string;
   workspace?: {actor: string; client_id: string; brand_id: string; id: string; fixture: boolean};
   live: boolean;
@@ -594,6 +596,7 @@ function App() {
           </select>
         </label>}
         <div className="rail-footer">
+          {mode?.learningExerciseAvailable && <a href="/exercise/plan/">Explore the learning exercise</a>}
           <div className="rail-environment"><span className="rail-label">{mode?.previewScope ? "Protected preview" : mode?.workspace ? "Staff access fixture" : mode?.live ? "Live catalog" : "Local workspace"}</span>
             <p>{mode?.googleAdsReporting ? "Google Ads reporting enabled. Check each report's coverage."
               : mode?.live ? "Check source labels when reviewing evidence." : mode?.previewScope ? "Activity stays in this invite." : "Authored delivery fixtures. Local viewer activity."}</p>
@@ -828,4 +831,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(location.pathname.startsWith("/exercise/") ? <GuidedJourney /> : <App />);

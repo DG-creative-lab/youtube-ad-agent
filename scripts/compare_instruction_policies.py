@@ -189,13 +189,15 @@ def compare(spec):
             "assessment_version": ASSESSMENT_VERSION, "runs": runs}
 
 
-def prepare_walkthrough(path, media_dir=DEMO_MEDIA_DIR):
+def prepare_walkthrough(path, media_dir=DEMO_MEDIA_DIR, *, checkpoint=None):
     """Prepare the reviewed learning example for both walkthrough and safety evals."""
     if path.exists():
         raise ValueError("Choose a new walkthrough database so existing state is preserved.")
     runtime = AgentRuntime(path, media_dir=media_dir)
     drafts, viewer = runtime.drafts, runtime.performance.viewer
     runtime.resume(runtime.start(DEMO_REQUEST))
+    if checkpoint:
+        checkpoint("plan", path.read_bytes())
     campaign = drafts.campaign_id
     baseline = drafts.review_package(campaign, 2)["fingerprint"]
     original = drafts.approve_package(campaign, 2, baseline)["package"]
@@ -211,6 +213,8 @@ def prepare_walkthrough(path, media_dir=DEMO_MEDIA_DIR):
     fingerprint = drafts.review_package(campaign, 3)["fingerprint"]
     drafts.approve_package(campaign, 3, fingerprint)
     test = runtime.instruction_tests.start(campaign, 3, fingerprint, allow_additional_batch=True)
+    if checkpoint:
+        checkpoint("wait", path.read_bytes())
     arrival = 1_700_000_000_000
     with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
         for arm, completions in (("original", 2), ("revised", 18)):
@@ -226,6 +230,8 @@ def prepare_walkthrough(path, media_dir=DEMO_MEDIA_DIR):
     with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 300000) * 1_000_000):
         snapshot = runtime.instruction_tests.save_evidence_snapshot(campaign, 3, fingerprint, uuid4().hex)
     finding = runtime.instruction_findings.save(campaign, 3, fingerprint, snapshot_id=snapshot["id"])
+    if checkpoint:
+        checkpoint("learning", path.read_bytes())
     fresh = drafts.start_brief(campaign, 3, fingerprint, title="Offline comparison walkthrough",
                                goal="Review tested editing instructions on a fresh brief.", context="video-editing")
     target = (campaign, fresh["revision"], drafts.review_package(campaign, fresh["revision"])["fingerprint"])

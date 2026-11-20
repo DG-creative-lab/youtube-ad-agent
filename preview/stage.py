@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "app.py", "requirements.txt", "vercel.json", "scripts/placement_review.py",
     "placement-review/index.html", "preview/seed.data", "examples/tts-performance/delivery.json",
+    "preview/journey-plan.data", "preview/journey-wait.data", "preview/journey-learning.data",
     "examples/placement-review/catalog.json", "web/planner/dist/index.html",
 }
 RUNTIME_PREFIXES = ("campaign_agent/", "web/brand/", "web/viewer/",

@@ -1,8 +1,8 @@
-import {useEffect, useState} from "react";
+import {useEffect, useId, useState} from "react";
 import type {FormEvent} from "react";
+import {probabilityLabel} from "./evidence-format";
 
 const findingPath = "/api/campaign/instruction-finding";
-const percent = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1});
 
 export type InstructionReuse = {
   finding: {
@@ -25,7 +25,7 @@ export type InstructionReuse = {
   correction: {id: string; label: string; note: string};
 };
 
-function FindingEvidence({reuse}: {reuse: InstructionReuse}) {
+export function FindingEvidence({reuse}: {reuse: InstructionReuse}) {
   const {finding, correction} = reuse;
   const {decision} = finding;
   return <>
@@ -40,7 +40,7 @@ function FindingEvidence({reuse}: {reuse: InstructionReuse}) {
       <div><dt>Buyer correction</dt><dd>{correction.label}. {correction.note}</dd></div>
     </dl>
     <p>Estimated lift is {(decision.mean_lift * 100).toFixed(1)} percentage points.
-      The probability of exceeding {decision.policy.minimum_lift * 100} points is {percent.format(decision.probability_worthwhile)}.</p>
+      The probability of exceeding {decision.policy.minimum_lift * 100} points is {probabilityLabel(decision.probability_worthwhile)}.</p>
     <details>
       <summary>Evidence source</summary>
       <p className="revision">Experiment {finding.test_id.slice(0, 8)} · Revision {finding.source_revision} · Snapshot {finding.snapshot_id.slice(0, 8)}</p>
@@ -63,6 +63,7 @@ type Props<Draft> = {
 
 export function BriefLearning<Draft>({campaignId, revision, fingerprint, reviewFinding, applied,
                                       disabled, request, onDraft, onReload}: Props<Draft>) {
+  const formId = useId();
   const [reuse, setReuse] = useState<InstructionReuse | null>();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -105,10 +106,10 @@ export function BriefLearning<Draft>({campaignId, revision, fingerprint, reviewF
   const shown = applied ?? reuse;
   return <div className="context">
     <details>
-      <summary>Start a fresh brief</summary>
-      <form className="correction-form" onSubmit={start}>
-        <label>Brief title <input name="title" required maxLength={120} /></label>
-        <label>Goal <textarea name="goal" required maxLength={500} rows={2} /></label>
+      <summary id={formId}>Start a fresh brief</summary>
+      <form className="correction-form" aria-labelledby={formId} onSubmit={start}>
+        <label htmlFor={formId + "-title"}>Brief title</label><input id={formId + "-title"} name="title" required maxLength={120} />
+        <label htmlFor={formId + "-goal"}>Goal</label><textarea id={formId + "-goal"} name="goal" required maxLength={500} rows={2} />
         <label htmlFor="fresh-brief-context">Comparison context</label>
         <select id="fresh-brief-context" name="context">
           <option value="video-editing">Video editing</option>

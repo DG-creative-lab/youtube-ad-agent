@@ -27,3 +27,4 @@ test-results/
 
 # Authored preview seed generated from the application schema.
 /preview/seed.data
+/preview/journey-*.data

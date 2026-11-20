@@ -178,13 +178,14 @@ def scoped_media(invite, value):
     return value.replace(path, path + invite[:32] + "/", 1) if value.startswith(path) else value
 
 
-def adjust_response(response, path, method, origin, invite):
+def adjust_response(response, path, method, origin, invite, *, journey_available=False):
     status, body, headers = response
     if status != 200:
         return response
     if path == "/api/mode":
         data = json.loads(body)
         data["previewScope"] = invite[:32]
+        data["learningExerciseAvailable"] = journey_available
         if data.get("openrouterAvailable"):
             data["liveInference"] = True
             data["agentPlanner"]["models"] = []
@@ -208,7 +209,8 @@ def adjust_response(response, path, method, origin, invite):
 
 
 class PreviewApplication:
-    def __init__(self, store, invites, origin, seed, *, clock=time, provider_metadata=None, provider_profiles=(), completion_transport=None):
+    def __init__(self, store, invites, origin, seed, *, clock=time, provider_metadata=None, provider_profiles=(), completion_transport=None, journey_seeds=None):
+        self.journey_seeds = journey_seeds or {}
         self.store = store
         self.invites = invites
         self.origin = origin
@@ -280,6 +282,8 @@ class PreviewApplication:
             if path in {"/", "/campaign", "/viewer", "/placements"} and method in {"GET", "HEAD"}:
                 return redirect("/invite")
             raise RequestRejected(401, "Open the workspace with your invite.")
+        if path.startswith("/exercise/"):
+            return self.exercise(environ, method, path, query, invite)
         if self.provider_metadata is None and (path.startswith("/api/openrouter/") or environ.get("HTTP_X_OPENROUTER_KEY") is not None):
             raise RequestRejected(403, "Provider connections are disabled in this preview.")
         if self.provider_metadata is not None and method == "POST" and (
@@ -353,7 +357,78 @@ class PreviewApplication:
             finally:
                 if method == "POST" and database_path.read_bytes() != saved_database:
                     checkpoint()
-        return adjust_response(result, path, method, self.origin, invite)
+        return adjust_response(result, path, method, self.origin, invite,
+                               journey_available=set(self.journey_seeds) == {"plan", "wait", "learning"})
+
+    def exercise(self, environ, method, path, query, invite):
+        """Isolated authored checkpoints; never route exercise effects to the live workspace."""
+        match = re.fullmatch(r"/exercise/(plan|wait|learning)(/.*)?", path)
+        if not match or match[1] not in self.journey_seeds:
+            raise RequestRejected(404, "Learning exercise unavailable.")
+        if self.store.load(invite).disabled:
+            raise RequestRejected(403, "This invite is disabled.")
+        if environ.get("HTTP_X_OPENROUTER_KEY") is not None:
+            raise RequestRejected(403, "Live credentials are not used in the authored exercise.")
+        phase, route = match[1], match[2] or "/"
+        prefix = "/exercise/" + phase
+        scope = scope_for("learning-exercise-v1:" + phase + ":" + invite)
+        reads = {"/", "/campaign", "/viewer", "/api/mode", "/api/campaign", "/api/campaign/package",
+                 "/api/campaign/instruction-test", "/api/campaign/instruction-finding"}
+        writes = {"/api/campaign/approve", "/api/campaign/export", "/api/campaign/brief",
+                  "/api/campaign/instruction-test/evidence", "/api/campaign/instruction-finding/apply",
+                  "/api/campaign/instruction-finding/retire", "/api/viewer/open", "/api/viewer/event",
+                  "/api/viewer/test/open"}
+        media = route.startswith("/viewer/media/")
+        if ((method in {"GET", "HEAD"} and route not in reads and not media)
+                or (method == "POST" and route not in writes | {"/reset"})):
+            raise RequestRejected(404, "This command is unavailable in the learning exercise.")
+        workspace = self.store.load(scope, include_snapshot=route.startswith("/api/"))
+        if route == "/reset":
+            if self.form(environ) != {"confirm": ["yes"]}:
+                raise RequestRejected(400, "Confirm resetting this exercise checkpoint.")
+            self.store.save(scope, workspace.version, None)
+            return redirect(prefix + "/")
+        if media:
+            first, separator, rest = route.removeprefix("/viewer/media/").partition("/")
+            if not separator or not secrets.compare_digest(first, scope[:32]):
+                raise RequestRejected(404, "Comparison media unavailable.")
+            route = "/viewer/media/" + rest
+        body = read_body(environ, MAX_BODY) if method == "POST" else b""
+        if method == "POST" and route == "/api/viewer/test/open":
+            try:
+                command = json.loads(body)
+                if not isinstance(command, dict):
+                    raise ValueError
+            except (ValueError, UnicodeError):
+                raise RequestRejected(400, "Send a valid rehearsal request.") from None
+            # Exercise interactions cannot add participants to authored policy outcomes.
+            command["rehearsal"] = True
+            body = json.dumps(command).encode()
+        original = workspace.snapshot if workspace.snapshot is not None else self.journey_seeds[phase]
+        with TemporaryDirectory(prefix="youtube-exercise-", dir="/tmp") as directory:
+            database = Path(directory) / "exercise.sqlite"
+            database.write_bytes(original)
+            try:
+                response = serve_command(route, query, method, self.origin, environ, body, database)
+            finally:
+                if method == "POST" and database.read_bytes() != original:
+                    self.store.save(scope, workspace.version, database.read_bytes())
+        response = adjust_response(response, route, method, self.origin + prefix, scope)
+        status, content, headers = response
+        if status == 200 and any(value.startswith("application/json") for name, value in headers if name == "Content-Type"):
+            data = json.loads(content)
+            if route == "/api/mode":
+                data.update(viewerOrigin=self.origin + prefix, learningExercise=phase)
+            if route.startswith("/api/viewer/"):
+                def bind(value):
+                    if isinstance(value, dict):
+                        return {key: bind(item) for key, item in value.items()}
+                    if isinstance(value, list):
+                        return [bind(item) for item in value]
+                    return prefix + value if isinstance(value, str) and value.startswith("/viewer/media/") else value
+                data = bind(data)
+            content = json.dumps(data).encode()
+        return status, content, headers
 
     @staticmethod
     def form(environ):

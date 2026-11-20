@@ -22,6 +22,8 @@ def deployment():
     seed = expand_snapshot((Path(__file__).resolve().parent / "preview" / "seed.data").read_bytes())
     from preview.providers import LiveMetadata, profiles, send
     return PreviewApplication(connected_store(FIXTURE), invites, f"https://{host}", seed,
+                              journey_seeds={phase: expand_snapshot((Path(__file__).resolve().parent / "preview" / f"journey-{phase}.data").read_bytes())
+                                             for phase in ("plan", "wait", "learning")},
                               provider_metadata=LiveMetadata(), provider_profiles=profiles(),
                               completion_transport=send)
 
