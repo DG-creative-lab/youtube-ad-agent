@@ -1,6 +1,17 @@
 # Campaign agent build plan
 
-## Current demo slice · #123 eval release gate, 19 November 2026
+## Current demo slice · #123 harness and live comparison, 20 November 2026
+
+PR #131 delivered the isolated live capability runner and human grading workflow.
+The current slice addresses the first advice trial's harness findings: expose
+scoped current campaign context IDs, make classification errors actionable, and
+guide advice to answer the request without unnecessary classification or another
+permission question. Planner prompt v8 retains the application authority checks.
+The [prepared Mini/Terra comparison](live-capability-benchmark.md#prepared-mini--terra-comparison--20-november-2026)
+uses the same frozen tasks/rubric and corrected source for both models. Offline
+regressions and bounded route qualification precede separately authorized live
+sampling; neither a public model listing nor a claimed credit allowance proves
+live compatibility, quality or paid-account entitlement.
 
 PR #130 delivered the deterministic gate and CI evidence. The next slice is the
 [live capability benchmark](live-capability-benchmark.md): 20 frozen campaign tasks,

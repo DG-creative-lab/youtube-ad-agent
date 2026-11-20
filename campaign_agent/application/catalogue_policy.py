@@ -31,14 +31,27 @@ def decimal_text(value):
     return format(value,'f')
 
 
-def pricing(value, *, text_tools=False):
+def pricing(value, *, text_tools=False, max_input_tokens=None):
     if not isinstance(value,dict) or not {'prompt','completion'}<=value.keys() or set(value)-PRICES-{'overrides'}:
         raise ProviderError('catalogue_unavailable')
     normalized={k:decimal_text(price('0' if k=='discount' and type(v) is int and v==0 else v))
                 for k,v in value.items() if k!='overrides'}
     if value.get('overrides'):
-        # A reviewed charging profile for conditional prices is a later qualification.
-        raise ProviderError('route_unqualified')
+        # Foreground requests enforce a conservative full-wire byte/token ceiling.
+        # Only known prompt-length tiers strictly beyond that ceiling are inert.
+        tiers = value['overrides']
+        if (type(max_input_tokens) is not int or max_input_tokens <= 0
+                or not isinstance(tiers, list) or len(tiers) > 100):
+            raise ProviderError('route_unqualified')
+        for tier in tiers:
+            if (not isinstance(tier, dict) or type(tier.get('min_prompt_tokens')) is not int
+                    or tier['min_prompt_tokens'] <= max_input_tokens
+                    or set(tier) - PRICES - {'min_prompt_tokens'}
+                    or not set(tier) & PRICES):
+                raise ProviderError('route_unqualified')
+            # Even an unreachable tier must have a recognized, finite price shape.
+            pricing({**{k: value[k] for k in ('prompt', 'completion')},
+                     **{k: v for k, v in tier.items() if k != 'min_prompt_tokens'}}, text_tools=text_tools)
     allowed = {'prompt','completion','request','input_cache_read','input_cache_write','input_cache_write_1h'}
     if text_tools:
         # Text requests enable neither media nor provider-side web-search tools.
@@ -154,7 +167,8 @@ def select_endpoint(model, task, endpoints, profiles, now):
             if not wanted<=set(params):
                 continue
             try:
-                rates=pricing(endpoint.get('pricing'), text_tools=profile.version.startswith('preview-text-tools/'))
+                rates=pricing(endpoint.get('pricing'), text_tools=profile.version.startswith('preview-text-tools/'),
+                              max_input_tokens=profile.max_input_tokens if profile.version.startswith('preview-text-tools/') else None)
                 ceilings={k:price(v) for k,v in {'prompt':profile.max_prompt_usd_per_million,
                     'completion':profile.max_completion_usd_per_million,'request':profile.max_request_usd}.items()}
                 if (price(rates['prompt'])*1_000_000>ceilings['prompt'] or price(rates['completion'])*1_000_000>ceilings['completion']
@@ -220,7 +234,8 @@ def select_live_endpoint(model, task, endpoints, now, *, previous=None):
                     or completion is not None and (type(completion) is not int or completion<512)):
                 raise ProviderError('route_context_unsupported')
             try:
-                rates=pricing(endpoint.get('pricing'),text_tools=True)
+                rates=pricing(endpoint.get('pricing'),text_tools=True,
+                              max_input_tokens=min(32000,context-512,prompt or 32000))
             except ProviderError:
                 raw_prices=endpoint.get('pricing')
                 reason='unsupported_pricing'

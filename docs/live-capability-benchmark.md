@@ -158,3 +158,81 @@ or mismatched data rather than excluding failed/unrun trials. Reports retain mod
 route, prompt, source and settings so changes remain visible. Deltas are descriptive;
 compare one intentional change at a time and use human review before promoting
 an improvement. There is no automatic prompt/skill rewrite, RLHF or model training.
+
+## Prepared Mini / Terra comparison · 20 November 2026
+
+Use `openai/gpt-4.1-mini` and `openai/gpt-6.1-terra` on the **same clean source
+revision**, planner prompt `campaign-planner-v8`, frozen v1 corpus and unchanged
+`campaign-quality-v1` rubric. Start with one trial each of CAP123-001 (campaign
+advice), CAP123-009 (classification advice without saving), and CAP123-011 (an
+authorized unapproved placement draft). These are development cases, not the
+evaluation-only split. The earlier Mini trial on v7 is historical diagnostic
+evidence; do not present it as a model-only comparison with Terra on v8.
+
+Prepare both plans without credentials or network calls:
+
+```sh
+.venv/bin/python scripts/evaluate_live_capability.py plan \
+  --case CAP123-001 --case CAP123-009 --case CAP123-011 --trials 1 \
+  --model openai/gpt-4.1-mini --max-run-cost-usd 0.25 --max-total-cost-usd 0.75
+.venv/bin/python scripts/evaluate_live_capability.py plan \
+  --case CAP123-001 --case CAP123-009 --case CAP123-011 --trials 1 \
+  --model openai/gpt-6.1-terra --max-run-cost-usd 0.25 --max-total-cost-usd 0.75
+```
+
+This proposes six conversation runs, $0.25 each, a $0.75 envelope per model and
+**$1.50 across both models**. It does not authorize spending. A smaller first
+check can use only CAP123-001 once per model: $0.25 each, $0.50 combined. After
+explicit account/budget approval, replace `plan` with `run-live` and give each
+model a different new `.local/live-capability/` output directory. Enter credentials
+only at the hidden prompt. Run sequentially and inspect the first model's report
+before starting the second; execution/provider/safety errors or unknown billing
+stop the sample across models as well as inside each batch. Do not chain these
+paid commands into an unconditional shell batch.
+
+Both use the existing eight-call, 512-output-token and at-most-32,000-input-token
+profile and 180-second trial deadline. Neither receives a rubric, reference
+answer, task-specific prompt patch or fixture response. Record the actual pinned
+route, settings, prompt/source revision and usage, including default reasoning
+behavior. A different provider or reasoning configuration is a visible comparison
+factor; this is a comparison of deployed configurations, not a pure causal test
+of model weights. Do not silently increase Terra's limits after a failure. Any
+changed configuration requires a separately named run and matched rerun where
+appropriate. One trial per task is a smoke sample; repeat successful configurations
+at least three times before drawing a reliability conclusion.
+
+At preparation time, standard catalogue rates are Mini $0.40 input / $1.60 output
+and Terra $1 input / $5 output per million tokens. Terra is more expensive per
+token. Its Flex route may have lower rates and different latency; live endpoint
+qualification decides the actual pinned route. Prices are observations, not a
+forecast or guaranteed invoice. [Mini](https://openrouter.ai/openai/gpt-4.1-mini)
+· [Terra](https://openrouter.ai/openai/gpt-6.1-terra).
+
+Terra's public routes advertise tool calling and prompt-length price tiers.
+The qualifier accepts a tier only when its known `min_prompt_tokens` threshold
+is strictly above the enforced input ceiling; applicable or unknown conditions
+remain blocked. Original endpoint metadata stays fingerprinted and is revalidated
+before dispatch. OpenAI documents Terra tool calling through Responses, while
+OpenRouter advertises normalized tool support. Metadata qualification is **not**
+proof of successful tool-call interoperability. Verify the first live call and
+retain any provider failure rather than treating it as a quality score or silently
+switching API, route, model or budget. [Terra API contract](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
+
+Review the saved answers using the frozen task-specific criteria and all four
+dimensions, alongside state/authority checks. In diagnosis, distinguish an invalid
+tool argument, failure to recover, an omitted requested answer, an unsupported
+claim and a provider/configuration failure. Compare reviewed success, dimension
+scores, tool rejections, actual settled cost per success and recorded duration.
+Human scores remain pending until a reviewer supplies them; proposed assistant
+scores are not human-certified grades. Do not retune the v1 rubric to reward a
+preferred model or claim campaign lift from this sample.
+
+The reported $100/month OpenAI allowance has not been verified. These commands
+authenticate to **OpenRouter**, whose billing is not established as covered by
+that allowance. Direct OpenAI credits, eligible organization/project, expiry and
+model restrictions need account verification before budgeting against them.
+Using them directly would require a separately qualified OpenAI adapter through
+the same application ports and benchmark, secure credential setup and receipt
+accounting; do not send an OpenAI key to the OpenRouter prompt. Better ad copy or
+a separate decision model can be evaluated in later scoped tasks after this
+comparison; an allowance does not itself authorize a provider migration or spend.

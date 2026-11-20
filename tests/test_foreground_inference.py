@@ -114,6 +114,64 @@ class ForegroundHttpTests(unittest.TestCase):
         self.assertEqual(result.json()['code'],'selection_stale')
         self.assertEqual(self.calls,[]);self.assertEqual(self.ledger(),[])
 
+    def test_live_price_tiers_above_enforced_input_bound_and_threshold_drift(self):
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': [
+            {'min_prompt_tokens': 272000, 'prompt': '0.001', 'completion': '0.002'}]}
+        self.selection = self.select()
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments'] = json.dumps(
+            {'topic': 'campaign_summary', 'message': 'Authored live-path reply.'})
+        completed = self.post('/api/agent/run', {'run_id': self.start()})
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(completed.json()['status'], 'answered')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.ledger()), 1)
+        run = self.start()
+        # A newly applicable tier invalidates the pin before reservation or dispatch.
+        self.meta.endpoint['pricing']['overrides'][0]['min_prompt_tokens'] = 32000
+        result = self.post('/api/agent/run', {'run_id': run})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['code'], 'selection_stale')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.ledger()), 1)
+
+    def test_live_price_tiers_preserve_full_wire_input_bound(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': [
+            {'min_prompt_tokens': 272000, 'prompt': '1'}]}
+        self.selection = self.select()
+        run = self.start()
+        with patch.object(OpenRouterPlanner, 'encode_request', return_value=b'x' * 32001):
+            result = self.post('/api/agent/run', {'run_id': run})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['code'], 'route_unqualified')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ledger(), [])
+
+    def test_applicable_or_unknown_price_tiers_cannot_be_selected(self):
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        connection = self.selection['connection_id']
+        catalogue = self.post('/api/openrouter/models', dict(connection_id=connection, tab_id=self.tab, search='', cursor=None)).json()
+        for tiers in ([{'min_prompt_tokens': 32000, 'prompt': '1'}],
+                      [{'min_prompt_tokens': 31999, 'completion': '1'}],
+                      [{'prompt': '1'}], [{'min_prompt_tokens': True, 'prompt': '1'}],
+                      [{'min_prompt_tokens': 272000, 'unknown_fee': '1'}],
+                      [{'min_prompt_tokens': 272000, 'prompt': 'NaN'}],
+                      {'min_prompt_tokens': 272000, 'prompt': '1'}):
+            with self.subTest(tiers=tiers):
+                self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': tiers}
+                response = self.post('/api/openrouter/select', dict(operation_id=uuid4().hex, connection_id=connection,
+                    tab_id=self.tab, model_id='fixture/tool-model', catalogue_revision=catalogue['catalogue_revision'],
+                    profile='planner', max_run_cost_usd='0'))
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(response.json()['code'], 'route_conditional_pricing')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ledger(), [])
+
     def test_cache_write_cost_is_reserved_and_zero_budget_cannot_select_it(self):
         self.dynamic_routes()
         rates={'prompt':'0','completion':'0','input_cache_write':'0.000001','input_cache_read':'0.0000001'}

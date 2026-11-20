@@ -105,6 +105,59 @@ class LiveCapabilityTests(unittest.TestCase):
         self.assertEqual(result['automated']['hard_failures'], [])
         self.assertTrue(all(row['source_reference'].startswith('authored:') for row in result['evidence']['after']['placements']))
 
+    def test_live_context_contract_and_correctable_classification_error(self):
+        transport = Transport([
+            ('inspect_catalog', {}),
+            ('classify_catalog', {'assignments': [{'id': 'EVAL0000001', 'context': 'video_editing'}]}),
+            ('classify_catalog', {'assignments': [{'id': 'EVAL0000001', 'context': 'video-editing'}]}),
+            ('save_placement_draft', {'video_ids': ['EVAL0000001']})])
+        result = self.trial('CAP123-011', transport)
+        first = transport.wires[0]
+        context = json.loads(first['messages'][1]['content'])
+        self.assertEqual(set(context['campaign_contexts']), {'video-editing', 'audiobook'})
+        tools = {tool['function']['name']: tool['function'] for tool in first['tools']}
+        enum = tools['classify_catalog']['parameters']['properties']['assignments']['items']['properties']['context']['enum']
+        self.assertEqual(set(enum), {'video-editing', 'audiobook', 'review'})
+        error = next(json.loads(message['content']) for message in transport.wires[3]['messages']
+                     if message['role'] == 'tool' and 'error' in json.loads(message['content']))
+        self.assertEqual(error['code'], 'invalid_classification')
+        self.assertEqual(set(error['allowed_contexts']), set(enum))
+        self.assertIn('EVAL0000001', error['inspected_video_ids'])
+        self.assertNotIn('video_editing', json.dumps(error))
+        self.assertEqual(result['automated']['placement_ids'], ['EVAL0000001'])
+        self.assertEqual(result['automated']['after_revision'], 2)
+        self.assertEqual(result['automated']['hard_failures'], [])
+
+    def test_malformed_or_uninspected_classification_never_authorizes_a_save(self):
+        for assignments in ([{'id': 'EVAL0000001', 'context': []}],
+                            [{'id': 'FOREIGN0001', 'context': 'video-editing'}]):
+            with self.subTest(assignments=assignments):
+                transport = Transport([
+                    ('classify_catalog', {'assignments': assignments}),
+                    ('save_placement_draft', {'video_ids': ['EVAL0000001']}),
+                    ('respond', {'topic': 'capabilities', 'message': 'No draft was saved.'})])
+                result = self.trial('CAP123-011', transport)
+                tool_messages = [json.loads(m['content']) for m in transport.wires[-1]['messages'] if m['role'] == 'tool']
+                self.assertEqual(tool_messages[0]['code'], 'invalid_classification')
+                self.assertEqual(tool_messages[0]['inspected_video_ids'], [])
+                self.assertIn('error', tool_messages[1])
+                self.assertEqual(result['evidence']['after']['placements'], [])
+                self.assertEqual(result['automated']['after_revision'], 1)
+
+    def test_context_schema_uses_this_campaign_without_mutating_shared_tools(self):
+        from campaign_agent.agent.planning_models import planner_request_body
+        def context(ids):
+            return {'settings': {'charging_profile': 'preview-text-tools/test'},
+                    'draft_permission': 'placements', 'campaign_contexts': ids}
+        first = planner_request_body(context({'tutorial-voice': 'Tutorial narration'}), [])
+        second = planner_request_body(context({'story-voice': 'Story narration'}), [])
+        for body, expected, other in ((first, 'tutorial-voice', 'story-voice'), (second, 'story-voice', 'tutorial-voice')):
+            tools = {tool['function']['name']: tool['function'] for tool in body['tools']}
+            self.assertEqual(tools['classify_catalog']['parameters']['properties']['assignments']['items']['properties']['context']['enum'],
+                             [expected, 'review'])
+            self.assertEqual(tools['save_placement_draft']['parameters']['properties']['contexts']['items']['enum'], [expected])
+            self.assertNotIn(other, json.dumps(body))
+
     def test_followup_keeps_real_conversation_and_propagates_earlier_dialogue(self):
         transport = Transport()
         result = self.trial('CAP123-018', transport)

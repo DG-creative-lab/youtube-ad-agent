@@ -174,8 +174,12 @@ class PlacementAgent:
         source = json.loads(SQLitePlannerStore(db).job_snapshot_row(run_id)[0])
         if self.conversations.session(SQLitePlannerStore(db).conversations, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
-        if self.drafts._read(db)['revision'] != source['revision']:
+        current = self.drafts._read(db)
+        if current['revision'] != source['revision']:
             raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            # Application-owned vocabulary, scoped and checked against the run's revision.
+            source['campaign_contexts'] = current['brief']['contexts']
         return source
 
     def _history(self, records: PlannerHistoryReader, run_id):
