@@ -21,6 +21,12 @@ planner receipt write recovers through the normal hash checks without a key,
 metadata request or another completion call. Authored historical wire fixtures
 and the HTTP recovery regression protect this upgrade boundary.
 
+Non-foreground OpenRouter planner admission also accepts supported v7/v8 pins
+under the current model, limit, credential and browser checks. The availability
+comparison does not rewrite saved settings; rendered requests and receipts retain
+the old pin. The native planner regression pauses a v8 run after its first tool,
+reopens it with the v9 adapter default and verifies the next inference completes.
+
 PR #131 delivered the isolated live capability runner and human grading workflow.
 The preceding harness slice exposes
 scoped current campaign context IDs, makes classification errors actionable, and

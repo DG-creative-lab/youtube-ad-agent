@@ -225,6 +225,15 @@ class OpenRouterPlanner(OpenRouterInference):
         super().__init__(models, transport=transport)
         self.request_body = request_body
 
+    def require_available(self, settings, credential=None):
+        # Admit supported legacy pins against the same current model/limit/key
+        # checks. Only this comparison uses the default; rendering and receipts
+        # keep the original, unmodified saved settings.
+        admitted = settings
+        if not settings.get('foreground') and settings.get('prompt_version') in ('campaign-planner-v7', 'campaign-planner-v8'):
+            admitted = {**settings, 'prompt_version': self.prompt_version}
+        return super().require_available(admitted, credential)
+
     def prepare_turn(self, context, history, settings):
         """Fit the actual wire request; omit complete oldest messages or tool pairs, never the new request."""
         context = {**context, 'conversation': list(context.get('conversation', []))}
