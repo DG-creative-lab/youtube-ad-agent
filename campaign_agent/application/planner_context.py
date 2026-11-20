@@ -4,6 +4,7 @@ import json
 from urllib.parse import urlencode
 
 from campaign_agent.domain.fingerprints import package_fingerprint
+from campaign_agent.domain.measurement import measurement_capabilities
 from campaign_agent.ports.drafts import DraftRepository
 from campaign_agent.ports.planner_context import ComparisonMedia, PlannerContextRepository
 
@@ -147,6 +148,7 @@ class PlannerContext:
         corrections = [self.correction_for_comparison(records, package, group['creative_version'])
                        for group in package['groups']]
         return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
+                'measurement_capabilities': measurement_capabilities(),
                 'draft_permission': source.get('draft_permission', 'none'),
                 'package_approved': self.package_review(records, draft_repo, draft['revision'])['approval'] is not None,
                 'reporting_scenario': source.get('reporting_scenario', 'balanced'),

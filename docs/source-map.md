@@ -70,6 +70,16 @@ which encodes the final request, fits the byte limit and parses response receipt
 schema for structured instruction requests. Existing commands still decide whether
 to admit inference and accept its results. The composition root supplies the native providers to application commands.
 
+`domain/measurement.py:measurement_capabilities` describes existing owned-viewer
+events, completion definitions, metric fields and attribution limitations without
+observations or effects. `measurement.py` exposes those definitions beside the
+event/count implementation; `performance.py` supplies an authorized read to the
+retained planner. Both `agent/planner.py` and the typed
+`application/planner_context.py` include the same definitions in campaign reads.
+The live planner includes them before its first model call, so advice does not
+require an otherwise unnecessary tool round trip. Existing measurement, delivery
+and experiment commands retain their scoped observation queries and cohort rules.
+
 ## Campaign setup and reporting contracts · #87
 
 `ports/campaign_effects.py` owns the setup provider, delivery binding and reporting

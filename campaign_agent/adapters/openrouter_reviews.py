@@ -219,7 +219,7 @@ class OpenRouterReviews(OpenRouterInference):
 
 
 class OpenRouterPlanner(OpenRouterInference):
-    prompt_version = 'campaign-planner-v8'
+    prompt_version = 'campaign-planner-v9'
 
     def __init__(self, models, *, request_body: Callable[[dict, list[dict]], dict], transport=None):
         super().__init__(models, transport=transport)

@@ -236,3 +236,31 @@ the same application ports and benchmark, secure credential setup and receipt
 accounting; do not send an OpenAI key to the OpenRouter prompt. Better ad copy or
 a separate decision model can be evaluated in later scoped tasks after this
 comparison; an allowance does not itself authorize a provider migration or spend.
+
+## Measurement context follow-up · planner v9
+
+The product supplies `measurement_capabilities` independently of this benchmark:
+the first live planner request and `read_campaign` contain the same versioned
+instrumentation definitions. They cover the viewer's start/finish/choice completion
+rule, one completion per visit/example, completions divided by eligible arrival
+visits, no rate for an empty denominator, and content/creative attribution. Local
+review, verified ad-link and experiment cohorts remain distinct. Visits are not
+unique people or ad clicks. The facts distinguish unavailable publisher analytics
+and sign-up tracking from delivery metrics that require separately verified report
+evidence. They contain no observed counts, campaign results or grading criteria.
+
+The logical definitions belong to `domain/measurement.py` and are checked against
+the real viewer event/count commands. Retained and typed campaign reads share
+them. No fixture answer, task-ID branch, expected grade or benchmark-specific
+instruction is added to the agent. Free-form recommendations are still model
+output; offline transport tests establish context delivery and containment, not
+that a real model will choose an appropriate metric.
+
+The earlier v8 advice pair remains private historical evidence. Any follow-up
+comparison uses the same v9 source commit and unchanged tasks/rubric for both
+models, fresh private directories and a separately authorized budget. Retain the
+original v8 packets; do not rename or overwrite them as v9 results. Do not change
+the frozen v1 pass rule to retroactively improve or worsen a model's result.
+Domain review may propose a future version with a mandatory supported-metric
+criterion; that calibration is distinct from this product-context fix. A passing
+advice sample does not qualify catalog classification or saving a draft.

@@ -70,6 +70,7 @@
     "campaign_agent/domain/instruction_policy.py": "domain",
     "campaign_agent/domain/instruction_requests.py": "domain",
     "campaign_agent/domain/instructions.py": "domain",
+    "campaign_agent/domain/measurement.py": "domain",
     "campaign_agent/domain/performance.py": "domain",
     "campaign_agent/domain/placements.py": "domain",
     "campaign_agent/domain/scope.py": "domain",

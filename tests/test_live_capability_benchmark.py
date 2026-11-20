@@ -93,6 +93,33 @@ class LiveCapabilityTests(unittest.TestCase):
         self.assertEqual(len(requests[0]['request_sha256']), 64)
         self.assertNotIn('Authorization', json.dumps(requests))
 
+    def test_measurement_definitions_reach_first_advice_call_and_campaign_read_without_grading_data(self):
+        for calls in ([('respond', {'topic': 'capabilities', 'message': 'Authored advice, not a quality reference.'})],
+                      [('read_campaign', {}), ('respond', {'topic': 'campaign_summary', 'message': 'Authored advice.'})]):
+            with self.subTest(tools=[name for name, _ in calls]):
+                transport = Transport(calls)
+                result = self.trial('CAP123-001', transport)
+                context = json.loads(transport.wires[0]['messages'][1]['content'])
+                facts = context['measurement_capabilities']
+                self.assertEqual(facts['kind'], 'instrumentation_definitions_not_results')
+                self.assertEqual(facts['metrics']['completion_rate']['numerator'], 'completions')
+                self.assertEqual(facts['metrics']['completion_rate']['denominator'], 'arrivals')
+                self.assertIsNone(facts['metrics']['completion_rate']['zero_denominator_result'])
+                self.assertEqual(set(facts['not_measured_by_viewer']),
+                    {'publisher_video_watch_time', 'publisher_video_likes', 'unique_ad_clicks', 'trial_signups'})
+                self.assertTrue(facts['completion']['all_takes_finished_before_choice'])
+                self.assertEqual(facts['completion']['deduplicate_by'], ['visit_id', 'example_ref'])
+                self.assertNotIn('observations', facts)
+                self.assertNotIn('campaign-quality-v1', json.dumps(transport.wires))
+                for task in self.corpus['tasks']:
+                    for criterion in task['criteria']:
+                        self.assertNotIn(criterion, json.dumps(transport.wires))
+                if calls[0][0] == 'read_campaign':
+                    read = next(step['result'] for step in result['evidence']['runs'][0]['steps'] if step['tool'] == 'read_campaign')
+                    self.assertEqual(read['measurement_capabilities'], facts)
+                self.assertEqual(result['automated']['status'], 'pass')
+                self.assertEqual(result['automated']['after_revision'], 1)
+
     def test_granted_placement_task_saves_exact_sourced_unapproved_draft(self):
         transport = Transport([
             ('inspect_catalog', {}),

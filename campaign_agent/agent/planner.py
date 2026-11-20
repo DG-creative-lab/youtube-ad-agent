@@ -180,6 +180,7 @@ class PlacementAgent:
         if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
             # Application-owned vocabulary, scoped and checked against the run's revision.
             source['campaign_contexts'] = current['brief']['contexts']
+            source['measurement_capabilities'] = self.owner.performance.measurement_capabilities()
         return source
 
     def _history(self, records: PlannerHistoryReader, run_id):
@@ -442,6 +443,7 @@ class PlacementAgent:
             corrections = [self.owner.performance.correction_for_comparison(db, package, group['creative_version'])
                            for group in package['groups']]
             return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
+                    'measurement_capabilities': self.owner.performance.measurement_capabilities(),
                     'draft_permission': source.get('draft_permission', 'none'),
                     'package_approved': self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None,
                     'reporting_scenario': source.get('reporting_scenario', 'balanced'),

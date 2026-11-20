@@ -1,11 +1,22 @@
 # Campaign agent build plan
 
-## Current demo slice · #123 harness and live comparison, 20 November 2026
+## Current demo slice · #123 measurement context, 20 November 2026
+
+Campaign advice needs the application's measurement contract to distinguish
+existing viewer outcomes from proposed tracking integrations. The current slice
+supplies versioned measurement definitions in the first live planner context and
+both retained and typed `read_campaign` results. It describes comparison completion,
+the arrival denominator, content/cohort attribution and unsupported viewer analytics
+without querying visits or claiming observed results. Prompt v9 guides use of
+those facts; existing commands still own report reads and authority. Tests bind
+the definitions to real event/count behavior and check that grading criteria never
+enter provider requests. The frozen capability corpus/rubric stay unchanged;
+future rubric calibration and another authorized live sample remain separate work.
 
 PR #131 delivered the isolated live capability runner and human grading workflow.
-The current slice addresses the first advice trial's harness findings: expose
-scoped current campaign context IDs, make classification errors actionable, and
-guide advice to answer the request without unnecessary classification or another
+The preceding harness slice exposes
+scoped current campaign context IDs, makes classification errors actionable, and
+guides advice to answer the request without unnecessary classification or another
 permission question. Planner prompt v8 retains the application authority checks.
 The [prepared Mini/Terra comparison](live-capability-benchmark.md#prepared-mini--terra-comparison--20-november-2026)
 uses the same frozen tasks/rubric and corrected source for both models. Offline

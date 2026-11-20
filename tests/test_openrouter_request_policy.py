@@ -83,12 +83,13 @@ class OpenRouterRequestPolicyTests(unittest.TestCase):
         self.assertEqual(collect_request_identities(), EXPECTED)
 
 
-# Structured requests retain the c1f92b2 baseline. Only the planner pair changes
-# for the intentional v8 advice/tool-contract prompt and provenance, 20 Nov 2026.
+# Structured requests retain the c1f92b2 baseline; the legacy planner wire keeps
+# its v8 bytes. Only planner receipt provenance changes to v9 on 20 Nov 2026;
+# measurement context/prompt additions are on the live foreground request path.
 EXPECTED = [
     ('836b9e25bcd6b6b5042b7878d5333408288f2821b7f905467abc0c41aa76798a',
      'https://openrouter.ai/api/v1/chat/completions', 30,
-     '498ffee54bb39aebde0d88ddf24315c822a88117cf755fd9c55ff0274d344575'),
+     'e403a0197fb05b840c50c854c112be003b0409e62485b347b79146f63ae24900'),
     ('50fea33860a938d5d3b390f1d23524f3636a56df19792ec745f927d9c282d876',
      'https://openrouter.ai/api/v1/chat/completions', 30,
      'b6cc107b606c0f785ec431fb1a0e6107330ee9e6c8714ca32106e76bfa1c2077'),
