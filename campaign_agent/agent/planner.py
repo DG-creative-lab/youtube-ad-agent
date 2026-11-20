@@ -174,8 +174,19 @@ class PlacementAgent:
         source = json.loads(SQLitePlannerStore(db).job_snapshot_row(run_id)[0])
         if self.conversations.session(SQLitePlannerStore(db).conversations, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
-        if self.drafts._read(db)['revision'] != source['revision']:
+        current = self.drafts._read(db)
+        if current['revision'] != source['revision']:
             raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            # Application-owned vocabulary, scoped and checked against the run's revision.
+            if source['settings'].get('prompt_version') in ('campaign-planner-v8', 'campaign-planner-v9'):
+                source['campaign_contexts'] = current['brief']['contexts']
+            else:
+                source.pop('campaign_contexts', None)
+            if source['settings'].get('prompt_version') == 'campaign-planner-v9':
+                source['measurement_capabilities'] = self.owner.performance.measurement_capabilities()
+            else:
+                source.pop('measurement_capabilities', None)
         return source
 
     def _history(self, records: PlannerHistoryReader, run_id):
@@ -438,6 +449,9 @@ class PlacementAgent:
             corrections = [self.owner.performance.correction_for_comparison(db, package, group['creative_version'])
                            for group in package['groups']]
             return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
+                    **({'measurement_capabilities': self.owner.performance.measurement_capabilities()}
+                       if source.get('settings', {}).get('mode') != 'openrouter'
+                       or source['settings'].get('prompt_version') == 'campaign-planner-v9' else {}),
                     'draft_permission': source.get('draft_permission', 'none'),
                     'package_approved': self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None,
                     'reporting_scenario': source.get('reporting_scenario', 'balanced'),

@@ -88,6 +88,11 @@ class CampaignPerformance:
         self.viewer = viewer
         self.reporting, self.storage = reporting, storage
 
+    def measurement_capabilities(self):
+        """Return the viewer owner's definitions, not an unscoped activity query."""
+        self.drafts.require('youtube:campaign.read')
+        return self.viewer.capabilities()
+
     def _latest_correction(self, records: CorrectionReader, evidence, package):
         proposal = evidence["proposal"]
         if proposal["kind"] != "comparison_test":

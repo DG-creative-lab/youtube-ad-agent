@@ -4,6 +4,7 @@ import re
 
 from .creatives import EXAMPLES
 from .domain.errors import PackageConflict
+from .domain.measurement import measurement_capabilities
 from .handoff import package_fingerprint
 from .ports.viewer_storage import ViewerReader, ViewerStorage, ViewerWriter
 
@@ -19,6 +20,11 @@ class ViewerMeasurement:
         self._clock_ms, self._new_visit_id = clock_ms, new_visit_id
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
+
+    @staticmethod
+    def capabilities():
+        """Describe existing instrumentation without reading visits or claiming traffic."""
+        return measurement_capabilities()
 
     def resolve(self, creative_ref, example_ref=None):
         origin = self.links.get(creative_ref)

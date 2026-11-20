@@ -14,6 +14,28 @@ from starlette.testclient import TestClient
 from campaign_agent.adapters.fixture_access import offline_fixture
 
 
+def historical_v8_body(context, history, settings=None):
+    """Independent pre-upgrade renderer from an authored e463931 wire fixture."""
+    fixture = json.loads((Path(__file__).parent / 'fixtures/planner_prompt_versions.json').read_text())
+    body = deepcopy(fixture['versions']['8']['body'])
+    excluded = set(fixture['internal_context_fields'])
+    def project(value):
+        if isinstance(value, dict):
+            return {key: project(item) for key, item in value.items() if key not in excluded}
+        if isinstance(value, list):
+            return [project(item) for item in value]
+        return value
+    body['messages'][1]['content'] = json.dumps(project(context))
+    body['tools'] = [item for item in body['tools'] if item['function']['name'] != 'save_placement_draft'
+                     or context.get('draft_permission') == 'placements']
+    for step in history:
+        body['messages'].extend([
+            {'role': 'assistant', 'content': None, 'tool_calls': [{'id': step['call_id'], 'type': 'function',
+                'function': {'name': step['tool'], 'arguments': json.dumps(step['arguments'])}}]},
+            {'role': 'tool', 'tool_call_id': step['call_id'], 'content': json.dumps(step['result'])}])
+    return body
+
+
 class ForegroundHttpTests(unittest.TestCase):
     def setUp(self):
         self.path=Path(self.enterContext(TemporaryDirectory()))/'product.sqlite'
@@ -113,6 +135,64 @@ class ForegroundHttpTests(unittest.TestCase):
         self.assertEqual(result.status_code,409,result.text)
         self.assertEqual(result.json()['code'],'selection_stale')
         self.assertEqual(self.calls,[]);self.assertEqual(self.ledger(),[])
+
+    def test_live_price_tiers_above_enforced_input_bound_and_threshold_drift(self):
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': [
+            {'min_prompt_tokens': 272000, 'prompt': '0.001', 'completion': '0.002'}]}
+        self.selection = self.select()
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments'] = json.dumps(
+            {'topic': 'campaign_summary', 'message': 'Authored live-path reply.'})
+        completed = self.post('/api/agent/run', {'run_id': self.start()})
+        self.assertEqual(completed.status_code, 200, completed.text)
+        self.assertEqual(completed.json()['status'], 'answered')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.ledger()), 1)
+        run = self.start()
+        # A newly applicable tier invalidates the pin before reservation or dispatch.
+        self.meta.endpoint['pricing']['overrides'][0]['min_prompt_tokens'] = 32000
+        result = self.post('/api/agent/run', {'run_id': run})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['code'], 'selection_stale')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.ledger()), 1)
+
+    def test_live_price_tiers_preserve_full_wire_input_bound(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': [
+            {'min_prompt_tokens': 272000, 'prompt': '1'}]}
+        self.selection = self.select()
+        run = self.start()
+        with patch.object(OpenRouterPlanner, 'encode_request', return_value=b'x' * 32001):
+            result = self.post('/api/agent/run', {'run_id': run})
+        self.assertEqual(result.status_code, 409, result.text)
+        self.assertEqual(result.json()['code'], 'route_unqualified')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ledger(), [])
+
+    def test_applicable_or_unknown_price_tiers_cannot_be_selected(self):
+        self.dynamic_routes()
+        self.meta.endpoint['context_length'] = 64000
+        connection = self.selection['connection_id']
+        catalogue = self.post('/api/openrouter/models', dict(connection_id=connection, tab_id=self.tab, search='', cursor=None)).json()
+        for tiers in ([{'min_prompt_tokens': 32000, 'prompt': '1'}],
+                      [{'min_prompt_tokens': 31999, 'completion': '1'}],
+                      [{'prompt': '1'}], [{'min_prompt_tokens': True, 'prompt': '1'}],
+                      [{'min_prompt_tokens': 272000, 'unknown_fee': '1'}],
+                      [{'min_prompt_tokens': 272000, 'prompt': 'NaN'}],
+                      {'min_prompt_tokens': 272000, 'prompt': '1'}):
+            with self.subTest(tiers=tiers):
+                self.meta.endpoint['pricing'] = {'prompt': '0', 'completion': '0', 'overrides': tiers}
+                response = self.post('/api/openrouter/select', dict(operation_id=uuid4().hex, connection_id=connection,
+                    tab_id=self.tab, model_id='fixture/tool-model', catalogue_revision=catalogue['catalogue_revision'],
+                    profile='planner', max_run_cost_usd='0'))
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(response.json()['code'], 'route_conditional_pricing')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ledger(), [])
 
     def test_cache_write_cost_is_reserved_and_zero_budget_cannot_select_it(self):
         self.dynamic_routes()
@@ -366,6 +446,75 @@ class ForegroundHttpTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         self.assertEqual(response.json()['status'],'answered')
         self.assertEqual(self.meta.requests,[]);self.assertEqual(len(self.calls),1)
+
+    def test_v8_upgrade_recovers_paid_ledger_receipt_without_redispatch(self):
+        from campaign_agent.agent.planner import PlacementAgent
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        from campaign_agent.adapters.sqlite_planner import SQLitePlannerLifecycleStorage
+        self.dynamic_routes()
+        rates = {'prompt': '0.000001', 'completion': '0.000002'}
+        self.meta.endpoint['pricing'] = rates
+        self.meta.rows[0]['pricing'] = rates
+        self.selection = self.select(budget='0.25')
+        self.reply['usage']['cost'] = 0.00014
+        self.reply['choices'][0]['message']['tool_calls'][0]['function']['arguments'] = json.dumps(
+            {'topic': 'campaign_summary', 'message': 'Authored answer paid for on v8.'})
+        current_context = PlacementAgent._context
+        def pre_upgrade_context(owner, db, run_id):
+            source = current_context(owner, db, run_id)
+            source.pop('measurement_capabilities', None)
+            return source
+        # The provider receives genuine v8 bytes; it durably bills and returns a
+        # receipt, then the separately persisted planner receipt fails to commit.
+        with patch.object(OpenRouterPlanner, 'prompt_version', 'campaign-planner-v8'), \
+             patch('campaign_agent.bootstrap.runtime.planner_request_body', historical_v8_body), \
+             patch.object(PlacementAgent, '_context', pre_upgrade_context):
+            run = self.start()
+            with patch.object(SQLitePlannerLifecycleStorage, 'receive_turn', side_effect=sqlite3.OperationalError('authored interrupted planner receipt')):
+                self.assertNotEqual(self.post('/api/agent/run', {'run_id': run}).status_code, 200)
+        before = self.ledger()
+        self.assertEqual(before[0][:4], ('settled', before[0][1], '0.00014', 0))
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute('SELECT state,receipt FROM planner_turns WHERE run_id=?', (run,)).fetchone(), ('requested', None))
+        self.assertEqual(len(self.calls), 1)
+        self.meta.requests.clear()
+        # Fresh runtime/adapter now uses v9 code. No key, metadata or paid call
+        # may be needed to recover the original hash-bound v8 response.
+        response = self.post('/api/agent/run', {'run_id': run}, key=False)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['status'], 'answered')
+        self.assertEqual(response.json()['result']['message'], 'Authored answer paid for on v8.')
+        self.assertEqual(response.json()['planner']['settings']['prompt_version'], 'campaign-planner-v8')
+        self.assertEqual(self.ledger(), before)
+        self.assertEqual(self.meta.requests, [])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_pinned_version_controls_first_context_and_campaign_read(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        self.dynamic_routes()
+        self.selection = self.select()
+        self.reply['choices'][0]['message']['tool_calls'][0]['function'] = {'name': 'read_campaign', 'arguments': '{}'}
+        for version in ('7', '8', '9'):
+            with self.subTest(version=version):
+                with patch.object(OpenRouterPlanner, 'prompt_version', 'campaign-planner-v' + version):
+                    run = self.start()
+                response = self.post('/api/agent/run', {'run_id': run})
+                self.assertEqual(response.status_code, 200, response.text)
+                context = json.loads(json.loads(self.calls[-1].data)['messages'][1]['content'])
+                read = response.json()['steps'][0]['result']
+                self.assertEqual('measurement_capabilities' in context, version == '9')
+                self.assertEqual('measurement_capabilities' in read, version == '9')
+                self.assertEqual('campaign_contexts' in context, version != '7')
+
+    def test_unsupported_pinned_prompt_stops_before_reservation_or_completion(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        with patch.object(OpenRouterPlanner, 'prompt_version', 'campaign-planner-v99'):
+            run = self.start()
+        response = self.post('/api/agent/run', {'run_id': run})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()['code'], 'prompt_version_unsupported')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.ledger(), [])
 
     def test_revocation_and_supersession_after_dispatch_keep_cost_but_block_domain_effect(self):
         for change in ('authority','supersession','connection'):

@@ -99,6 +99,63 @@ class PlacementPlannerTests(unittest.TestCase):
                 'tool_calls': [{'id': uuid4().hex, 'type': 'function', 'function': {
                     'name': tool, 'arguments': json.dumps(arguments or {})}}]}}]}).encode())
 
+    def test_nonforeground_v8_run_resumes_after_default_upgrades_to_v9(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        wires = []
+        def transport(request, *, timeout):
+            wires.append(json.loads(request.data))
+            return (self.reply('read_campaign') if len(wires) == 1 else
+                    self.reply('respond', {'topic': 'campaign_summary'}))
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'authored-key'}):
+            with patch.object(OpenRouterPlanner, 'prompt_version', 'campaign-planner-v8'):
+                old = self.reopen(main_models=[MODEL], main_transport=transport)
+                run = old.planner.start('Summarise the saved campaign.', MODEL, self.session,
+                                        uuid4().hex, self.catalog)
+                first = old.resume(run, max_steps=1)
+                self.assertEqual(first['status'], 'running')
+                self.assertEqual(len(wires), 1)
+            # Reconstruct the native runtime with the upgraded v9 adapter default.
+            reopened = self.reopen(main_models=[MODEL], main_transport=transport)
+            self.assertEqual(reopened.planner.remote.prompt_version, 'campaign-planner-v9')
+            result = reopened.resume(run, max_steps=1)
+        self.assertEqual(result['status'], 'answered')
+        self.assertEqual(result['planner']['settings']['prompt_version'], 'campaign-planner-v8')
+        self.assertEqual([step['tool'] for step in result['steps']], ['read_campaign', 'respond'])
+        self.assertEqual(len(wires), 2)  # One legitimate next inference, no replay of the first.
+        for wire in wires:
+            source = json.loads(wire['messages'][1]['content'])
+            self.assertEqual(source['settings']['prompt_version'], 'campaign-planner-v8')
+            self.assertNotIn('measurement_capabilities', source)
+            self.assertNotIn('measurement_capabilities describes', wire['messages'][0]['content'])
+        saved = self.persisted(run)
+        self.assertEqual([json.loads(row[2])['inference']['prompt_version'] for row in saved['turns']],
+                         ['campaign-planner-v8', 'campaign-planner-v8'])
+        self.assertEqual(reopened.drafts.read()['revision'], 1)
+
+    def test_legacy_availability_keeps_model_limits_credentials_and_web_fences(self):
+        from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner
+        transport = Mock(side_effect=AssertionError('Availability must not call the provider'))
+        adapter = self.reopen(main_models=[MODEL], main_transport=transport).planner.remote
+        with patch.object(OpenRouterPlanner, 'prompt_version', 'campaign-planner-v8'):
+            pinned = adapter.settings(MODEL)
+        original = dict(pinned)
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'authored-key'}):
+            for version in ('campaign-planner-v7', 'campaign-planner-v8'):
+                adapter.require_available({**pinned, 'prompt_version': version})
+            for change in ({'model': 'disabled/model:free'}, {'max_calls': 2}, {'max_output_tokens': 1024},
+                           {'max_cost_usd': 1}, {'mode': 'offline'}, {'unexpected': True},
+                           {'prompt_version': 'campaign-planner-v99'}, {'foreground': True}):
+                with self.subTest(change=change), self.assertRaises((ValueError, ReviewInferenceError)):
+                    adapter.require_available({**pinned, **change})
+            adapter.web_disabled = True
+            with self.assertRaisesRegex(ReviewInferenceError, 'Browser inference'):
+                adapter.require_available(pinned)
+            adapter.web_disabled = False
+        with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(ReviewInferenceError, 'Configure OPENROUTER_API_KEY'):
+            adapter.require_available(pinned)
+        self.assertEqual(pinned, original)
+        transport.assert_not_called()
+
     def persisted(self, run_id):
         # Reopen native storage rather than trusting the public result projection.
         with closing(sqlite3.connect(self.path)) as db:

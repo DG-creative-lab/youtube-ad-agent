@@ -110,8 +110,13 @@ def model_assignments(arguments, history, contexts):
             or not assignments or len(assignments) > len(known)
             or any(not isinstance(row, dict) or set(row) != {"id", "context"}
                    or not isinstance(row["id"], str) or row["id"] not in known
+                   or not isinstance(row["context"], str)
                    or row["context"] not in {*contexts, "review"} for row in assignments)
             or len({row["id"] for row in assignments}) != len(assignments)):
-        raise ValueError("Classify inspected catalog IDs into known campaign contexts.")
+        # No model arguments or exception strings are reflected back. Returning an
+        # error observation preserves the existing transaction and recovery path.
+        return {"error": "Classify only inspected video IDs, once each, using an allowed context ID or review. Inspect the catalog first if no IDs are listed.",
+                "code": "invalid_classification", "allowed_contexts": [*contexts, "review"],
+                "inspected_video_ids": sorted(known)}
     return {"assignments": assignments, "route": "main_model",
             "label": "Main-model classification of inspected catalog entries"}

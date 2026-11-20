@@ -219,18 +219,27 @@ class OpenRouterReviews(OpenRouterInference):
 
 
 class OpenRouterPlanner(OpenRouterInference):
-    prompt_version = 'campaign-planner-v7'
+    prompt_version = 'campaign-planner-v9'
 
-    def __init__(self, models, *, request_body: Callable[[dict, list[dict]], dict], transport=None):
+    def __init__(self, models, *, request_body: Callable[[dict, list[dict], dict], dict], transport=None):
         super().__init__(models, transport=transport)
         self.request_body = request_body
+
+    def require_available(self, settings, credential=None):
+        # Admit supported legacy pins against the same current model/limit/key
+        # checks. Only this comparison uses the default; rendering and receipts
+        # keep the original, unmodified saved settings.
+        admitted = settings
+        if not settings.get('foreground') and settings.get('prompt_version') in ('campaign-planner-v7', 'campaign-planner-v8'):
+            admitted = {**settings, 'prompt_version': self.prompt_version}
+        return super().require_available(admitted, credential)
 
     def prepare_turn(self, context, history, settings):
         """Fit the actual wire request; omit complete oldest messages or tool pairs, never the new request."""
         context = {**context, 'conversation': list(context.get('conversation', []))}
         visible = list(history)
         while True:
-            body = self.request_body(context, visible)
+            body = self.request_body(context, visible, settings)
             try:
                 self.encode_request(settings, body)
                 return context, body

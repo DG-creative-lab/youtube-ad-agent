@@ -1,6 +1,42 @@
 # Campaign agent build plan
 
-## Current demo slice · #123 eval release gate, 19 November 2026
+## Current demo slice · #123 measurement context, 20 November 2026
+
+Campaign advice needs the application's measurement contract to distinguish
+existing viewer outcomes from proposed tracking integrations. The current slice
+supplies versioned measurement definitions in the first live planner context and
+both retained and typed `read_campaign` results. It describes comparison completion,
+the arrival denominator, content/cohort attribution and unsupported viewer analytics
+without querying visits or claiming observed results. Prompt v9 guides use of
+those facts; existing commands still own report reads and authority. Tests bind
+the definitions to real event/count behavior and check that grading criteria never
+enter provider requests. The frozen capability corpus/rubric stay unchanged;
+future rubric calibration and another authorized live sample remain separate work.
+
+Resumption keeps the run's saved planner version. Historical v7/v8 prompts,
+schemas and context projections remain available; only v9 receives measurement
+facts in the initial context or campaign-read result. Unsupported versions stop
+before reservation/dispatch. A paid v8 ledger receipt interrupted before the
+planner receipt write recovers through the normal hash checks without a key,
+metadata request or another completion call. Authored historical wire fixtures
+and the HTTP recovery regression protect this upgrade boundary.
+
+Non-foreground OpenRouter planner admission also accepts supported v7/v8 pins
+under the current model, limit, credential and browser checks. The availability
+comparison does not rewrite saved settings; rendered requests and receipts retain
+the old pin. The native planner regression pauses a v8 run after its first tool,
+reopens it with the v9 adapter default and verifies the next inference completes.
+
+PR #131 delivered the isolated live capability runner and human grading workflow.
+The preceding harness slice exposes
+scoped current campaign context IDs, makes classification errors actionable, and
+guides advice to answer the request without unnecessary classification or another
+permission question. Planner prompt v8 retains the application authority checks.
+The [prepared Mini/Terra comparison](live-capability-benchmark.md#prepared-mini--terra-comparison--20-november-2026)
+uses the same frozen tasks/rubric and corrected source for both models. Offline
+regressions and bounded route qualification precede separately authorized live
+sampling; neither a public model listing nor a claimed credit allowance proves
+live compatibility, quality or paid-account entitlement.
 
 PR #130 delivered the deterministic gate and CI evidence. The next slice is the
 [live capability benchmark](live-capability-benchmark.md): 20 frozen campaign tasks,

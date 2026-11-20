@@ -29,6 +29,7 @@ class ProviderError(RuntimeError):
         'inference_outcome_unknown': (409,'This inference may have been sent. Its original reservation is retained.'),
         'operation_conflict': (409,'This operation already has different inputs.'),
         'selection_stale': (409,'Refresh the catalogue and choose a model again.'),
+        'prompt_version_unsupported': (409,'The saved planner prompt version is unavailable. Start a new conversation; no new inference was sent.'),
         'unsupported_capabilities': (409,'This model does not support text input, text output and the required tools.'),
         'route_conditional_pricing': (409,'The provider publishes conditional price tiers that this app cannot bound yet.'),
         'route_unknown_pricing': (409,'The provider publishes an unrecognized billing unit that this app cannot bound.'),
