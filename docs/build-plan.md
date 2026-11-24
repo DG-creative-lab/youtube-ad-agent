@@ -18,8 +18,12 @@ continues to verify behavior and deployed revisions without introducing fixtures
 as production results. Earlier chronological demo plans below are historical
 where they prescribe #124 as the next customer-facing feature.
 
+Track presentation in #133, the first Knowledge/context-used build in #134 and
+campaign Learning review in #135. Keep their scope distinct from #58 promotion.
+
 A common workspace with Direct Acquisition/iwoca is a future discovery item,
-not an implementation dependency or repository/runtime merger authorization.
+tracked in #136, not an implementation dependency or repository/runtime merger
+authorization.
 
 ## Current demo slice · #123 measurement context, 20 November 2026
 

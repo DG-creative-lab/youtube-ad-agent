@@ -22,6 +22,15 @@ Use existing epics #48 (agent workspace) and #125 (pitch MVP). Reuse #56 for
 versioned briefs/guidance and #58 for reviewed project-level learning promotion;
 add bounded implementation issues rather than another overlapping product epic.
 
+| Tracker | Responsibility | Sequence |
+| --- | --- | --- |
+| [#133](https://github.com/DG-creative-lab/youtube-ad-agent/issues/133) | Workspace navigation, first-use flows and shared presentation | Deliver alongside functional views |
+| [#134](https://github.com/DG-creative-lab/youtube-ad-agent/issues/134) | Current-workspace Knowledge and context used, bounded child of #56 | First vertical build after scoped contract acceptance |
+| [#135](https://github.com/DG-creative-lab/youtube-ad-agent/issues/135) | Campaign Learning view and explicit review/intervention | Next vertical build over real learning commands |
+| [#55](https://github.com/DG-creative-lab/youtube-ad-agent/issues/55), [#56](https://github.com/DG-creative-lab/youtube-ad-agent/issues/56), [#58](https://github.com/DG-creative-lab/youtube-ad-agent/issues/58) | Full project ownership, versioned guidance and reviewed promotion | Retain their dependency/authority gates |
+| [#136](https://github.com/DG-creative-lab/youtube-ad-agent/issues/136) | Shared marketing workspace discovery with Direct Acquisition | Future, non-blocking |
+| [#124](https://github.com/DG-creative-lab/youtube-ad-agent/issues/124) | Separate demo exploration | Paused; no incidental merge |
+
 ## Navigation and layout
 
 ```text
