@@ -1,5 +1,15 @@
 # Campaign agent design direction
 
+## Working product navigation · owner direction, 24 November 2026
+
+Use [Workspace UX and learning review](workspace-ux-design.md) as the current
+navigation/interaction contract. The sidebar exposes New chat, Campaigns,
+Knowledge base and Learning when their actual scoped paths are available, plus
+recent chats and account controls. Learning is a real campaign finding/review
+surface; the separate #124 demo-exploration UI is paused. The modest radii,
+collapsible navigation, appearance settings, inline activity and artefact-panel
+direction below remains applicable. These are requirements, not shipped features.
+
 ## Next UI build · owner direction, 19 November 2026
 
 After the functional MVP and #123 eval gate, refine the planner around a quieter

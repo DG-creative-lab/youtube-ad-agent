@@ -1,5 +1,26 @@
 # Campaign agent build plan
 
+## Current product priority · 24 November 2026
+
+The owner paused #124's separate learning exploration and agreed a product-first
+sidebar, usable Knowledge base and real Learning review/intervention view. The
+[workspace UX contract](workspace-ux-design.md) captures the user actions, scope,
+source/authority boundaries, acceptance journeys and sequence under #48/#125.
+The paused feature branch is not part of accepted main and must not be merged
+incidentally with this design capture.
+
+The first build should deliver scoped knowledge plus visible agent context as a
+bounded #56 slice, with its functional navigation. Accept the current-workspace
+storage/access/version contract first; do not bypass #55/#56 project release
+dependencies. Campaign-level learning review follows using existing commands.
+Project-wide promotion remains #58 after #55/#56; #57 retains its own gates. #123
+continues to verify behavior and deployed revisions without introducing fixtures
+as production results. Earlier chronological demo plans below are historical
+where they prescribe #124 as the next customer-facing feature.
+
+A common workspace with Direct Acquisition/iwoca is a future discovery item,
+not an implementation dependency or repository/runtime merger authorization.
+
 ## Current demo slice · #123 measurement context, 20 November 2026
 
 Campaign advice needs the application's measurement contract to distinguish
