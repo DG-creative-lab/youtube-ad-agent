@@ -1,0 +1,14 @@
+{
+  "mode": "Built-in image_gen tool",
+  "generated_on": "2026-11-25",
+  "images": [
+    {
+      "file": "editing-scene.png",
+      "prompt": "Use case: ads-marketing. Asset type: cinematic artwork for an original voiceover demo and YouTube sample ad, landscape 16:9. A close, filmic still of a modest quiet apartment after dusk, one small sculptural desk lamp with a warm glowing bulb on a wooden writing desk near a rain-streaked window, the room just beginning to emerge from darkness. A half-open unmarked notebook, subtle lived-in textures, no people. Sophisticated independent-film cinematography, amber practical light against blue-grey window light, visible grain, beautiful photographic realism. Compose the lamp and desk in the right half with dark calm negative space to the left and top for later typeset ad copy. The emotional idea is a small change that makes a scene feel different. No text, letters, logos, brands, app interfaces, watermarks, or split panels. Render one wide cinematic image."
+    },
+    {
+      "file": "audiobook-scene.png",
+      "prompt": "Use case: ads-marketing / illustration-story. Asset type: one landscape 16:9 cinematic photographic still for an original audiobook voice comparison and sample ad. Scene: a worn dark blue painted door at the end of the upstairs hallway of a modest old house at night. The closed door occupies the right third; a fine line of soft amber light escapes under it. Foreground a brass door handle, old wood textures, subdued deep teal walls, no people. Literary suspense, intimate and intriguing rather than horror. Beautiful subtle film grain and natural low-light photographic texture. The left half remains very dark, quiet negative space for later typeset titles. Restrained cinematic composition, amber and midnight blue. No books with visible words, no text, letters, logos, brands, watermark, faces, ghosts, or split panels. Wide image."
+    }
+  ]
+}

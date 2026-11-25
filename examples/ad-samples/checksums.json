@@ -1,0 +1,62 @@
+{
+  "examples/ad-samples/audiobook-a.mp4": {
+    "sha256": "a4d01b741f0f616c179b701a6c7bd072e1246782e0413f6ad793ae284251e594",
+    "bytes": 572068
+  },
+  "examples/ad-samples/audiobook-a.vtt": {
+    "sha256": "28bd620ebd745e10a91d9183fe606d957670e38eea872776f976c984d7489fdf",
+    "bytes": 187
+  },
+  "examples/ad-samples/audiobook-b.mp4": {
+    "sha256": "5edfdf3dc21b4f0736dfd1a5a69b130f620298983703a2da735bc37799d59eac",
+    "bytes": 574224
+  },
+  "examples/ad-samples/audiobook-b.vtt": {
+    "sha256": "98d72c614ff6c2f500b2fad89e66d99ebd62a677f573fcc62c115c031d33c9a4",
+    "bytes": 211
+  },
+  "examples/ad-samples/audiobook-scene.png": {
+    "sha256": "2224d900ef0d09d12ca3baaabb8b70b682fbec8affaf59ae38a263c570c0d712",
+    "bytes": 1872562
+  },
+  "examples/ad-samples/editing-a.mp4": {
+    "sha256": "3461901f80ac27bac32dd81f3c4c789aaf6142fbb7ea869a051954f64a97690c",
+    "bytes": 603916
+  },
+  "examples/ad-samples/editing-a.vtt": {
+    "sha256": "b63db741156c27e70790427f471e9a81e79c4a480344a2b41f3ab191f94b316f",
+    "bytes": 203
+  },
+  "examples/ad-samples/editing-b.mp4": {
+    "sha256": "39f98e4983620e7800714a6b699fc2c77ba911e1d0135205314576428c1a84e3",
+    "bytes": 633532
+  },
+  "examples/ad-samples/editing-b.vtt": {
+    "sha256": "08facf9b27928335430e1972caf53524952558236d373624cde532ecfc5e648e",
+    "bytes": 200
+  },
+  "examples/ad-samples/editing-scene.png": {
+    "sha256": "b0800eca22f466f8af55823c729bb77c082b0bb9b3986c23e89920b94d110004",
+    "bytes": 1969143
+  },
+  "examples/viewer-media/audiobook-a.mp3": {
+    "sha256": "45cb65c45f34113cd893ce562cb4e174f86a128c93c97de8859a2977e494c116",
+    "bytes": 145196
+  },
+  "examples/viewer-media/audiobook-b.mp3": {
+    "sha256": "ccd44713f53160557d0f28c84304051d0eb7ea7419c8c2c9af53354a93789230",
+    "bytes": 183788
+  },
+  "examples/viewer-media/audiobook-preview.mp4": {
+    "sha256": "1a99fcb05d483d94922ba5543a95275b5b3b173c324956ad91bbdec23c625c96",
+    "bytes": 288841
+  },
+  "examples/viewer-media/editing-a.mp4": {
+    "sha256": "8791152cfd9ce59706f271ca81639e9c7eedb5fe92a470f8d297e30ceaa5fbfd",
+    "bytes": 281392
+  },
+  "examples/viewer-media/editing-b.mp4": {
+    "sha256": "34f048374c75e0586f6ca23c4479808f21fce2db399f631f3375d3af05877e5d",
+    "bytes": 311335
+  }
+}

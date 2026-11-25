@@ -1,0 +1,52 @@
+{
+  "schema": "comparison-media/v1",
+  "examples": [
+    {
+      "ref": "editing-comparison-v1",
+      "creative_ref": "editing-voiceover-v1",
+      "title": "Find the voice that fits the cut",
+      "instruction": "Watch the same scene twice. Which read makes the room feel like home?",
+      "passage": "The room hadn't changed. But with one small light, it felt like home.",
+      "takes": [
+        [
+          "a",
+          "Quick and direct",
+          "editing-a.mp4"
+        ],
+        [
+          "b",
+          "Measured and deliberate",
+          "editing-b.mp4"
+        ]
+      ],
+      "preview": "editing-a.mp4"
+    },
+    {
+      "ref": "audiobook-comparison-v1",
+      "creative_ref": "audiobook-reading-v1",
+      "title": "Hear the scene two ways",
+      "instruction": "Listen to both readings. Which delivery fits the moment in the story?",
+      "passage": "Only Mara knew that lullaby. Now someone behind the locked door was singing it back.",
+      "takes": [
+        [
+          "a",
+          "Brisk reading",
+          "audiobook-a.mp3"
+        ],
+        [
+          "b",
+          "Measured reading",
+          "audiobook-b.mp3"
+        ]
+      ],
+      "preview": "audiobook-preview.mp4"
+    }
+  ],
+  "files": {
+    "audiobook-a.mp3": "45cb65c45f34113cd893ce562cb4e174f86a128c93c97de8859a2977e494c116",
+    "audiobook-b.mp3": "ccd44713f53160557d0f28c84304051d0eb7ea7419c8c2c9af53354a93789230",
+    "audiobook-preview.mp4": "1a99fcb05d483d94922ba5543a95275b5b3b173c324956ad91bbdec23c625c96",
+    "editing-a.mp4": "8791152cfd9ce59706f271ca81639e9c7eedb5fe92a470f8d297e30ceaa5fbfd",
+    "editing-b.mp4": "34f048374c75e0586f6ca23c4479808f21fce2db399f631f3375d3af05877e5d"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "revision": "2026-11-25",
+  "purpose": "Original, unbranded creative samples for the offline application. Not an approved live campaign or a demonstration of any advertiser's voice model.",
+  "disclosure": "Sample creative / AI-generated voice and imagery",
+  "comparison_model": "gpt-4o-mini-tts",
+  "comparisons": {
+    "editing": {
+      "voice": "marin",
+      "poster": "editing-scene.png",
+      "takes": {
+        "a": "Natural British English. Warm but direct commercial read, conversational and brisk. Let the turn on 'But' lift gently. No sales announcer voice. Read only the supplied words. Finish within six seconds.",
+        "b": "Natural British English. Intimate, reflective film voiceover. Soft warmth, with a meaningful pause after the first sentence and a gentle sense of arrival on 'home'. Read only the supplied words. Finish within seven seconds."
+      }
+    },
+    "audiobook": {
+      "voice": "cedar",
+      "poster": "audiobook-scene.png",
+      "takes": {
+        "a": "Natural British English audiobook narrator. Clear, alert and story-led, with curiosity rather than horror. A brisk read, subtly stress 'Only Mara'. Read only the supplied words. Finish within six seconds.",
+        "b": "Natural British English audiobook narrator. Measured, close and quietly suspenseful, never theatrical. Pause briefly after 'lullaby', then let the final phrase reveal the mystery. Read the supplied passage exactly, preserving every word and article: the phrase is 'the locked door'. Finish within seven seconds."
+      }
+    }
+  },
+  "ads": [
+    {
+      "id": "editing-a",
+      "context": "editing",
+      "angle": "The last thing your edit needs",
+      "headline": "The cut is ready.\nIs the voice?",
+      "primary_text": "A finished edit can still be waiting for the right voice. Compare two reads of the same scene and hear which delivery belongs.",
+      "script": "Your cut is finished. The voice still feels wrong. Hear one scene with two different reads, then choose the delivery that fits your edit. Start with the comparison.",
+      "cta": "Compare the reads",
+      "delivery": "Warm, grounded British English creative producer speaking to another editor. Conversational, precise and confident. A small pause after the opening two sentences. Avoid hype and an announcer voice. Read only the supplied script.",
+      "voice": "marin"
+    },
+    {
+      "id": "editing-b",
+      "context": "editing",
+      "angle": "Demonstrate the difference",
+      "headline": "Same scene.\nDifferent feeling.",
+      "primary_text": "The picture stays the same. So do the words. Change the delivery and hear what happens to the scene.",
+      "script": "A voice can change the whole scene. Same picture. Same words. Two different reads. Play them side by side and hear what changes. Find the voice your story needs.",
+      "cta": "Hear the difference",
+      "delivery": "British English. An intimate, thoughtful creative voice, with light rhythmic emphasis on 'Same picture. Same words.' Let the idea build naturally. Calm and inviting rather than promotional. Read only the supplied script.",
+      "voice": "marin"
+    },
+    {
+      "id": "audiobook-a",
+      "context": "audiobook",
+      "angle": "The listener's first moment",
+      "headline": "Make the first line\nworth following.",
+      "primary_text": "Before a listener commits to the whole story, they hear a voice. Compare two readings of one original passage.",
+      "script": "One line can pull a reader into a story. Or leave them outside it. Hear the same passage read two ways, then choose the narrator you want to follow.",
+      "cta": "Choose your narrator",
+      "delivery": "British English literary narrator. Warm, articulate and quietly compelling. A brief pause after the second sentence, then invite the listener into the comparison. No grand trailer delivery. Read only the supplied script.",
+      "voice": "cedar"
+    },
+    {
+      "id": "audiobook-b",
+      "context": "audiobook",
+      "angle": "Try one scene first",
+      "headline": "A whole story\nstarts with one voice.",
+      "primary_text": "Start with one scene, not a whole manuscript. Listen to two deliveries and decide which makes you want the next chapter.",
+      "script": "Before you choose a voice for a whole book, listen to one moment. Compare two readings of an original scene. Which one makes you want the next chapter? Listen, then decide.",
+      "cta": "Listen to both",
+      "delivery": "British English. Friendly, assured audiobook producer, speaking directly to an independent author. Natural questions, a little curiosity and a warm invitation at the end. Read only the supplied script.",
+      "voice": "cedar"
+    }
+  ]
+}

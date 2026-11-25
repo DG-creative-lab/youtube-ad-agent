@@ -1,6 +1,7 @@
 """Build the manual handoff for the fictional campaign."""
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -9,10 +10,68 @@ from .creatives import EXAMPLES
 
 MEDIA_DIR = Path(__file__).resolve().parents[1] / ".local/viewer-media"
 DEMO_MEDIA_DIR = Path(__file__).resolve().parents[1] / "examples/viewer-media"
+MEDIA_MANIFEST = "media-manifest.json"
 
 
 def media_sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def comparison_media_manifest(directory, examples):
+    """Trusted authoring records which definitions produced these exact files."""
+    names = {name for example in examples for name in (example.preview, *(t[2] for t in example.takes))}
+    return {
+        "schema": "comparison-media/v1",
+        # Scope is authorized by CampaignDrafts/the private asset catalog. The
+        # recording binding describes content, so a permitted rescope of the
+        # same authored demo does not claim different spoken words.
+        "examples": json.loads(json.dumps([
+            {key: value for key, value in asdict(example).items() if key != "scope"}
+            for example in examples
+        ])),
+        "files": {name: media_sha256((directory / name).read_bytes()) for name in sorted(names)},
+    }
+
+
+def write_media_manifest(directory, examples):
+    manifest = comparison_media_manifest(directory, examples)
+    pending = directory / (MEDIA_MANIFEST + ".pending")
+    pending.write_text(json.dumps(manifest, indent=2) + "\n")
+    pending.replace(directory / MEDIA_MANIFEST)
+
+
+class BoundLocalMedia:
+    """Freeze a verified local script/file pairing, including across later reads."""
+    def __init__(self, directory, examples):
+        message = ("Local comparison media does not match the current example definitions. "
+                   "Back up .local/viewer-media, then regenerate it with "
+                   "python3 -m scripts.prepare_viewer_media, or replace it with the current "
+                   "bundled examples/viewer-media files. Restart and review the new package.")
+        examples = tuple(examples)
+        try:
+            current = comparison_media_manifest(directory, examples)
+            manifest = directory / MEDIA_MANIFEST
+            if manifest.exists():
+                if manifest.stat().st_size > 1_000_000:
+                    raise ValueError(message)
+                expected = json.loads(manifest.read_text())
+            else:
+                # A manifest-free copy is safe only when every byte matches our
+                # known current bundle and its actual authored definitions.
+                expected = comparison_media_manifest(DEMO_MEDIA_DIR, EXAMPLES)
+            if current != expected:
+                raise ValueError(message)
+        except (OSError, ValueError):
+            raise ValueError(message) from None
+        self.directory, self.files = directory, current["files"]
+
+    def read_asset(self, name):
+        if name not in self.files:
+            raise FileNotFoundError("Local comparison media is unavailable.")
+        data = (self.directory / name).read_bytes()
+        if media_sha256(data) != self.files[name]:
+            raise FileNotFoundError("Local comparison media changed; regenerate and restart before review.")
+        return data
 
 
 def caption_bytes(example):

@@ -7,6 +7,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 from campaign_agent.creatives import EXAMPLES
+from campaign_agent.handoff import MEDIA_MANIFEST, write_media_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,8 +64,11 @@ def main():
                     if take == "a":
                         video(voice, BOOK, staging / example.preview)
                 voice.unlink()
+        write_media_manifest(staging, EXAMPLES)
         for asset in staging.iterdir():
-            asset.replace(args.output / asset.name)
+            if asset.name != MEDIA_MANIFEST:
+                asset.replace(args.output / asset.name)
+        (staging / MEDIA_MANIFEST).replace(args.output / MEDIA_MANIFEST)
     print(f"Demo media prepared in {args.output}")
 
 

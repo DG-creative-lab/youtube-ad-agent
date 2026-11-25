@@ -1,16 +1,127 @@
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
+from itertools import product
+import shutil
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 from campaign_agent.creatives import EXAMPLES
+from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_MANIFEST, read_media, write_media_manifest
 from scripts.campaign_drafts import CampaignDrafts, PackageConflict
 
 
 class PackageHandoffTests(unittest.TestCase):
+    def test_default_local_override_rejects_unbound_or_mixed_recordings_before_creating_state(self):
+        for example, with_manifest, live in product(EXAMPLES, (False, True), (False, True)):
+            with self.subTest(context=example.ref, manifest=with_manifest, live=live), TemporaryDirectory() as folder:
+                root = Path(folder)
+                media = root / 'media'
+                shutil.copytree(DEMO_MEDIA_DIR, media)
+                if not with_manifest:
+                    (media / MEDIA_MANIFEST).unlink(missing_ok=True)
+                # An old/custom recording cannot inherit the current passage just
+                # because its filename still matches the bundled catalog.
+                (media / example.takes[0][2]).write_bytes(b'old passage recording')
+                path = root / 'draft.sqlite'
+                with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                    with self.assertRaisesRegex(ValueError, 'Local comparison media'):
+                        CampaignDrafts(path, live=live)
+                self.assertFalse(path.exists())
+
+    def test_live_mode_uses_verified_override_for_viewer_reads(self):
+        for with_manifest in (False, True):
+            with self.subTest(manifest=with_manifest), TemporaryDirectory() as folder:
+                root = Path(folder)
+                media = root / 'media'
+                shutil.copytree(DEMO_MEDIA_DIR, media)
+                if not with_manifest:
+                    (media / MEDIA_MANIFEST).unlink(missing_ok=True)
+                with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                    drafts = CampaignDrafts(root / 'draft.sqlite', live=True)
+                for example in EXAMPLES:
+                    name = example.takes[0][2]
+                    self.assertEqual(read_media(drafts.media_dir, name), (DEMO_MEDIA_DIR / name).read_bytes())
+                    (media / name).write_bytes(b'replaced after live startup')
+                    with self.assertRaises(FileNotFoundError):
+                        read_media(drafts.media_dir, name)
+
+    def test_manifest_free_current_bundle_still_plays_and_exports_after_restart(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            media = root / 'media'
+            shutil.copytree(DEMO_MEDIA_DIR, media)
+            (media / MEDIA_MANIFEST).unlink(missing_ok=True)
+            with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                drafts = CampaignDrafts(root / 'draft.sqlite', live=False)
+                saved = drafts.save({'campaign_id': drafts.campaign_id, 'revision': 1,
+                                     'placements': self.placements})
+                review = drafts.review_package(drafts.campaign_id, saved['revision'])
+                drafts.approve_package(drafts.campaign_id, saved['revision'], review['fingerprint'])
+                reopened = CampaignDrafts(root / 'draft.sqlite', live=False)
+                exported = reopened.export_setup(drafts.campaign_id, saved['revision'], review['fingerprint'])
+                self.assertEqual(exported['fingerprint'], review['fingerprint'])
+                name = EXAMPLES[0].takes[0][2]
+                self.assertEqual(read_media(reopened.media_dir, name), (DEMO_MEDIA_DIR / name).read_bytes())
+                self.assertFalse((media / MEDIA_MANIFEST).exists())  # Startup cannot self-certify files.
+
+    def test_local_manifest_binds_custom_media_to_definitions_and_later_reads(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            media = root / 'media'
+            shutil.copytree(DEMO_MEDIA_DIR, media)
+            name = EXAMPLES[0].takes[0][2]
+            (media / name).write_bytes(b'authored alternate recording of the current passage')
+            write_media_manifest(media, EXAMPLES)
+            with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                drafts = CampaignDrafts(root / 'draft.sqlite', live=False)
+                drafts.save({'campaign_id': drafts.campaign_id, 'revision': 1,
+                             'placements': self.placements})
+                review = drafts.review_package(drafts.campaign_id, 2)
+                drafts.approve_package(drafts.campaign_id, 2, review['fingerprint'])
+                # Rewriting the manifest after startup cannot bless a changed
+                # recording for a process that still serves the old definition.
+                (media / name).write_bytes(b'replaced after startup')
+                write_media_manifest(media, EXAMPLES)
+                changed = drafts.review_package(drafts.campaign_id, 2)
+                self.assertIn('Prepare the preview and comparison media for Video editing.', changed['blockers'])
+                with self.assertRaises(PackageConflict):
+                    drafts.approve_package(drafts.campaign_id, 2, changed['fingerprint'])
+                with self.assertRaises(PackageConflict):
+                    drafts.export_setup(drafts.campaign_id, 2, review['fingerprint'])
+                with self.assertRaises(FileNotFoundError):
+                    read_media(drafts.media_dir, name)
+
+    def test_local_manifest_rejects_old_definitions_and_partial_regeneration(self):
+        for example in EXAMPLES:
+            for mismatch in ('passage', 'bytes', 'malformed'):
+                with self.subTest(context=example.ref, mismatch=mismatch), TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    media = root / 'media'
+                    shutil.copytree(DEMO_MEDIA_DIR, media)
+                    definitions = tuple(replace(e, passage='Previous passage.') if e == example else e
+                                        for e in EXAMPLES) if mismatch == 'passage' else EXAMPLES
+                    write_media_manifest(media, definitions)
+                    if mismatch == 'bytes':
+                        (media / example.takes[1][2]).write_bytes(b'partially replaced recording')
+                    if mismatch == 'malformed':
+                        (media / MEDIA_MANIFEST).write_text('{invalid json')
+                    path = root / 'draft.sqlite'
+                    with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                        with self.assertRaisesRegex(ValueError, 'Local comparison media'):
+                            CampaignDrafts(path, live=False)
+                    self.assertFalse(path.exists())
+                    # The same rejection must leave an existing campaign store
+                    # untouched, including any history awaiting operator recovery.
+                    CampaignDrafts(path, live=False, media_dir=DEMO_MEDIA_DIR)
+                    before = path.read_bytes()
+                    with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                        with self.assertRaisesRegex(ValueError, 'Local comparison media'):
+                            CampaignDrafts(path, live=False)
+                    self.assertEqual(path.read_bytes(), before)
+
     def setUp(self):
         directory = self.enterContext(TemporaryDirectory())
         self.path = Path(directory) / "draft.sqlite"

@@ -13,7 +13,7 @@ from campaign_agent.adapters.local_access import LocalDemoAccess
 from campaign_agent.creatives import render_instruction_choices
 from campaign_agent.workspaces import initialize, verify, admit_demo_campaign
 from campaign_agent import handoff
-from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
+from campaign_agent.handoff import BoundLocalMedia, DEMO_MEDIA_DIR, MEDIA_DIR, example_content, package_blockers, package_fingerprint, sample_package
 
 
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -103,6 +103,8 @@ class CampaignDrafts:
                 or len({example.creative_ref for example in self.examples}) != len(self.examples)):
             raise PermissionError("Supply the brand's own comparison catalog.")
         self.require("youtube:campaign.read")
+        if media_dir is None and MEDIA_DIR.is_dir():
+            self.media_dir = BoundLocalMedia(MEDIA_DIR, self.examples)
         self.sources = CATALOG_SOURCES if live else {"sample_search", "synthetic"}
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(path)) as db, db:
