@@ -11,6 +11,7 @@ from campaign_agent.adapters.sqlite_setup_delivery import verified_viewer_link
 from campaign_agent.campaign_setup import SetupProviderError
 from scripts.campaign_drafts import PackageConflict
 import test_placement_planner as fixtures
+from legacy_comparison_examples import LEGACY_EXAMPLES
 
 
 MANAGER = '1111111111'
@@ -27,6 +28,8 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         self.case = fixtures.PlacementPlannerTests()
         self.case.setUp()
         self.addCleanup(self.case.doCleanups)
+        # This suite freezes pre-migration approval/setup receipt identities.
+        self.case.runtime = self.case.reopen(examples=LEGACY_EXAMPLES)
         self.drafts = self.case.runtime.drafts
         self.native_campaign = None
         self.ad_destinations = []
