@@ -1,5 +1,33 @@
 # Campaign agent architecture
 
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+17 November architecture boundary: #83 was accepted in PR #90; initial #84 was
+human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`. Its static Python import guard
+remains small. The first #85 slice moves scope values, shared errors and video-ID
+syntax to pure domain owners with inward compatibility reexports. Live policy
+covers 71 Python modules and the baseline remains at 86 after the initial 88 → 86 shrink. CampaignDrafts now lives in the application module while its native storage remains uninverted. Other #85 policies remain separate work. The historical
+[ADR/map](hexagonal-architecture.md) migration/authority obligations are unchanged.
+#87 foundation → #86 complete local pilot UOW → #87 external → #88 composition
+integrate serially, then the named #37 native graph → #84 import strict zero → #89
+conformance. Later PostgreSQL/cloud work stays separate.
+
+15 November hosted decision: [proposed topology and first migration contract](hosted-topology-decision.md)
+selects separate Vercel Python ASGI staff/viewer origins in Frankfurt, Neon
+Postgres and private Vercel Blob as the future reference. This is a design
+handoff, not an activated composition. One-worker SQLite/private files and
+zero-cost offline inference remain supported. #37 owns the native transaction
+port and DB/blob recovery; #36/#55 current-authority and all-campaign restore
+gates, #40–#42 pilot acceptance and #70 real foreground qualification remain.
+
+14 November provider preparation: [OpenRouter foreground session contract v1](openrouter-session-contract.md)
+specifies browser-memory credentials, scoped selection, admission and recovery for
+issue #54. It is a proposed implementation handoff; current runtime behavior is
+unchanged. Real identity, paid-route qualification and deployment retain their gates.
+
 Updated 6 November 2026 · Proposed for the ElevenLabs application. The product brief defines the two Text to Speech creatives and viewer task. This plan defines the system boundaries. [Product brief](product-brief.md) · [Build plan](build-plan.md) · [Design direction](design-direction.md)
 
 ## Decision

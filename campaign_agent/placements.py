@@ -2,7 +2,7 @@
 import json
 import re
 
-from scripts.campaign_drafts import VIDEO_ID
+from campaign_agent.domain.placements import VIDEO_ID
 
 
 TERMS = {

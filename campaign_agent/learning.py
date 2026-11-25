@@ -1,14 +1,15 @@
 """Scoped reuse of a saved instruction experiment decision."""
 
-from contextlib import closing
 import json
 import re
 
-from scripts.campaign_drafts import POLICY, PackageConflict
+from campaign_agent.application.campaigns import POLICY
+from campaign_agent.domain.errors import PackageConflict
 from .agent.draft_permissions import permits
 from .handoff import package_fingerprint
 from .instruction_tests import EVIDENCE_PROTOCOL
 from .measurement import ViewerNotFound
+from .ports.evidence import EvidenceReader, EvidenceStorage
 
 
 FINDING_VERSION = 1
@@ -31,54 +32,45 @@ def _comparison_key(group, baseline):
 
 
 class InstructionFindings:
-    def __init__(self, tests):
+    def __init__(self, tests, storage: EvidenceStorage):
         self.tests = tests
         self.drafts = tests.drafts
-        self.connect = tests.viewer.connect
-        with closing(self.connect()) as db, db:
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS instruction_findings (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    comparison_key TEXT NOT NULL, snapshot TEXT NOT NULL,
-                    retired INTEGER NOT NULL DEFAULT 0 CHECK (retired IN (0, 1))
-                )
-            """)
-            db.execute("""
-                CREATE INDEX IF NOT EXISTS instruction_findings_scope
-                ON instruction_findings(client_id, brand_id, comparison_key)
-            """)
+        self.storage = storage
 
-    def _current_source(self, db, test, snapshot_id):
-        snapshot = self.tests._latest_snapshot(db, test["id"])
+    @property
+    def scope(self):
+        return self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id
+
+    def _current_source(self, records: EvidenceReader, test, snapshot_id):
+        snapshot = self.tests.latest_snapshot_from(records, test["id"])
         if not snapshot or snapshot["id"] != snapshot_id or snapshot["protocol"] != test.get("evidence_protocol"):
             return None
         protocol = snapshot["protocol"]
         if any(protocol.get(key) != value for key, value in MATCH_PROTOCOL.items()):
             return None
         frozen = [row["cohorts"]["participant"] for row in snapshot["rows"]]
-        live = self.tests._assignment_rows(db, test, "participant")
+        live = self.tests.assignment_rows_from(records, test, "participant")
         if any(count["unresolved"] or count["mature_arrivals"] != row["arrivals"]
                for count, row in zip(frozen, live, strict=True)):
             return None
         # A completion committed in the same millisecond as the cutoff can change the evidence.
-        at_cutoff = self.tests._snapshot_rows(db, test, protocol["observation_window_ms"], snapshot["cutoff_ms"])
+        at_cutoff = self.tests.snapshot_rows_from(records, test, protocol["observation_window_ms"], snapshot["cutoff_ms"])
         return snapshot if [row["cohorts"]["participant"] for row in at_cutoff] == frozen else None
 
     def save(self, campaign_id, revision, fingerprint, *, snapshot_id):
         self.drafts.require("youtube:learning.manage")
         _reference(snapshot_id)
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            package = self.drafts.require_approved_package(db, campaign_id, revision, fingerprint)["package"]
-            test = self.tests._test(db, self.tests.test_id(campaign_id, revision, fingerprint, self.drafts.scope))
-            snapshot = self._current_source(db, test, snapshot_id)
+        with self.storage.write() as records:
+            package = self.drafts.require_approved_from(records.drafts, campaign_id, revision, fingerprint)["package"]
+            test = self.tests.test_from(records, self.tests.test_id(campaign_id, revision, fingerprint, self.drafts.scope))
+            snapshot = self._current_source(records, test, snapshot_id)
             if snapshot is None:
                 raise PackageConflict("Save a current snapshot with resolved participant outcomes first.")
-            decision = self.tests.snapshot_decision(snapshot, self.tests._initial_batch_checkpoint(db, snapshot))
+            decision = self.tests.snapshot_decision(snapshot, self.tests.initial_batch_checkpoint_from(records, snapshot))
             if decision["action"] != "reuse" or decision["batch_status"] == "no_batch_recommendation":
                 raise PackageConflict("This evidence does not support saving a reuse finding.")
             creative = test["creative_version"]
-            correction = self.tests.performance.correction_for_comparison(db, package, creative)
+            correction = self.tests.performance.correction_for_comparison_from(records, package, creative)
             if correction != test["source_correction"]:
                 raise PackageConflict("The buyer correction changed. Review the experiment again.")
             original, revised = test["versions"]
@@ -94,93 +86,71 @@ class InstructionFindings:
                 "before": original["content"]["instruction"], "after": revised["content"]["instruction"],
                 "revised_content_fingerprint": revised["content_fingerprint"],
             }
-            db.execute("""
-                INSERT INTO instruction_findings (id, client_id, brand_id, comparison_key, snapshot)
-                VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
-            """, (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id,
-                  _comparison_key(group, original["content_fingerprint"]), json.dumps(finding)))
-            row = db.execute("SELECT retired FROM instruction_findings WHERE id = ? AND client_id = ? AND brand_id = ?",
-                             (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id)).fetchone()
+            records.add_finding(self.scope, finding_id,
+                                _comparison_key(group, original["content_fingerprint"]), json.dumps(finding))
+            row = records.finding_retired_row(self.scope, finding_id)
             if row is None or row[0]:
                 raise PackageConflict("This finding is unavailable for reuse.")
+            records.commit()
         return finding
 
-    def _target(self, db, campaign_id, revision, fingerprint):
-        review, _ = self.drafts._package_review(db, campaign_id, revision)
+    def _target(self, records: EvidenceReader, campaign_id, revision, fingerprint):
+        review, _ = self.drafts._review_from(records.drafts, campaign_id, revision)
         if review["current_revision"] != revision or review["fingerprint"] != fingerprint:
             raise PackageConflict("The package has changed. Load and review the latest draft.")
-        return review["package"], self.drafts._read(db)
+        return review["package"], self.drafts.read_from(records.drafts)
 
-    def _latest_match(self, db, package):
+    def _latest_match(self, records: EvidenceReader, package):
         if len(package["groups"]) != 1 or "instruction_test" in package:
             return None
         group, = package["groups"]
         key = _comparison_key(group, package_fingerprint(group["content"]))
-        # Resolve ownership from the native source test, including for legacy findings.
-        # A retired or stale latest finding within this campaign must not revive an older one.
-        row = db.execute("""
-            SELECT f.snapshot, f.retired FROM instruction_findings f
-            JOIN instruction_tests t ON t.id = json_extract(f.snapshot, '$.test_id')
-                AND t.client_id = f.client_id AND t.brand_id = f.brand_id
-            WHERE f.client_id = ? AND f.brand_id = ? AND f.comparison_key = ? AND t.campaign_id = ?
-            ORDER BY f.rowid DESC LIMIT 1
-        """, (self.drafts.scope.client_id, self.drafts.scope.brand_id, key, self.drafts.campaign_id)).fetchone()
+        row = records.latest_finding_row(self.scope, key)
         return json.loads(row[0]) if row and not row[1] else None
 
-    def _eligible(self, db, package, draft):
-        finding = self._latest_match(db, package)
+    def _eligible(self, records: EvidenceReader, package, draft):
+        finding = self._latest_match(records, package)
         if (not finding or finding["version"] != FINDING_VERSION or package["brief"] == finding["source_brief"]
                 or draft["policy"] != POLICY or package["policy"] != finding["brand_policy"]):
             return None
         try:
-            test = self.tests._test(db, finding["test_id"])
+            test = self.tests.test_from(records, finding["test_id"])
         except ViewerNotFound:
             return None
-        if not self._current_source(db, test, finding["snapshot_id"]):
+        if not self._current_source(records, test, finding["snapshot_id"]):
             return None
         group, = package["groups"]
-        correction = self.tests.performance.correction_for_comparison(db, package, group["creative_version"])
+        correction = self.tests.performance.correction_for_comparison_from(records, package, group["creative_version"])
         if not correction or correction["kind"] != "keep_takes":
             return None
         return {"finding": finding, "correction": correction}
 
     def read(self, campaign_id, revision, fingerprint):
-        with closing(self.connect()) as db:
-            db.execute("BEGIN")
-            package, draft = self._target(db, campaign_id, revision, fingerprint)
-            return self._eligible(db, package, draft)
+        with self.storage.read() as records:
+            package, draft = self._target(records, campaign_id, revision, fingerprint)
+            return self._eligible(records, package, draft)
 
     def retire(self, campaign_id, revision, fingerprint, *, finding_id):
         self.drafts.require("youtube:learning.manage")
         _reference(finding_id)
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            package, _ = self._target(db, campaign_id, revision, fingerprint)
-            finding = self._latest_match(db, package)
+        with self.storage.write() as records:
+            package, _ = self._target(records, campaign_id, revision, fingerprint)
+            finding = self._latest_match(records, package)
             if not finding or finding["id"] != finding_id:
                 raise PackageConflict("This finding is no longer available for this brief.")
             self.drafts.require("youtube:learning.manage")
-            updated = db.execute("""
-                UPDATE instruction_findings SET retired = 1
-                WHERE id = ? AND client_id = ? AND brand_id = ? AND EXISTS (
-                    SELECT 1 FROM instruction_tests t
-                    WHERE t.id = json_extract(instruction_findings.snapshot, '$.test_id')
-                        AND t.client_id = instruction_findings.client_id
-                        AND t.brand_id = instruction_findings.brand_id AND t.campaign_id = ?
-                )
-            """, (finding_id, self.drafts.scope.client_id, self.drafts.scope.brand_id, self.drafts.campaign_id))
-            if updated.rowcount != 1:
+            if not records.retire_finding(self.scope, finding_id):
                 raise PackageConflict("This finding is no longer available for this brief.")
+            records.commit()
         return {"retired": finding_id}
 
     def apply(self, campaign_id, revision, fingerprint, *, finding_id, correction_id, draft_permission="none"):
         _reference(finding_id)
         if not permits({"draft_permission": draft_permission}, "apply_instruction_finding"):
             raise PermissionError("Allow an instruction draft before applying a finding.")
-        with closing(self.connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
-            package, draft = self._target(db, campaign_id, revision, fingerprint)
-            eligible = self._eligible(db, package, draft)
+        with self.storage.write() as records:
+            package, draft = self._target(records, campaign_id, revision, fingerprint)
+            eligible = self._eligible(records, package, draft)
             if not eligible or eligible["finding"]["id"] != finding_id or eligible["correction"]["id"] != correction_id:
                 raise PackageConflict("The finding or buyer correction changed. Reload the brief to review it.")
             finding = eligible["finding"]
@@ -188,6 +158,8 @@ class InstructionFindings:
             instruction = self.drafts.validate_instruction(finding["after"], group["content"]["instruction"])
             if package_fingerprint({**group["content"], "instruction": instruction}) != finding["revised_content_fingerprint"]:
                 raise PackageConflict("The revised wording no longer matches the tested comparison.")
-            return self.drafts._save_instruction_revision(
-                db, draft, group, instruction, {"instruction_reuse": eligible},
+            saved = self.drafts._save_instruction_revision_from(
+                records.drafts, draft, group, instruction, {"instruction_reuse": eligible},
             )
+            records.commit()
+            return saved

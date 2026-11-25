@@ -1,7 +1,7 @@
 """Chat tools over the existing performance and instruction-test application commands."""
 from campaign_agent.creatives import INSTRUCTION_COMPONENTS, render_instruction_choices
 from campaign_agent.handoff import package_fingerprint
-from scripts.campaign_drafts import PackageConflict
+from campaign_agent.domain.errors import PackageConflict
 from .replies import REPLY_VERSION
 from .draft_permissions import permits
 

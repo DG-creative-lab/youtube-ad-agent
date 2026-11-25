@@ -16,14 +16,17 @@ from starlette.testclient import TestClient
 
 from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR, Operator, WorkspaceContext, BrandScope
 from campaign_agent.adapters.fixture_access import offline_fixture
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
-from campaign_agent.assets import AssetStore, AssetUnavailable, owner_key
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST
+from campaign_agent.assets import AssetUnavailable, owner_key
+from campaign_agent.bootstrap.runtime import create_asset_store as AssetStore
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.handoff import package_fingerprint
 from campaign_agent import migrations
 from campaign_agent.migrations import migrate_path, SchemaConflict, versions
 from campaign_agent.recovery import backup_store, restore_store, verify_backup
-from campaign_agent.workspaces import provision_workspace
+from campaign_agent.bootstrap.runtime import provision_workspace
 from scripts.campaign_drafts import StaleDraft
 from scripts.compare_instruction_policies import walkthrough
 import test_hosted_access as hosted_fixtures
@@ -60,7 +63,7 @@ class ProductStorageTests(unittest.TestCase):
         return case
 
     def test_unversioned_learning_history_migrates_and_restores_exactly(self):
-        with patch('campaign_agent.workspaces.migrate', side_effect=legacy_ownership):
+        with patch('campaign_agent.adapters.sqlite_workspace_admission.migrate', side_effect=legacy_ownership):
             learning = walkthrough(self.path)
             old = AgentRuntime(self.path, media_dir=DEMO_MEDIA_DIR)
             revision = learning['draft_revision']
@@ -112,16 +115,16 @@ class ProductStorageTests(unittest.TestCase):
             barrier.wait(timeout=10)
             return migrate_path(self.path)
         with ThreadPoolExecutor(max_workers=3) as pool:
-            self.assertEqual(list(pool.map(lambda _: upgrade(), range(3))), [2, 2, 2])
+            self.assertEqual(list(pool.map(lambda _: upgrade(), range(3))), [4, 4, 4])
         prior = rows(self.path)
         migrate_path(self.path)
         self.assertEqual(rows(self.path), prior)
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT INTO product_schema_migrations(version,name,checksum) VALUES(3,'future','unknown')")
+            db.execute("INSERT INTO product_schema_migrations(version,name,checksum) VALUES(5,'future','unknown')")
         with self.assertRaises(SchemaConflict):
             migrate_path(self.path)
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute('DELETE FROM product_schema_migrations WHERE version=3')
+            db.execute('DELETE FROM product_schema_migrations WHERE version=4')
             db.execute("UPDATE product_schema_migrations SET checksum='changed' WHERE version=1")
         with self.assertRaises(SchemaConflict):
             migrate_path(self.path)

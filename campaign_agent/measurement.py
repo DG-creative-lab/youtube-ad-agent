@@ -1,13 +1,12 @@
-"""Scoped viewer visits, events and comparison completion in local SQLite."""
+"""Scoped viewer visits, events and comparison completion."""
 
-from contextlib import closing
 import re
-import sqlite3
-from time import time_ns
-from uuid import uuid4
 
-from .access import LOCAL_BRAND
 from .creatives import EXAMPLES
+from .domain.errors import PackageConflict
+from .domain.measurement import measurement_capabilities
+from .handoff import package_fingerprint
+from .ports.viewer_storage import ViewerReader, ViewerStorage, ViewerWriter
 
 
 class ViewerNotFound(LookupError):
@@ -15,58 +14,17 @@ class ViewerNotFound(LookupError):
 
 
 class ViewerMeasurement:
-    def __init__(self, path, examples=EXAMPLES, *, campaign_id="tts-sample"):
-        self.path = path
+    def __init__(self, storage: ViewerStorage, examples=EXAMPLES, *, campaign_id="tts-sample", clock_ms, new_visit_id):
         # Server composition selects the campaign. Public payloads cannot override it.
-        self.campaign_id = campaign_id
+        self.storage, self.campaign_id = storage, campaign_id
+        self._clock_ms, self._new_visit_id = clock_ms, new_visit_id
         self.examples = {example.ref: example for example in examples}
         self.links = {example.creative_ref: example for example in examples}
-        with closing(self.connect()) as db, db:
-            db.executescript("""
-                BEGIN IMMEDIATE;
-                CREATE TABLE IF NOT EXISTS viewer_visits (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    creative_ref TEXT NOT NULL, content_fingerprint TEXT, ad_link_id TEXT,
-                    arrived_ms INTEGER, rehearsal INTEGER
-                );
-                CREATE TABLE IF NOT EXISTS viewer_events (
-                    seq INTEGER PRIMARY KEY, visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
-                    event_id TEXT NOT NULL, example_ref TEXT NOT NULL, kind TEXT NOT NULL,
-                    take TEXT NOT NULL, UNIQUE (visit_id, event_id)
-                );
-                CREATE TABLE IF NOT EXISTS viewer_completions (
-                    visit_id TEXT NOT NULL REFERENCES viewer_visits(id),
-                    example_ref TEXT NOT NULL, first_choice TEXT NOT NULL, completed_ms INTEGER,
-                    PRIMARY KEY (visit_id, example_ref)
-                );
-            """)
-            columns = {column[1] for column in db.execute("PRAGMA table_info(viewer_visits)")}
-            if "content_fingerprint" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN content_fingerprint TEXT")
-            if "ad_link_id" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN ad_link_id TEXT")
-            if "campaign_id" not in columns:
-                db.execute("ALTER TABLE viewer_visits ADD COLUMN campaign_id TEXT")
-                # Admit the original demo only if no sibling campaign makes that legacy
-                # attribution ambiguous. Other unbound history stays quarantined.
-                has_owners = db.execute("SELECT 1 FROM sqlite_master WHERE name='campaign_owners' AND type='table'").fetchone()
-                ambiguous_demo = has_owners and db.execute(
-                    "SELECT 1 FROM campaign_owners WHERE client_id=? AND brand_id=? "
-                    "AND campaign_id NOT IN ('tts-sample','tts-catalog')",
-                    (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id)).fetchone()
-                if not ambiguous_demo:
-                    db.execute("UPDATE viewer_visits SET campaign_id='tts-sample' WHERE client_id=? AND brand_id=?",
-                               (LOCAL_BRAND.client_id, LOCAL_BRAND.brand_id))
-            for column in ("arrived_ms", "rehearsal"):
-                if column not in columns:
-                    db.execute(f"ALTER TABLE viewer_visits ADD COLUMN {column} INTEGER")
-            if "completed_ms" not in {column[1] for column in db.execute("PRAGMA table_info(viewer_completions)")}:
-                db.execute("ALTER TABLE viewer_completions ADD COLUMN completed_ms INTEGER")
 
-    def connect(self):
-        db = sqlite3.connect(self.path)
-        db.execute("PRAGMA foreign_keys = ON")
-        return db
+    @staticmethod
+    def capabilities():
+        """Describe existing instrumentation without reading visits or claiming traffic."""
+        return measurement_capabilities()
 
     def resolve(self, creative_ref, example_ref=None):
         origin = self.links.get(creative_ref)
@@ -75,56 +33,79 @@ class ViewerMeasurement:
             raise ViewerNotFound("This comparison is unavailable.")
         return origin, target
 
-    @staticmethod
-    def visit_key(origin, visit_id):
-        return visit_id, origin.scope.client_id, origin.scope.brand_id, origin.creative_ref
+    def open_verified_ad(self, drafts, attribution, visit_id, *, rehearsal):
+        with self.storage.write() as unit:
+            link = unit.verified_setup_link(drafts.scope, drafts.campaign_id, attribution)
+            if link is None:
+                raise ViewerNotFound("This ad comparison is unavailable.")
+            result = self._open_reviewed(
+                drafts,
+                {"creative_ref": link["creative_ref"], "example_ref": link["comparison_ref"], "visit_id": visit_id},
+                link["content_fingerprint"], None, records=unit, ad_link_id=link["id"], rehearsal=rehearsal,
+            )
+            unit.commit()
+            return {**result, "creative_ref": link["creative_ref"]}
 
-    def require_visit(self, db, origin, visit_id):
-        visit = db.execute(
-            "SELECT content_fingerprint, ad_link_id FROM viewer_visits "
-            "WHERE id = ? AND client_id = ? AND brand_id = ? AND creative_ref = ? AND campaign_id IS ?",
-            (*self.visit_key(origin, visit_id), self.campaign_id),
-        ).fetchone()
+    def open_reviewed(self, drafts, data, fingerprint, references):
+        return self._open_reviewed(drafts, data, fingerprint, references)
+
+    def _open_reviewed(self, drafts, data, fingerprint, references, *, records: ViewerWriter | None = None,
+                       ad_link_id=None, rehearsal=False):
+        if fingerprint is None and records is None:
+            return self.open_example(**data)
+        origin, example = self.resolve(data["creative_ref"], data["example_ref"])
+        if references is None:
+            references = {origin.ref: fingerprint}
+        if references.get(origin.ref) != fingerprint or example.ref not in references:
+            raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+        verified = {}
+        for item in self.examples.values():
+            if item.scope != origin.scope or item.ref not in references:
+                continue
+            content = drafts.comparison_content(item, references[item.ref],
+                                                records=records.drafts if records is not None else None)
+            if (package_fingerprint(content) == references[item.ref]
+                    and all(take["sha256"] for take in content["takes"])):
+                verified[item.ref] = content
+        if not verified:
+            raise PackageConflict("The comparison has changed. Reload the package in the planner.")
+        selected_ref = example.ref if example.ref in verified else next(iter(verified))
+        visit = {**data, "example_ref": selected_ref, "content_fingerprint": fingerprint,
+                 "origin_unavailable": origin.ref not in verified, "ad_link_id": ad_link_id, "rehearsal": rehearsal}
+        result = (self.open_example(**visit) if records is None else self.open_from(records, **visit))
+        content = verified[selected_ref]
+        comparison = result["example"]
+        comparison["instruction"] = content["instruction"]
+        for take, reviewed in zip(comparison["takes"], content["takes"]):
+            take["url"] += "?sha256=" + reviewed["sha256"]
+        comparison["captions"] += "?sha256=" + content["captions_sha256"]
+        result["examples"] = [item for item in result["examples"] if item["ref"] in verified]
+        if selected_ref != example.ref:
+            result["notice"] = "That reviewed example is unavailable. Another verified example is open."
+        return result
+
+    def visit_key(self, origin, visit_id):
+        return visit_id, origin.scope.client_id, origin.scope.brand_id, origin.creative_ref, self.campaign_id
+
+    def require_visit(self, records: ViewerReader, origin, visit_id):
+        visit = records.visit_attribution(self.visit_key(origin, visit_id))
         if visit is None:
             raise ViewerNotFound("This visit is unavailable.")
         return visit
 
-    def summarize(self, scope, comparisons, *, connection=None):
+    def summarize(self, scope, comparisons):
         """Count tagged visits and intended-example outcomes in one local snapshot."""
-        if connection is None:
-            with closing(self.connect()) as db:
-                db.execute("BEGIN")
-                return self.summarize(scope, comparisons, connection=db)
-        db = connection
+        with self.storage.read() as records:
+            return self.summarize_from(records, scope, comparisons)
+
+    def summarize_from(self, records: ViewerReader, scope, comparisons):
         observations = []
         for creative_ref, example_ref, fingerprint in comparisons:
             origin, example = self.resolve(creative_ref, example_ref)
             if origin.scope != scope or origin.ref != example.ref:
                 raise ViewerNotFound("This comparison is unavailable.")
-            arrivals, opened, completed = db.execute("""
-                SELECT COUNT(*),
-                    COUNT(CASE WHEN EXISTS (
-                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id
-                            AND e.kind = 'arrival' AND e.example_ref = ?
-                    ) THEN 1 END),
-                    COUNT(CASE WHEN EXISTS (
-                        SELECT 1 FROM viewer_completions c WHERE c.visit_id = v.id AND c.example_ref = ?
-                    ) THEN 1 END)
-                FROM viewer_visits v
-                WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ? AND v.content_fingerprint = ?
-                    AND v.campaign_id = ? AND v.ad_link_id IS NULL
-                    AND EXISTS (
-                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
-                    )
-            """, (example_ref, example_ref, scope.client_id, scope.brand_id, creative_ref, fingerprint, self.campaign_id)).fetchone()
-            unattributed, = db.execute("""
-                SELECT COUNT(*) FROM viewer_visits v
-                WHERE v.client_id = ? AND v.brand_id = ? AND v.creative_ref = ?
-                    AND v.campaign_id = ? AND v.content_fingerprint IS NULL
-                    AND EXISTS (
-                        SELECT 1 FROM viewer_events e WHERE e.visit_id = v.id AND e.kind = 'arrival'
-                    )
-            """, (scope.client_id, scope.brand_id, creative_ref, self.campaign_id)).fetchone()
+            arrivals, opened, completed, unattributed = records.comparison_counts(
+                scope, self.campaign_id, creative_ref, example_ref, fingerprint)
             observations.append({
                 "creative_version": creative_ref, "comparison_version": example_ref,
                 "comparison_fingerprint": fingerprint, "unattributed_arrivals": unattributed,
@@ -133,63 +114,24 @@ class ViewerMeasurement:
             })
         return observations
 
-    @staticmethod
-    def ad_link_activity(db, scope, link, *, campaign_id="tts-sample"):
-        arrivals, completions = db.execute("""
-            SELECT COUNT(*), COUNT(c.visit_id)
-            FROM viewer_visits v
-            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
-            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
-            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
-        """, (f"arrival:{link['comparison_ref']}", scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'], campaign_id)).fetchone()
-        return {"arrivals": arrivals, "completions": completions}
+    def open_example(self, creative_ref, example_ref=None, visit_id=None, **options):
+        with self.storage.write() as unit:
+            result = self.open_from(unit, creative_ref, example_ref, visit_id, **options)
+            unit.commit()
+            return result
 
-    @staticmethod
-    def ad_link_window_activity(db, scope, link, start_ms, end_ms, *, campaign_id="tts-sample"):
-        rows = db.execute("""
-            SELECT v.rehearsal, COUNT(*), COUNT(c.visit_id)
-            FROM viewer_visits v
-            JOIN viewer_events e ON e.visit_id = v.id AND e.event_id = ?
-            LEFT JOIN viewer_completions c ON c.visit_id = v.id AND c.example_ref = e.example_ref
-                AND c.completed_ms >= v.arrived_ms AND c.completed_ms < ?
-            WHERE v.client_id = ? AND v.brand_id = ? AND v.ad_link_id = ?
-                AND v.creative_ref = ? AND v.content_fingerprint = ? AND v.campaign_id = ?
-                AND v.arrived_ms >= ? AND v.arrived_ms < ? AND v.rehearsal IN (0, 1)
-            GROUP BY v.rehearsal
-        """, (f"arrival:{link['comparison_ref']}", end_ms, scope.client_id, scope.brand_id, link['id'],
-              link['creative_ref'], link['content_fingerprint'], campaign_id, start_ms, end_ms))
-        cohorts = {rehearsal: (arrivals, completions) for rehearsal, arrivals, completions in rows}
-        arrivals, completions = cohorts.get(0, (0, 0))
-        rehearsals, rehearsal_completions = cohorts.get(1, (0, 0))
-        return {"arrivals": arrivals, "completions": completions,
-                "rehearsal_arrivals": rehearsals, "rehearsal_completions": rehearsal_completions}
-
-    def open_example(self, creative_ref, example_ref=None, visit_id=None, *,
-                     content_fingerprint=None, origin_unavailable=False, ad_link_id=None, rehearsal=False, connection=None):
-        if connection is None:
-            with closing(self.connect()) as db, db:
-                db.execute("BEGIN IMMEDIATE")
-                return self.open_example(
-                    creative_ref, example_ref, visit_id, content_fingerprint=content_fingerprint,
-                    origin_unavailable=origin_unavailable, ad_link_id=ad_link_id, rehearsal=rehearsal, connection=db,
-                )
+    def open_from(self, records: ViewerWriter, creative_ref, example_ref=None, visit_id=None, *,
+                  content_fingerprint=None, origin_unavailable=False, ad_link_id=None, rehearsal=False):
         origin, target = self.resolve(creative_ref, example_ref)
         if ad_link_id is not None and (target != origin or origin_unavailable or content_fingerprint is None):
             raise ViewerNotFound("This ad comparison is unavailable.")
-        db = connection
         if visit_id is None:
-            visit_id = uuid4().hex
+            visit_id = self._new_visit_id()
             attribution = None if origin_unavailable else content_fingerprint
-            db.execute(
-                "INSERT INTO viewer_visits (id, client_id, brand_id, creative_ref, content_fingerprint, "
-                "ad_link_id, arrived_ms, rehearsal, campaign_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (*self.visit_key(origin, visit_id), attribution, ad_link_id, time_ns() // 1_000_000,
-                 int(rehearsal) if ad_link_id is not None else None, self.campaign_id),
-            )
+            records.add_visit(self.visit_key(origin, visit_id), attribution, ad_link_id, self._clock_ms(),
+                              int(rehearsal) if ad_link_id is not None else None)
         else:
-            attribution, saved_link = self.require_visit(db, origin, visit_id)
+            attribution, saved_link = self.require_visit(records, origin, visit_id)
             if saved_link != ad_link_id:
                 raise ViewerNotFound("This visit is unavailable.")
             # A visit with unknown content can resume, but later verification cannot attribute its old activity.
@@ -197,13 +139,9 @@ class ViewerMeasurement:
                 if attribution != content_fingerprint:
                     raise ViewerNotFound("This visit is unavailable.")
                 if origin_unavailable:
-                    db.execute("UPDATE viewer_visits SET content_fingerprint = NULL WHERE id = ?", (visit_id,))
-        db.execute(
-            "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) "
-            "VALUES (?, ?, ?, 'arrival', '') ON CONFLICT (visit_id, event_id) DO NOTHING",
-            (visit_id, f"arrival:{target.ref}", target.ref),
-        )
-        state = self.state(db, visit_id, target.ref)
+                    records.clear_attribution(visit_id)
+        records.add_arrival(visit_id, target.ref)
+        state = self.state(records, visit_id, target.ref)
         return {
             "visit_id": visit_id,
             "example": {
@@ -223,61 +161,39 @@ class ViewerMeasurement:
         }
 
     @staticmethod
-    def state(db, visit_id, example_ref):
-        scope = (visit_id, example_ref)
-        finished = [row[0] for row in db.execute(
-            "SELECT DISTINCT take FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'finish' ORDER BY take",
-            scope,
-        )]
-        choice = db.execute(
-            "SELECT take FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'choose' ORDER BY seq DESC LIMIT 1",
-            scope,
-        ).fetchone()
-        complete = db.execute(
-            "SELECT 1 FROM viewer_completions WHERE visit_id = ? AND example_ref = ?", scope,
-        ).fetchone()
-        return {"finished": finished, "choice": choice[0] if choice else None, "complete": bool(complete)}
+    def state(records: ViewerReader, visit_id, example_ref):
+        return {"finished": records.finished_takes(visit_id, example_ref),
+                "choice": records.last_choice(visit_id, example_ref),
+                "complete": records.completed(visit_id, example_ref)}
 
-    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take, *, connection=None):
-        if connection is None:
-            with closing(self.connect()) as db, db:
-                db.execute("BEGIN IMMEDIATE")
-                return self.record(creative_ref, visit_id, example_ref, event_id, kind, take, connection=db)
+    def record(self, creative_ref, visit_id, example_ref, event_id, kind, take):
+        with self.storage.write() as unit:
+            result = self.record_from(unit, creative_ref, visit_id, example_ref, event_id, kind, take)
+            unit.commit()
+            return result
+
+    def record_from(self, records: ViewerWriter, creative_ref, visit_id, example_ref, event_id, kind, take,
+                    *, expected_attribution: tuple[str, str] | None = None):
         origin, target = self.resolve(creative_ref, example_ref)
         takes = {item[0] for item in target.takes}
         if not re.fullmatch(r"[0-9a-f]{32}", event_id) or kind not in {"start", "finish", "choose"} or take not in takes:
             raise ValueError("Invalid comparison event.")
         event = (example_ref, kind, take)
-        db = connection
-        self.require_visit(db, origin, visit_id)
-        existing = db.execute(
-            "SELECT example_ref, kind, take FROM viewer_events WHERE visit_id = ? AND event_id = ?",
-            (visit_id, event_id),
-        ).fetchone()
+        saved_attribution = self.require_visit(records, origin, visit_id)
+        if expected_attribution is not None and saved_attribution != expected_attribution:
+            raise ViewerNotFound("This visit is unavailable.")
+        existing = records.event(visit_id, event_id)
         if existing is not None:
             if existing != event:
                 raise ValueError("This event ID belongs to a different action.")
-            return self.state(db, visit_id, example_ref)
-        if not db.execute(
-            "SELECT 1 FROM viewer_events WHERE visit_id = ? AND event_id = ?",
-            (visit_id, f"arrival:{example_ref}"),
-        ).fetchone():
+            return self.state(records, visit_id, example_ref)
+        if records.event(visit_id, f"arrival:{example_ref}") is None:
             raise ViewerNotFound("Open this comparison before recording playback.")
-        if kind == "finish" and not db.execute(
-            "SELECT 1 FROM viewer_events WHERE visit_id = ? AND example_ref = ? AND kind = 'start' AND take = ?",
-            (visit_id, example_ref, take),
-        ).fetchone():
+        if kind == "finish" and not records.started(visit_id, example_ref, take):
             raise ValueError("Start this take before finishing it.")
-        if kind == "choose" and set(self.state(db, visit_id, example_ref)["finished"]) != takes:
+        if kind == "choose" and set(records.finished_takes(visit_id, example_ref)) != takes:
             raise ValueError("Finish both takes before choosing.")
-        db.execute(
-            "INSERT INTO viewer_events (visit_id, event_id, example_ref, kind, take) VALUES (?, ?, ?, ?, ?)",
-            (visit_id, event_id, *event),
-        )
+        records.add_event(visit_id, event_id, event)
         if kind == "choose":
-            db.execute(
-                "INSERT INTO viewer_completions (visit_id, example_ref, first_choice, completed_ms) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                (visit_id, example_ref, take, time_ns() // 1_000_000),
-            )
-        return self.state(db, visit_id, example_ref)
+            records.add_completion(visit_id, example_ref, take, self._clock_ms())
+        return self.state(records, visit_id, example_ref)

@@ -8,9 +8,14 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from campaign_agent.adapters.sqlite_drafts import SQLiteDraftRepository
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, MEDIA_MANIFEST, read_media, write_media_manifest
-from scripts.campaign_drafts import CampaignDrafts, PackageConflict
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.adapters.local_media import MEDIA_MANIFEST, write_media_manifest
+from campaign_agent.handoff import read_media
+from campaign_agent.ports.storage_errors import StorageError
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import PackageConflict
 
 
 class PackageHandoffTests(unittest.TestCase):
@@ -26,7 +31,7 @@ class PackageHandoffTests(unittest.TestCase):
                 # because its filename still matches the bundled catalog.
                 (media / example.takes[0][2]).write_bytes(b'old passage recording')
                 path = root / 'draft.sqlite'
-                with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                     with self.assertRaisesRegex(ValueError, 'Local comparison media'):
                         CampaignDrafts(path, live=live)
                 self.assertFalse(path.exists())
@@ -39,7 +44,7 @@ class PackageHandoffTests(unittest.TestCase):
                 shutil.copytree(DEMO_MEDIA_DIR, media)
                 if not with_manifest:
                     (media / MEDIA_MANIFEST).unlink(missing_ok=True)
-                with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                     drafts = CampaignDrafts(root / 'draft.sqlite', live=True)
                 for example in EXAMPLES:
                     name = example.takes[0][2]
@@ -54,7 +59,7 @@ class PackageHandoffTests(unittest.TestCase):
             media = root / 'media'
             shutil.copytree(DEMO_MEDIA_DIR, media)
             (media / MEDIA_MANIFEST).unlink(missing_ok=True)
-            with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+            with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                 drafts = CampaignDrafts(root / 'draft.sqlite', live=False)
                 saved = drafts.save({'campaign_id': drafts.campaign_id, 'revision': 1,
                                      'placements': self.placements})
@@ -75,7 +80,7 @@ class PackageHandoffTests(unittest.TestCase):
             name = EXAMPLES[0].takes[0][2]
             (media / name).write_bytes(b'authored alternate recording of the current passage')
             write_media_manifest(media, EXAMPLES)
-            with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+            with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                 drafts = CampaignDrafts(root / 'draft.sqlite', live=False)
                 drafts.save({'campaign_id': drafts.campaign_id, 'revision': 1,
                              'placements': self.placements})
@@ -109,7 +114,7 @@ class PackageHandoffTests(unittest.TestCase):
                     if mismatch == 'malformed':
                         (media / MEDIA_MANIFEST).write_text('{invalid json')
                     path = root / 'draft.sqlite'
-                    with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                    with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                         with self.assertRaisesRegex(ValueError, 'Local comparison media'):
                             CampaignDrafts(path, live=False)
                     self.assertFalse(path.exists())
@@ -117,10 +122,11 @@ class PackageHandoffTests(unittest.TestCase):
                     # untouched, including any history awaiting operator recovery.
                     CampaignDrafts(path, live=False, media_dir=DEMO_MEDIA_DIR)
                     before = path.read_bytes()
-                    with patch('scripts.campaign_drafts.MEDIA_DIR', media):
+                    with patch('campaign_agent.bootstrap.runtime.MEDIA_DIR', media):
                         with self.assertRaisesRegex(ValueError, 'Local comparison media'):
                             CampaignDrafts(path, live=False)
                     self.assertEqual(path.read_bytes(), before)
+
 
     def setUp(self):
         directory = self.enterContext(TemporaryDirectory())
@@ -174,6 +180,27 @@ class PackageHandoffTests(unittest.TestCase):
             reopened.export_setup(campaign_id, 3, latest["fingerprint"])
         self.assertEqual(reopened.review_package(campaign_id, 2)["approval"], approved["approval"])
         self.assertEqual(reopened.read_approved_package(campaign_id, 2, fingerprint)["package"], approved["package"])
+
+    def test_approval_unit_rolls_back_when_the_response_cannot_be_completed(self):
+        drafts = self.drafts
+        campaign_id = drafts.campaign_id
+        drafts.save({"campaign_id": campaign_id, "revision": 1, "placements": self.placements})
+        args = campaign_id, 2, drafts.review_package(campaign_id, 2)["fingerprint"]
+        with patch.object(SQLiteDraftRepository, "approval_history",
+                          side_effect=sqlite3.OperationalError("unavailable native approval history")):
+            with self.assertRaisesRegex(StorageError, "Campaign draft storage is unavailable"):
+                drafts.approve_package(*args)
+        reopened = CampaignDrafts(self.path, live=False, media_dir=self.media_dir)
+        self.assertIsNone(reopened.read_approved_package(*args))
+        self.assertEqual(reopened.review_package(campaign_id, 2)["history"], [])
+        approved = reopened.approve_package(*args)
+        self.assertEqual(reopened.approve_package(*args), approved)
+        self.assertEqual(len(approved["history"]), 1)
+        self.assertEqual(reopened.export_setup(*args)["approval"], approved["approval"])
+        with patch.object(SQLiteDraftRepository, "owner_row",
+                          return_value=("local-client", "tts-demo", "local-workspace", "foreign-installation")):
+            with self.assertRaises(PermissionError):
+                reopened.read_approved_package(*args)
 
     def test_review_names_missing_groups_and_blocks_approval(self):
         drafts = self.drafts

@@ -12,8 +12,16 @@ Use Python 3.12 or newer, Node 22.12 or newer, and pnpm 10.33.0 to run the React
 
 ```sh
 (cd web/planner && pnpm install --frozen-lockfile && pnpm build)
-python3 scripts/placement_review.py serve --portable-demo wait
+python3 -m campaign_agent.bootstrap.planner serve
 ```
+
+The local bootstrap uses the typed storage path for simulated placement chat,
+including catalogue registration, follow-ups, draft saving and receipt recovery.
+Review, experiment, delivery and provider commands retain their existing native
+implementations in the same store. The historical `scripts/placement_review.py`
+launcher remains compatible; it does not select this new placement composition.
+For the authored portable delivery walkthrough, use
+`python3 scripts/placement_review.py serve --portable-demo wait` as before.
 
 Choose **Try the offline example** on the home screen to open the campaign workspace and run the recorded agent against the fictional catalog. The workspace shows the completed steps, saved draft revision, placements and comparison links. **Resume preparation** continues a run interrupted in the same browser tab. Use **Placements** to search, edit selections or export placement URLs. Rebuild after editing the React source.
 

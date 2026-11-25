@@ -1,8 +1,12 @@
+from contextlib import closing
+import json
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.campaign_drafts import CampaignDrafts, StaleDraft
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import StaleDraft
 
 
 EDITING = {"id": "SAMPLE00001", "title": "Editing tutorial", "creative": "video-editing", "source": "synthetic"}
@@ -54,6 +58,53 @@ class CampaignDraftTests(unittest.TestCase):
         self.assertEqual(self.drafts.read()["placements"], [])
         self.assertIsNone(self.drafts.read(2))
 
+    def test_borrowed_connection_leaves_commit_and_rollback_to_the_caller(self):
+        payload = {"campaign_id": "tts-sample", "revision": 1, "placements": [EDITING]}
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute("CREATE TABLE draft_markers (label TEXT PRIMARY KEY)")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("INSERT INTO draft_markers VALUES ('rolled back')")
+            self.drafts.save(payload, connection=db)
+            self.assertEqual(self.drafts.read()["revision"], 1)
+            db.rollback()
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [])
+            self.assertEqual(self.drafts.read()["revision"], 1)
+
+            db.execute("BEGIN IMMEDIATE")
+            saved = self.drafts.save(payload, connection=db)
+            db.execute("INSERT INTO draft_markers VALUES ('committed')")
+            self.assertEqual(self.drafts.read()["revision"], 1)
+            db.commit()
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), saved)
+        self.assertIsNone(reopened.read(3))
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
+
+    def test_write_unit_rolls_back_post_save_failure_and_commits_sibling_records(self):
+        payload = {"campaign_id": "tts-sample", "revision": 1, "placements": [EDITING]}
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("CREATE TABLE draft_markers (label TEXT PRIMARY KEY)")
+            seed = db.execute("SELECT * FROM campaign_revisions").fetchall()
+        for failure in (RuntimeError, KeyboardInterrupt):
+            with self.subTest(failure=failure), self.assertRaises(failure):
+                with self.drafts.write_unit() as db:
+                    self.drafts.save(payload, connection=db)
+                    db.execute("INSERT INTO draft_markers VALUES ('interrupted')")
+                    raise failure('Interrupted after draft and sibling write')
+            with closing(sqlite3.connect(self.path)) as db:
+                self.assertEqual(db.execute("SELECT * FROM campaign_revisions").fetchall(), seed)
+                self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [])
+        with self.drafts.write_unit() as db:
+            saved = self.drafts.save(payload, connection=db)
+            db.execute("INSERT INTO draft_markers VALUES ('committed')")
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), saved)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT * FROM campaign_revisions WHERE revision=1").fetchall(), seed)
+            self.assertEqual(db.execute("SELECT * FROM draft_markers").fetchall(), [('committed',)])
+
     def test_catalog_and_sample_campaigns_are_separate(self):
         self.save(1, [EDITING])
         catalog = CampaignDrafts(self.path, live=True)
@@ -86,8 +137,38 @@ class CampaignDraftTests(unittest.TestCase):
             {**BOOK, "source": "creator_supplied", "catalog_ref": ref},
             {**EDITING, "source": "licensed", "catalog_ref": ref},
             {**EDITING, "source": "creator_supplied", "title": "Search title", "catalog_ref": ref},
+            {**EDITING, "source": "creator_supplied", "catalog_ref": ref, "source_reference": "Unverified substitute"},
         )
         for row in attempts:
             with self.subTest(row=row), self.assertRaises(ValueError):
                 catalog.save({"campaign_id": "tts-catalog", "revision": 1, "placements": [row]})
         self.assertIsNone(catalog.read(2))
+
+    def test_reopen_and_append_preserve_noncanonical_historical_snapshot_text(self):
+        historical = self.save(1, [{**EDITING, "title": "Café é · 朗読 🎙"}])
+        raw = " \n" + json.dumps(historical, ensure_ascii=False, indent=3) + "\n\t"
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE campaign_revisions SET snapshot=? WHERE campaign_id=? AND revision=2",
+                       (raw, "tts-sample"))
+        reopened = CampaignDrafts(self.path, live=False)
+        self.assertEqual(reopened.read(), historical)
+        saved = reopened.save({"campaign_id": "tts-sample", "revision": 2, "placements": []})
+        self.assertEqual(saved["revision"], 3)
+        self.assertEqual(reopened.read(2), historical)
+        with closing(sqlite3.connect(self.path)) as db:
+            retained = db.execute("SELECT snapshot FROM campaign_revisions WHERE campaign_id=? AND revision=2",
+                                  ("tts-sample",)).fetchone()[0]
+        self.assertEqual(retained.encode("utf-8"), raw.encode("utf-8"))
+
+    def test_admitted_legacy_null_snapshot_still_fails_closed(self):
+        path = self.path.parent / "legacy.sqlite3"
+        with closing(sqlite3.connect(path)) as db, db:
+            db.execute("CREATE TABLE campaign_revisions (campaign_id TEXT, revision INTEGER, snapshot TEXT, "
+                       "PRIMARY KEY(campaign_id, revision))")
+            db.execute("INSERT INTO campaign_revisions VALUES ('tts-sample', 1, NULL)")
+        drafts = CampaignDrafts(path, live=False)
+        with self.assertRaises(TypeError):
+            drafts.read()
+        with self.assertRaises(TypeError):
+            drafts.read(1)
+        self.assertIsNone(drafts.read(2))

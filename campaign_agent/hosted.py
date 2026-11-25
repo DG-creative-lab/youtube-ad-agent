@@ -1,10 +1,9 @@
 """ASGI staff/public composition over existing commands; no loopback HTTP wrapper."""
-from contextlib import closing
 from html import escape
 import json
+import hashlib
 from pathlib import Path
 import secrets
-import sqlite3
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
@@ -13,17 +12,17 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from campaign_agent.access import Operator
+from campaign_agent.domain.scope import Operator
 from campaign_agent.assets import AssetUnavailable
-from campaign_agent.adapters.gateplane import GateplaneAccess
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.handoff import caption_bytes, media_sha256, read_media
-from campaign_agent.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
+from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.measurement import ViewerNotFound
-from campaign_agent.ports.access import AccessUnavailable
-from campaign_agent.publications import Publications
+from campaign_agent.ports.access import AccessUnavailable, StaffAuthorityFactory
 from campaign_agent.staff import SignInRequired
-from scripts.campaign_drafts import PackageConflict, StaleDraft
+from campaign_agent.provider_sessions import ProviderContext, validate_fields
+from campaign_agent.ports.inference import ProviderError
+from campaign_agent.domain.errors import PackageConflict, StaleDraft
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,11 +48,18 @@ def fields(data, required, optional=()):
 
 class HostedApplication:
     def __init__(self, path, sessions, client, assets, *, staff_origin, viewer_origin,
-                 application_id='youtube', fixture_login=None):
+                 publications, provider_sessions, runtime_factory, authority_factory: StaffAuthorityFactory,
+                 application_id='youtube', fixture_login=None, provider_metadata=None,
+                 provider_completion_transport=None):
         self.path, self.sessions, self.client, self.assets = path, sessions, client, assets
         self.staff_origin, self.viewer_origin, self.application_id = staff_origin, viewer_origin, application_id
+        self.provider_completion_transport=provider_completion_transport
+        self.authority_factory = authority_factory
+        self.runtime_factory = runtime_factory
         self.fixture_login = fixture_login
         self.fixture = fixture_login is not None
+        if self.fixture and provider_metadata is not None and not getattr(provider_metadata,'synthetic',False):
+            raise ValueError('The offline fixture accepts synthetic provider metadata only.')
         for origin in (staff_origin, viewer_origin):
             url = urlsplit(origin)
             if self.fixture and url.hostname != '127.0.0.1':
@@ -65,7 +71,8 @@ class HostedApplication:
         if staff_origin == viewer_origin:
             raise ValueError('Staff and viewer origins must be separate.')
         self.cookie = 'gp_fixture_session' if self.fixture else '__Host-gp_session'
-        self.publications = Publications(path, assets)
+        self.publications = publications
+        self.provider_sessions = provider_sessions
         self.staff = self._app(False)
         self.viewer = self._app(True)
 
@@ -73,12 +80,17 @@ class HostedApplication:
         async def endpoint(request: Request):
             origin = self.viewer_origin if public else self.staff_origin
             csrf = None
+            provider_route = not public and request.url.path.startswith('/api/openrouter/')
             try:
                 if request.headers.get('host') != urlsplit(origin).netloc or request.url.scheme != urlsplit(origin).scheme:
+                    if provider_route:
+                        raise ProviderError('access_denied')
                     return JSONResponse({'error': 'Use the registered application origin.'}, status_code=403)
                 site = request.headers.get('sec-fetch-site')
                 if site not in (None, 'same-origin', 'none') and not (
                         request.method in {'GET', 'HEAD'} and request.headers.get('sec-fetch-mode') == 'navigate'):
+                    if provider_route:
+                        raise ProviderError('access_denied')
                     return JSONResponse({'error': 'Cross-origin request rejected.'}, status_code=403)
                 if request.method == 'POST' and request.headers.get('origin') != origin:
                     raise PermissionError('Use the registered application origin.')
@@ -88,6 +100,8 @@ class HostedApplication:
                 async for chunk in request.stream():
                     raw += chunk
                     if len(raw) > 800_000:
+                        if provider_route:
+                            raise ProviderError('invalid_request')
                         return JSONResponse({'error': 'Request is too large.'}, status_code=413)
                 if request.method == 'POST':
                     if request.headers.get('content-type', '').split(';')[0] != 'application/json':
@@ -96,6 +110,8 @@ class HostedApplication:
                 else:
                     data = {}
                 response, csrf = await run_in_threadpool(self._handle, request, data, public)
+            except ProviderError as exc:
+                response = JSONResponse(exc.response(),status_code=exc.status)
             except SignInRequired:
                 response = JSONResponse({'error': 'Sign in to open this workspace.'}, status_code=401)
             except AccessUnavailable:
@@ -110,6 +126,11 @@ class HostedApplication:
                 response = JSONResponse({'error': 'Invalid command or unsupported fields.'}, status_code=400)
             except Exception:
                 response = JSONResponse({'error': 'Could not complete this action.'}, status_code=503)
+            if provider_route and response.status_code>=400 and b'"code"' not in response.body:
+                code={400:'invalid_request',401:'sign_in_required',403:'access_denied',409:'operation_conflict',
+                      429:'admission_busy'}.get(response.status_code,'authority_unavailable')
+                error=ProviderError(code)
+                response=JSONResponse(error.response(),status_code=error.status)
             response.headers.update({'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
                 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
                 'Cross-Origin-Resource-Policy': 'same-origin', 'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
@@ -122,13 +143,13 @@ class HostedApplication:
         return Starlette(routes=[Route('/{path:path}', endpoint, methods=['GET', 'HEAD', 'POST'])])
 
     def runtime(self, token, campaign, command):
-        access = GateplaneAccess(self.path, self.sessions, token, self.client,
-                                 application_id=self.application_id, command=command)
+        access = self.authority_factory(self.path, self.sessions, token, self.client,
+                                        application_id=self.application_id, command=command)
         _, context, principal = access.principal(campaign)
         examples, media_dir = self.assets(context.scope.client_id, context.scope.brand_id)
-        runtime = AgentRuntime(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
+        runtime = self.runtime_factory(self.path, Operator(principal['actor']['principal_id'], frozenset({context.scope})),
                     context=context, campaign_id=campaign, access=access, examples=examples, media_dir=media_dir,
-                    viewer_links=self.publications.approved_links)
+                    viewer_links=self.publications.approved_links,web=True)
         return runtime, principal
 
     def _handle(self, request, data, public):
@@ -154,9 +175,46 @@ class HostedApplication:
         if self.fixture and path == '/fixture.js' and method == 'GET':
             return Response("document.getElementById('profiles').addEventListener('click',async e=>{if(e.target.tagName!=='BUTTON')return;const r=await fetch('/fixture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:e.target.value})});if(r.ok)location.assign((await r.json()).path);else document.body.append(' Access unavailable.');});", media_type='application/javascript'), None
         token = request.cookies.get(self.cookie)
+        if path.startswith('/api/openrouter/'):
+            if method!='POST' or request.query_params:
+                raise ProviderError('invalid_request')
+            action=path.removeprefix('/api/openrouter/')
+            validate_fields(action,data)
+            session = self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),session.csrf):
+                raise ProviderError('access_denied')
+            session_digest=hashlib.sha256(token.encode()).hexdigest()
+            if action=='disconnect':
+                # Original local session is sufficient only for revocation, not metadata or inference.
+                context=ProviderContext('',None,'',session_digest,session.expires_at,{},lambda:self.sessions.local(token))
+                return JSONResponse(self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,None)),session.csrf
+            identity,campaign,csrf=self.sessions.current(token)
+            command={'method':method,'path':path,'query':{},'body':data}
+            runtime,_=self.runtime(token,campaign,command)
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,session_digest,session.expires_at,command,
+                                    lambda:self.sessions.local(token))
+            result=self.provider_sessions.command(action,data,request.headers.getlist('x-openrouter-key'),context,runtime.drafts.access)
+            return JSONResponse(result),csrf
+        agent_paths={'/api/agent/placements','/api/agent/next-test','/api/agent/instruction-review','/api/agent/experiment-next-test','/api/agent/run'}
+        if method=='POST' and path in agent_paths:
+            from .foreground_inference import ForegroundInference,dispatch_agent
+            session = self.sessions.local(token)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token',''),session.csrf): raise ProviderError('access_denied')
+            _,campaign,csrf=self.sessions.current(token)
+            command={'method':method,'path':path,'query':dict(request.query_params),'body':data}
+            if request.query_params: raise ProviderError('invalid_request')
+            runtime,_=self.runtime(token,campaign,command)
+            context=ProviderContext(runtime.operator.id,runtime.drafts.context,campaign,hashlib.sha256(token.encode()).hexdigest(),session.expires_at,command,lambda:self.sessions.local(token))
+            foreground=ForegroundInference(self.provider_sessions,context,runtime.drafts.access,request.headers.getlist('x-openrouter-key'),completion_transport=self.provider_completion_transport)
+            foreground.attach(runtime)
+            try: result=dispatch_agent(runtime,path,data)
+            finally: foreground.close()
+            return JSONResponse(result),csrf
+        if request.headers.getlist('x-openrouter-key'):
+            raise ProviderError('invalid_request')
         if path == '/api/session/end' and method == 'POST':
-            row = self.sessions.local(token, allow_expired=True)
-            if not secrets.compare_digest(request.headers.get('x-csrf-token', ''), row[5]):
+            session = self.sessions.local(token, allow_expired=True)
+            if not secrets.compare_digest(request.headers.get('x-csrf-token', ''), session.csrf):
                 raise PermissionError('Refresh the session before submitting changes.')
             fields(data, set())
             self.sessions.end(token)
@@ -208,7 +266,8 @@ class HostedApplication:
             return Response(data, media_type='text/vtt' if take == 'captions' else 'video/mp4' if name.endswith('.mp4') else 'audio/mpeg')
         if path in {'/api/config', '/api/mode'}:
             return {'live': False, 'demoRequest': DEMO_REQUEST, 'viewerOrigin': '', 'publicViewerOrigin': self.viewer_origin,
-                'googleAdsReporting': False, 'openrouterReviewModels': [], 'openrouterDraftModels': [],
+                'googleAdsReporting': False, 'openrouterAvailable': self.provider_sessions.metadata is not None,
+                'openrouterReviewModels': [], 'openrouterDraftModels': [],
                 'instructionTestLimits': {'initial': INITIAL_SAMPLE_SIZE, 'batch': ADDITIONAL_BATCH_SIZE,
                     'cap': SAMPLE_CAP, 'batchCost': POLICY_V1['batch_cost']},
                 'agentPlanner': {**r.planner.options(), 'catalogs': r.planner.catalogs.list()},
@@ -218,6 +277,9 @@ class HostedApplication:
         if path == '/api/campaign':
             fields(q, set(), {'revision'})
             return r.drafts.read(int(q['revision']) if 'revision' in q else None)
+        if path == '/api/agent/capabilities':
+            fields(q, set())
+            return r.capabilities()
         if path == '/api/agent/conversations':
             return r.planner.conversations.list()
         if path in {'/api/agent/conversation', '/api/agent/run'}:
@@ -235,11 +297,8 @@ class HostedApplication:
                 return r.drafts.read_approved_package(r.drafts.campaign_id, int(q['revision']), q['approval'])
             result = reads[path](r.drafts.campaign_id, int(q['revision']), **({'fingerprint': q['fingerprint']} if 'fingerprint' in q else {}))
             if path == '/api/campaign/package':
-                with closing(sqlite3.connect(self.path)) as db:
-                    links = [{'creative_ref': creative, 'url': self.viewer_origin + '/viewer?attribution=' + token}
-                             for token, creative in db.execute('SELECT id,creative_ref FROM public_comparisons '
-                                 'WHERE campaign_id=? AND revision=? AND fingerprint=? AND active=1 AND expires_at>?',
-                                 (r.drafts.campaign_id, int(q['revision']), result['fingerprint'], self.publications.clock()))]
+                links = self.publications.active_links(r.drafts, int(q['revision']), result['fingerprint'])
+                links = [{'creative_ref': link['creative_ref'], 'url': self.viewer_origin + link['path']} for link in links]
                 return {**result, 'public_comparisons': links}
             return result
         raise ViewerNotFound()

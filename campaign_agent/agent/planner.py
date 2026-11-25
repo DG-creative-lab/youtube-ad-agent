@@ -4,13 +4,18 @@ import json
 import re
 import sqlite3
 
-from campaign_agent.adapters.openrouter_reviews import ReviewInferenceError
+from campaign_agent.domain.inference_errors import ReviewInferenceError
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
+from campaign_agent.adapters.sqlite_runs import SQLiteRunStore
+from campaign_agent.ports.inference import ProviderError
+from campaign_agent.application.inference_diagnostics import trace_projection, FAILURES
+from campaign_agent.ports.placement_commit import PlacementCommitUnit, PlacementCommitStorage, PlacementRepositories
+from campaign_agent.ports.planner_records import PlannerRunScope, PlannerHistoryReader, PlannerReadStorage, PlannerReceiptStorage
+from campaign_agent.ports.planning import MainModel, PlannerModel, PlacementClassifier
 from campaign_agent.delivery import delivery_message
-from campaign_agent.delivery_next_test import recommendation_message
+from campaign_agent.domain.delivery_next_test import recommendation_message
 from campaign_agent.handoff import package_fingerprint
-from campaign_agent.placement_discovery import PlacementDiscovery, SimulatedClassifier
-from scripts.campaign_drafts import PackageConflict
-from .planning_models import OpenRouterPlanner, SimulatedPlanner
+from campaign_agent.domain.errors import PackageConflict
 from .conversations import CampaignConversations
 from .replies import REPLY_VERSION, clarification, reply, verified_result
 from .review_tools import CampaignReviewTools
@@ -50,47 +55,53 @@ DELIVERY_NEXT_TEST_REQUEST = re.compile(
 
 
 class PlacementAgent:
-    def __init__(self, owner, models=(), *, transport=None, simulator=None, classifier=None):
+    def __init__(self, owner, *, remote: PlannerModel, simulator: MainModel, classifier: PlacementClassifier,
+                 catalogs, receipts: PlannerReceiptStorage, commit_storage: PlacementCommitStorage,
+                 read_storage: PlannerReadStorage, conversations):
         self.owner, self.path, self.drafts = owner, owner.path, owner.drafts
-        self.catalogs = PlacementDiscovery(self.drafts)
-        self.remote = OpenRouterPlanner(models, transport=transport)
-        self.simulator = simulator or SimulatedPlanner()
-        self.classifier = classifier or SimulatedClassifier()
+        self.foreground_compatible = False
+        self.web_disabled = owner.web
+        self.catalogs = catalogs
+        self.remote = remote
+        self.remote.web_disabled = owner.web
+        self.simulator = simulator
+        self.classifier = classifier
         self.review_tools = CampaignReviewTools(self)
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS planner_sessions (
-                    id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                    actor_id TEXT NOT NULL, settings TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS planner_defaults (
-                    client_id TEXT, brand_id TEXT, actor_id TEXT, model TEXT NOT NULL,
-                    PRIMARY KEY(client_id,brand_id,actor_id));
-                CREATE TABLE IF NOT EXISTS planner_jobs (
-                    run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                    classification_state TEXT NOT NULL DEFAULT 'pending', classification TEXT, outcome TEXT);
-                CREATE TABLE IF NOT EXISTS planner_turns (
-                    run_id TEXT, position INTEGER, state TEXT NOT NULL, receipt TEXT, error TEXT,
-                    PRIMARY KEY(run_id,position));
-            ''')
+        self.receipt_storage = receipts
+        self.placement_commit_storage = commit_storage
+        self.read_storage = read_storage
+        self.conversation_storage = conversations
         self.conversations = CampaignConversations(self)
+
+    def _require_model_available(self, settings):
+        # The supplied-model seam is offline-only until admitted dispatch is a port.
+        if self.web_disabled and not self.foreground_compatible:
+            raise ReviewInferenceError(
+                'Browser inference awaits scoped admission and recovery. Use offline mode.')
+        self.remote.require_available(settings)
 
     def options(self):
         self.owner.require("youtube:campaign.read")
         models = [{'id': 'simulated', 'label': 'Simulated agent', 'mode': 'simulated'},
                   {'id': 'simulated-inspect', 'label': 'Simulated agent · inspect first', 'mode': 'simulated'}]
-        models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute('SELECT model FROM planner_defaults WHERE client_id=? AND brand_id=? AND actor_id=?',
-                             (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)).fetchone()
+        if not self.web_disabled and not self.remote.web_disabled:
+            models += [{'id': item, 'label': item, 'mode': 'openrouter'} for item in self.remote.models]
+        with self.read_storage.read() as records:
+            row = records.default_row(
+                self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id)
         default = row[0] if row and row[0] in {item['id'] for item in models} else 'simulated'
         return {'models': models, 'default': default, 'max_turns': MAX_TURNS,
                 'specialist': 'simulated_decision', 'specialist_label': 'Automatic · simulated decision model'}
 
     def owns(self, run_id):
-        with closing(sqlite3.connect(self.path)) as db:
-            return db.execute('SELECT 1 FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone() is not None
+        with self.read_storage.read() as records:
+            return records.job_exists_row(run_id) is not None
 
-    def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none'):
+    def start(self, request, model, session_id, run_id, catalog_id, after_message=None, draft_permission='none', provider_selection_id=None):
+        if self.owner.foreground:
+            self.owner.foreground.guard_data({'request':request,'model':model,'session_id':session_id,'run_id':run_id,
+                'catalog_id':catalog_id,'after_message':after_message,'draft_permission':draft_permission,
+                'provider_selection_id':provider_selection_id})
         self.owner.require("youtube:agent.run")
         self.owner.require("youtube:campaign.read")
         if (any(not isinstance(value, str) or not ID.fullmatch(value) for value in (session_id, run_id, catalog_id))
@@ -100,10 +111,14 @@ class PlacementAgent:
             raise ValueError('Supply a valid conversation message reference.')
         if not isinstance(draft_permission, str) or draft_permission not in DRAFT_PERMISSIONS:
             raise ValueError('Choose a valid draft permission for this request.')
-        settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
+        if provider_selection_id is not None:
+            if model in SIMULATED or self.owner.foreground is None: raise ValueError('Use a provider selection only for OpenRouter.')
+            settings=self.owner.foreground.settings(provider_selection_id,model,'planner',self.remote.prompt_version)
+        else:
+            settings = ({'mode': 'simulated', 'model': model} if model in SIMULATED else self.remote.settings(model))
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            existing = db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+            existing = SQLitePlannerStore(db).job_snapshot_row(run_id)
             if existing:
                 self.owner._owned_run(db, run_id)
                 source = json.loads(existing[0])
@@ -115,10 +130,12 @@ class PlacementAgent:
                 if source.get('draft_permission', 'none') != draft_permission:
                     raise ValueError('This run ID has different draft authority. Send a new request to change it.')
                 return run_id
+            if settings['mode']=='openrouter' and (self.web_disabled or self.remote.web_disabled):
+                self._require_model_available(settings)
             expected = (self.owner.drafts.scope.client_id, self.owner.drafts.scope.brand_id, self.owner.operator.id, json.dumps(settings))
-            self.catalogs.read(db, catalog_id)
+            self.catalogs.read(SQLitePlannerStore(db).catalogs, catalog_id)
             current = self.drafts._read(db)
-            previous, truncated = self.conversations.begin(db, session_id, settings, run_id, request,
+            previous, truncated = self.conversations.begin(SQLitePlannerStore(db).conversations, session_id, settings, run_id, request,
                                                           catalog_id, current['revision'], after_message)
             context = {'request': request, 'session_id': session_id, 'catalog_id': catalog_id,
                        'revision': current['revision'], 'settings': settings,
@@ -144,12 +161,9 @@ class PlacementAgent:
                 if delivery_next_test:
                     report = self.owner.delivery.saved_report(db, binding) if binding else None
                     context.update(delivery_next_test=True, delivery_report_id=report['id'] if report else None)
-            db.execute('INSERT INTO planner_defaults VALUES(?,?,?,?) ON CONFLICT DO UPDATE SET model=excluded.model',
-                       (*expected[:3], model))
-            db.execute('INSERT INTO agent_runs VALUES(?,?,?,?,?,?,?)',
-                       (run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id))
-            db.execute('INSERT INTO planner_jobs(run_id,session_id,snapshot) VALUES(?,?,?)',
-                       (run_id, session_id, json.dumps(context)))
+            SQLitePlannerStore(db).upsert_default(*expected[:3], model)
+            SQLiteRunStore(db).create_run(run_id, *expected[:3], request, 'running', self.owner.drafts.campaign_id)
+            SQLitePlannerStore(db).create_job(run_id, session_id, json.dumps(context))
         return run_id
 
     def _context(self, db, run_id):
@@ -157,18 +171,27 @@ class PlacementAgent:
         _, status = self.owner._owned_run(db, run_id)
         if status != 'running':
             raise PackageConflict('This request is no longer active. Read the latest conversation.')
-        source = json.loads(db.execute('SELECT snapshot FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()[0])
-        if self.conversations.session(db, source['session_id']) != source['settings']:
+        source = json.loads(SQLitePlannerStore(db).job_snapshot_row(run_id)[0])
+        if self.conversations.session(SQLitePlannerStore(db).conversations, source['session_id']) != source['settings']:
             raise PermissionError('The conversation scope or model has changed.')
-        if self.drafts._read(db)['revision'] != source['revision']:
+        current = self.drafts._read(db)
+        if current['revision'] != source['revision']:
             raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            # Application-owned vocabulary, scoped and checked against the run's revision.
+            if source['settings'].get('prompt_version') in ('campaign-planner-v8', 'campaign-planner-v9'):
+                source['campaign_contexts'] = current['brief']['contexts']
+            else:
+                source.pop('campaign_contexts', None)
+            if source['settings'].get('prompt_version') == 'campaign-planner-v9':
+                source['measurement_capabilities'] = self.owner.performance.measurement_capabilities()
+            else:
+                source.pop('measurement_capabilities', None)
         return source
 
-    def _history(self, db, run_id):
+    def _history(self, records: PlannerHistoryReader, run_id):
         history = []
-        for tool, result, receipt in db.execute(
-                'SELECT s.tool,s.result,t.receipt FROM agent_steps s JOIN planner_turns t '
-                'ON t.run_id=s.run_id AND t.position=s.position WHERE s.run_id=? ORDER BY s.position', (run_id,)):
+        for tool, result, receipt in records.history_rows(run_id):
             result, receipt = json.loads(result), json.loads(receipt)
             reply_status = {'respond': 'answered', 'ask_clarification': 'needs_input'}.get(tool)
             if reply_status and 'error' not in result:
@@ -181,17 +204,16 @@ class PlacementAgent:
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             source = self._context(db, run_id)
-            state, saved = db.execute('SELECT classification_state,classification FROM planner_jobs WHERE run_id=?',
-                                      (run_id,)).fetchone()
+            state, saved = SQLitePlannerStore(db).classification_row(run_id)
             if state == 'received':
                 return json.loads(saved)
             if state != 'pending':
                 raise ReviewInferenceError('The specialist request outcome is unknown. Start a new run.')
             if self.classifier.route != source['routing']['classifier']:
                 raise ValueError('The pinned specialist route is unavailable.')
-            rows = self.catalogs.read(db, source['catalog_id'])
+            rows = self.catalogs.read(SQLitePlannerStore(db).catalogs, source['catalog_id'])
             contexts = self.drafts._read(db)['brief']['contexts']
-            db.execute("UPDATE planner_jobs SET classification_state='requested' WHERE run_id=?", (run_id,))
+            SQLitePlannerStore(db).request_classification(run_id)
         try:
             assignments = self.classifier.classify(rows, contexts)
             if (not isinstance(assignments, list) or len(assignments) != len(rows)
@@ -202,14 +224,11 @@ class PlacementAgent:
                     or {row['id'] for row in assignments} != {row['video_id'] for row in rows}):
                 raise ValueError('Invalid classification receipt')
         except Exception:
-            with closing(sqlite3.connect(self.path)) as db, db:
-                db.execute("UPDATE planner_jobs SET classification_state='failed' WHERE run_id=?", (run_id,))
+            self.receipt_storage.fail_classification(run_id)
             raise ReviewInferenceError('The specialist response failed validation. Start a new run.') from None
         result = {'assignments': assignments, 'route': source['routing']['classifier'],
                   'label': 'Simulated decision response; accuracy not evaluated'}
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("UPDATE planner_jobs SET classification_state='received',classification=? WHERE run_id=?",
-                       (json.dumps(result), run_id))
+        self.receipt_storage.receive_classification(run_id, json.dumps(result))
         return result
 
     def resume(self, run_id, max_steps=1):
@@ -222,23 +241,22 @@ class PlacementAgent:
                 if status != 'running':
                     return self.read(run_id)
                 source = self._context(db, run_id)
-                history = self._history(db, run_id)
+                history = self._history(SQLitePlannerStore(db), run_id)
                 try:
                     self.review_tools.check_progress(db, source, history)
                 except PackageConflict:
                     self._finish(db, run_id, self.review_tools.refresh_outcome(source, history), 'needs_input')
                     continue
                 position = len(history)
-                row = db.execute('SELECT state,receipt,error FROM planner_turns WHERE run_id=? AND position=?',
-                                 (run_id, position)).fetchone()
-                if row and row[0] != 'received':
+                row = SQLitePlannerStore(db).turn_row(run_id, position)
+                if row and row[0] != 'received' and not source['settings'].get('foreground'):
                     raise ReviewInferenceError(row[2] or 'This model request is in progress or its outcome is unknown. Start a new run.')
-                receipt = json.loads(row[1]) if row else None
+                receipt = json.loads(row[1]) if row and row[1] else None
                 if not row:
                     if source['settings']['mode'] == 'openrouter' and not source.get('delivery_request'):
-                        self.remote.require_available(source['settings'])
-                        self.remote.prepare_turn(source, history, source['settings'])
-                    db.execute("INSERT INTO planner_turns VALUES(?,?,'requested',NULL,NULL)", (run_id, position))
+                        self._require_model_available(source['settings'])
+                        self.remote.validate_turn(source, history, source['settings'])
+                    SQLitePlannerStore(db).request_turn(run_id, position)
             if receipt is None:
                 try:
                     if source.get('delivery_request'):
@@ -248,26 +266,30 @@ class PlacementAgent:
                     else:
                         model = self.remote if source['settings']['mode'] == 'openrouter' else self.simulator
                         receipt = model.next_turn(source, history, source['settings'])
+                    if source['settings'].get('foreground'):
+                        self.owner.foreground.guard_receipt(receipt)
                     if (not isinstance(receipt, dict) or not isinstance(receipt.get('call_id'), str)
                             or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', receipt['call_id'])
                             or not isinstance(receipt.get('tool'), str) or len(receipt['tool']) > 64
                             or not isinstance(receipt.get('arguments'), dict)):
                         raise ValueError('Invalid tool request')
                     usage = receipt.get('inference', {}).get('usage') or {}
-                    if (usage.get('cost_usd') is not None and usage['cost_usd'] > 0
+                    if (not source['settings'].get('foreground') and usage.get('cost_usd') is not None and usage['cost_usd'] > 0
                             or usage.get('output_tokens') is not None and usage['output_tokens'] > 512):
                         raise ValueError('Exceeded inference limit')
+                except ProviderError as error:
+                    if error.code in FAILURES:
+                        self.receipt_storage.fail_turn(run_id,position,error.code)
+                    raise
                 except Exception:
-                    with closing(sqlite3.connect(self.path)) as db, db:
-                        db.execute("UPDATE planner_turns SET state='failed',error=? WHERE run_id=? AND position=?",
-                                   ('The main-model request failed or its outcome is unknown. Start a new run.', run_id, position))
+                    self.receipt_storage.fail_turn(
+                        run_id, position, 'The main-model request failed or its outcome is unknown. Start a new run.')
                     raise ReviewInferenceError('The main-model request failed or its outcome is unknown. Start a new run.') from None
-                with closing(sqlite3.connect(self.path)) as db, db:
-                    db.execute("UPDATE planner_turns SET state='received',receipt=? WHERE run_id=? AND position=?",
-                               (json.dumps(receipt), run_id, position))
+                self.receipt_storage.receive_turn(run_id, position, json.dumps(receipt))
+            if self.owner.foreground: self.owner.foreground.before_commit(source['settings'])
             self.owner.require("youtube:agent.run")
             classified = None
-            if receipt['tool'] == 'classify_catalog' and not receipt['arguments']:
+            if receipt['tool'] == 'classify_catalog' and not receipt['arguments'] and not source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
                 classified = self._classify(run_id)
             captured_review = None
             if receipt['tool'] == 'review_performance' and not receipt['arguments']:
@@ -285,46 +307,140 @@ class PlacementAgent:
                         setup_id=source['delivery_setup_id'], demo_scenario=source.get('delivery_demo_scenario'))
                 except PackageConflict:
                     pass
-            with closing(sqlite3.connect(self.path)) as db, db:
-                db.execute('BEGIN IMMEDIATE')
-                _, status = self.owner._owned_run(db, run_id)
-                if status != 'running':
-                    return self.read(run_id)
-                source = self._context(db, run_id)
-                if db.execute('SELECT 1 FROM agent_steps WHERE run_id=? AND position=?', (run_id, position)).fetchone():
-                    continue
-                history = self._history(db, run_id)
-                self.owner.require("youtube:agent.run")
-                db.execute('SAVEPOINT planner_tool')
-                try:
-                    result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
-                except PackageConflict:
-                    db.execute('ROLLBACK TO planner_tool')
-                    if receipt['tool'] not in {'review_performance', 'load_experiment_evidence',
-                                               'assess_instruction_experiment', 'prepare_next_test', 'respond'}:
-                        raise
-                    result, status = self.review_tools.refresh_outcome(source, history, receipt['tool']), 'needs_input'
-                except (ValueError, TypeError):
-                    db.execute('ROLLBACK TO planner_tool')
-                    result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
-                db.execute('RELEASE planner_tool')
-                db.execute('INSERT INTO agent_steps VALUES(?,?,?,?)',
-                           (run_id, position, receipt['tool'], json.dumps(result)))
-                if status == 'running' and position + 1 >= source['max_turns']:
-                    result, status = {'revision': source['revision'], 'ambiguous': [],
-                                      'message': 'The turn allowance is exhausted. Start a new request with more context.',
-                                      'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
-                if status != 'running':
-                    self._finish(db, run_id, result, status)
+            if not self._commit_turn(run_id, position, receipt, classified, captured_review,
+                                     foreground=bool(source['settings'].get('foreground'))):
+                return self.read(run_id)
+        if self.owner.foreground: self.owner.foreground.policy.refresh()
         return self.read(run_id)
 
+    def _commit_turn(self, run_id, position, receipt, classified, captured_review, *, foreground=True):
+        if receipt['tool'] == 'save_placement_draft' and not foreground and self.owner.foreground is None:
+            return self._commit_placement_turn(run_id, position, receipt)
+        return self._commit_legacy_turn(run_id, position, receipt, classified, captured_review)
+
+    def _commit_legacy_turn(self, run_id, position, receipt, classified, captured_review):
+        """Commit one received tool turn, rechecking current native state."""
+        with self.drafts.write_unit() as db:
+            _, status = self.owner._owned_run(db, run_id)
+            if status != 'running':
+                return False
+            source = self._context(db, run_id)
+            if SQLiteRunStore(db).step_exists_row(run_id, position):
+                return True
+            history = self._history(SQLitePlannerStore(db), run_id)
+            self.owner.require("youtube:agent.run")
+            db.execute('SAVEPOINT planner_tool')
+            try:
+                result, status = self._tool(db, run_id, source, history, receipt, classified, captured_review)
+            except PackageConflict:
+                db.execute('ROLLBACK TO planner_tool')
+                if receipt['tool'] not in {'review_performance', 'load_experiment_evidence',
+                                           'assess_instruction_experiment', 'prepare_next_test', 'respond'}:
+                    raise
+                result, status = self.review_tools.refresh_outcome(source, history, receipt['tool']), 'needs_input'
+            except (ValueError, TypeError):
+                db.execute('ROLLBACK TO planner_tool')
+                result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
+            db.execute('RELEASE planner_tool')
+            SQLiteRunStore(db).append_step(run_id, position, receipt['tool'], json.dumps(result))
+            if status == 'running' and position + 1 >= source['max_turns']:
+                result, status = {'revision': source['revision'], 'ambiguous': [],
+                                  'message': 'The turn allowance is exhausted. Start a new request with more context.',
+                                  'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
+            if status != 'running':
+                self._finish(db, run_id, result, status)
+        return True
+
+    def _owned_placement_run(self, unit: PlacementCommitUnit, run_id):
+        self.owner.require("youtube:campaign.read")
+        scope = PlannerRunScope(self.owner.scope.client_id, self.owner.scope.brand_id,
+                                self.owner.operator.id, self.owner.drafts.campaign_id)
+        row = unit.runs.scoped_run_row(run_id, scope)
+        if row is None:
+            raise PermissionError("The run is unavailable to this operator.")
+        return row
+
+    def _placement_context(self, unit: PlacementCommitUnit, run_id):
+        self.owner.require("youtube:campaign.read")
+        _, status = self._owned_placement_run(unit, run_id)
+        if status != 'running':
+            raise PackageConflict('This request is no longer active. Read the latest conversation.')
+        source = json.loads(unit.planner.job_snapshot_row(run_id)[0])
+        if source['settings'].get('foreground'):
+            raise PackageConflict('Foreground placement commits require their original admission path.')
+        if self.conversations.session(unit.conversations, source['session_id']) != source['settings']:
+            raise PermissionError('The conversation scope or model has changed.')
+        if self.drafts.read_from(unit.drafts)['revision'] != source['revision']:
+            raise PackageConflict('The campaign changed. Start a new request from the latest revision.')
+        return source
+
+    def _commit_placement_turn(self, run_id, position, receipt):
+        with self.placement_commit_storage.write() as unit:
+            _, status = self._owned_placement_run(unit, run_id)
+            if status != 'running':
+                return False
+            source = self._placement_context(unit, run_id)
+            if unit.runs.step_exists_row(run_id, position):
+                return True
+            history = self._history(unit.planner, run_id)
+            self.owner.require("youtube:agent.run")
+            try:
+                with unit.tool_attempt():
+                    result, status = self._save_placement_tool(unit, source, history, receipt)
+            except PackageConflict:
+                raise
+            except (ValueError, TypeError):
+                result, status = {'error': 'Invalid tool arguments or unavailable capability; use the declared tool schemas.'}, 'running'
+            unit.runs.append_step(run_id, position, receipt['tool'], json.dumps(result))
+            if status == 'running' and position + 1 >= source['max_turns']:
+                result, status = {'revision': source['revision'], 'ambiguous': [],
+                                  'message': 'The turn allowance is exhausted. Start a new request with more context.',
+                                  'reply_version': REPLY_VERSION, 'reply_code': 'turn_limit'}, 'needs_input'
+            if status != 'running':
+                unit.runs.update_status(run_id, status)
+                unit.planner.update_outcome(run_id, json.dumps(result))
+                self.conversations.finish(unit.conversations, run_id, result, status)
+            unit.commit()
+        return True
+
+    def _save_placement_tool(self, unit: PlacementRepositories, source, history, call):
+        args = call['arguments']
+        if set(args) not in ({'video_ids'}, {'contexts'}):
+            raise ValueError('Unknown tool')
+        if not permits(source, 'save_placement_draft'):
+            return self.review_tools.outcome(source['revision'], None, 'placement_draft_not_authorized'), 'needs_input'
+        classification = next((step['result'] for step in reversed(history)
+                               if step['tool'] == 'classify_catalog' and 'error' not in step['result']), None)
+        if classification is None:
+            raise ValueError('Classify catalog first')
+        selected = args.get('video_ids')
+        if 'contexts' in args:
+            contexts = args['contexts']
+            known = self.drafts.read_from(unit.drafts)['brief']['contexts']
+            if (not isinstance(contexts, list) or not contexts or any(not isinstance(item, str) or item not in known for item in contexts)
+                    or len(contexts) != len(set(contexts))):
+                raise ValueError('Choose known campaign contexts')
+            selected = [item['id'] for item in classification['assignments'] if item['context'] in contexts]
+        saved = self.catalogs.save(source['catalog_id'], source['revision'],
+                                   classification['assignments'], selected, repositories=unit)
+        rows = {row['video_id']: row for row in self.catalogs.read_from(unit.catalogs, source['catalog_id'])}
+        ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
+                      'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
+        return {'revision': saved['revision'], 'ambiguous': ambiguous,
+                'message': 'Placement draft saved for package review.' + (' Classifications are simulated.' if source['settings']['mode'] == 'simulated' else '')}, 'ready_for_review'
+
     def _finish(self, db, run_id, result, status):
-        db.execute('UPDATE agent_runs SET status=? WHERE id=?', (status, run_id))
-        db.execute('UPDATE planner_jobs SET outcome=? WHERE run_id=?', (json.dumps(result), run_id))
-        self.conversations.finish(db, run_id, result, status)
+        SQLiteRunStore(db).update_status(run_id, status)
+        SQLitePlannerStore(db).update_outcome(run_id, json.dumps(result))
+        self.conversations.finish(SQLitePlannerStore(db).conversations, run_id, result, status)
 
     def _tool(self, db, run_id, source, history, call, classified, captured_review=None):
         name, args = call['tool'], call['arguments']
+        if source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/') and name in {'review_performance', 'validate_campaign_setup'}:
+            raise ValueError('This tool uses evaluation fixtures and is unavailable for live requests.')
+        if name == 'classify_catalog' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.placement_discovery import model_assignments
+            return model_assignments(args, history, self.drafts._read(db)['brief']['contexts']), 'running'
         if name in {'read_campaign', 'inspect_catalog', 'classify_catalog', 'review_performance', 'load_experiment_evidence'} and args:
             raise ValueError('Unexpected fields')
         if name == 'read_campaign':
@@ -333,6 +449,9 @@ class PlacementAgent:
             corrections = [self.owner.performance.correction_for_comparison(db, package, group['creative_version'])
                            for group in package['groups']]
             return {'brief': draft['brief'], 'policy': draft['policy'], 'revision': draft['revision'],
+                    **({'measurement_capabilities': self.owner.performance.measurement_capabilities()}
+                       if source.get('settings', {}).get('mode') != 'openrouter'
+                       or source['settings'].get('prompt_version') == 'campaign-planner-v9' else {}),
                     'draft_permission': source.get('draft_permission', 'none'),
                     'package_approved': self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None,
                     'reporting_scenario': source.get('reporting_scenario', 'balanced'),
@@ -340,7 +459,7 @@ class PlacementAgent:
                     'placements': [{key: row[key] for key in ('id', 'creative', 'source')} for row in draft['placements'][:30]],
                     'placement_count': len(draft['placements']), 'buyer_corrections': [item for item in corrections if item]}, 'running'
         if name == 'inspect_catalog':
-            rows = self.catalogs.read(db, source['catalog_id'])
+            rows = self.catalogs.read(SQLitePlannerStore(db).catalogs, source['catalog_id'])
             return {'entries': [{**row, 'description': row['description'][:300], 'source_reference': row['source_reference'][:200]} for row in rows[:10]],
                     'total': len(rows), 'shown': min(10, len(rows))}, 'running'
         if name == 'validate_campaign_setup' and not args:
@@ -395,29 +514,12 @@ class PlacementAgent:
         if name == 'prepare_next_test':
             return self.review_tools.prepare(db, run_id, source, history, call)
         if name == 'save_placement_draft' and set(args) in ({'video_ids'}, {'contexts'}):
-            if not permits(source, name):
-                return self.review_tools.outcome(source['revision'], None, 'placement_draft_not_authorized'), 'needs_input'
-            classification = next((step['result'] for step in reversed(history)
-                                   if step['tool'] == 'classify_catalog' and 'error' not in step['result']), None)
-            if classification is None:
-                raise ValueError('Classify catalog first')
-            selected = args.get('video_ids')
-            if 'contexts' in args:
-                contexts = args['contexts']
-                known = self.drafts._read(db)['brief']['contexts']
-                if (not isinstance(contexts, list) or not contexts or any(not isinstance(item, str) or item not in known for item in contexts)
-                        or len(contexts) != len(set(contexts))):
-                    raise ValueError('Choose known campaign contexts')
-                selected = [item['id'] for item in classification['assignments'] if item['context'] in contexts]
-            saved = self.catalogs.save(db, source['catalog_id'], source['revision'],
-                                       classification['assignments'], selected)
-            rows = {row['video_id']: row for row in self.catalogs.read(db, source['catalog_id'])}
-            ambiguous = [{'id': item['id'], 'title': rows[item['id']]['description'], 'creative': 'review',
-                          'source': rows[item['id']]['source']} for item in classification['assignments'] if item['context'] == 'review']
-            return {'revision': saved['revision'], 'ambiguous': ambiguous,
-                    'message': 'Placement draft saved for package review. Classifications are simulated.'}, 'ready_for_review'
+            return self._save_placement_tool(SQLitePlannerStore(db).placement_repositories, source, history, call)
         if name == 'ask_clarification' and set(args) == {'reason'}:
             return clarification(args['reason'], source['revision']), 'needs_input'
+        if name == 'respond' and source.get('settings', {}).get('charging_profile', '').startswith('preview-text-tools/'):
+            from campaign_agent.agent.replies import model_reply
+            return model_reply(args, source['revision']), 'answered'
         if name == 'respond' and set(args) == {'topic'}:
             if args['topic'] == 'performance_review':
                 return self.review_tools.explain(db, source, history)
@@ -427,19 +529,27 @@ class PlacementAgent:
             approved = False
             if args['topic'] == 'approval_and_launch':
                 approved = self.drafts._package_review(db, self.drafts.campaign_id, draft['revision'])[0]['approval'] is not None
-            return reply(args['topic'], draft, approved=approved), 'answered'
+            capabilities = self.owner.capabilities() if args['topic'] == 'capabilities' else None
+            return reply(args['topic'], draft, approved=approved, capabilities=capabilities), 'answered'
         raise ValueError('Unknown tool')
 
     def read(self, run_id):
         self.owner.require("youtube:campaign.read")
-        with closing(sqlite3.connect(self.path)) as db:
-            request, status = self.owner._owned_run(db, run_id)
-            snapshot, outcome = db.execute('SELECT snapshot,outcome FROM planner_jobs WHERE run_id=?', (run_id,)).fetchone()
+        with self.read_storage.read() as records:
+            self.owner.require("youtube:campaign.read")
+            scope = PlannerRunScope(self.owner.scope.client_id, self.owner.scope.brand_id,
+                                    self.owner.operator.id, self.owner.drafts.campaign_id)
+            row = records.scoped_run_row(run_id, scope)
+            if row is None:
+                raise PermissionError("The run is unavailable to this operator.")
+            request, status = row
+            snapshot, outcome = records.job_result_row(run_id)
             source = json.loads(snapshot)
             turns = [{'position': position, 'state': state, 'inference': json.loads(receipt).get('inference') if receipt else None}
-                     for position, state, receipt in db.execute('SELECT position,state,receipt FROM planner_turns WHERE run_id=? ORDER BY position', (run_id,))]
-            return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(db, run_id),
+                     for position, state, receipt in records.turn_rows(run_id)]
+            return {'run_id': run_id, 'request': request, 'status': status, 'steps': self._history(records, run_id),
                     'result': verified_result(json.loads(outcome), status) if outcome else None,
+                    **({'diagnostics': trace_projection(run_id,status,source['settings'],records.inference_trace_rows(run_id))} if source['settings'].get('foreground') else {}),
                     'planner': {'session_id': source['session_id'], 'settings': source['settings'],
                                 'draft_permission': source.get('draft_permission', 'none'),
                                 'execution': 'application' if source.get('delivery_request') else 'model',

@@ -24,3 +24,6 @@ playwright-report/
 test-results/
 /web/planner/node_modules/
 /web/planner/dist/
+
+# Authored preview seed generated from the application schema.
+/preview/seed.data

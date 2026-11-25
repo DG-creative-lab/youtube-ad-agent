@@ -3,20 +3,20 @@
 The client is injected. Offline fixtures implement this boundary; the private SDK
 and real upstream verification remain explicit composition dependencies.
 """
-from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 from time import monotonic, time
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, FormatChecker
 from rfc3986_validator import validate_rfc3986
 
-from campaign_agent.access import BrandScope, CAPABILITIES, WorkspaceContext
-from campaign_agent.ports.access import AccessUnavailable, GateplaneClient
+from campaign_agent.domain.access_binding import CAPABILITIES
+from campaign_agent.domain.scope import BrandScope, WorkspaceContext
+from campaign_agent.ports.access import AccessUnavailable, CampaignAccessReader, GateplaneClient, CommandPermit
+from .sqlite_access import validate_permit
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / 'contracts/gateplane-v1.json'
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
@@ -49,28 +49,25 @@ def seconds(value):
     return datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
 
 
-def native_campaign(path, campaign_id):
-    with closing(sqlite3.connect(path)) as db:
-        row = db.execute('''SELECT b.client_id,b.brand_id,b.workspace_id,b.installation_id,
-            r.revision,r.snapshot FROM campaign_owners c JOIN brand_workspaces b
-            ON b.client_id=c.client_id AND b.brand_id=c.brand_id
-            JOIN campaign_revisions r ON r.campaign_id=c.campaign_id WHERE c.campaign_id=?
-            ORDER BY r.revision DESC LIMIT 1''', (campaign_id,)).fetchone()
-    if row is None:
-        raise PermissionError('Campaign unavailable in this workspace.')
-    return WorkspaceContext(BrandScope(*row[:2]), *row[2:4]), str(row[4]), hash_value(json.loads(row[5]))
-
-
 class GateplaneAccess:
     def __init__(self, path, sessions, session_token, client: GateplaneClient, *, application_id, command,
-                 clock=time, monotonic_clock=monotonic):
+                 campaign_access: CampaignAccessReader, clock=time, monotonic_clock=monotonic):
         self.path, self.sessions, self.session_token, self.client = path, sessions, session_token, client
         self.application_id, self.command = application_id, command
         self.clock, self.monotonic = clock, monotonic_clock
+        self._campaign_access = campaign_access
+
+    def _native_campaign(self, campaign_id):
+        record = self._campaign_access.access_record(campaign_id)
+        if record is None:
+            raise PermissionError('Campaign unavailable in this workspace.')
+        client, brand, workspace, installation = record.owner
+        context = WorkspaceContext(BrandScope(client, brand), workspace, installation)
+        return context, record.revision, hash_value(json.loads(record.snapshot))
 
     def principal(self, campaign_id):
         identity, _, _ = self.sessions.current(self.session_token)
-        context, _, _ = native_campaign(self.path, campaign_id)
+        context, _, _ = self._native_campaign(campaign_id)
         try:
             result = validate_record('PrincipalContext', self.client.context(identity.subject_token, context))
             actor = result['actor']
@@ -89,12 +86,34 @@ class GateplaneAccess:
         return identity, context, result
 
     def decide(self, request):
+        return self._decision(request)
+
+    def permit(self, request, *, command, session_digest, expires_at, path):
+        if (Path(path) != Path(self.path) or command != self.command or session_digest != hashlib.sha256(self.session_token.encode()).hexdigest()):
+            raise PermissionError('The command binding changed.')
+        result = self._decision(request, permit=True)
+        if result == 'unavailable':
+            raise AccessUnavailable('Current access decision unavailable.')
+        if result == 'deny':
+            raise PermissionError('Current access denied.')
+        return result
+
+    def validate_permit(self, records: CampaignAccessReader, permit, request, command, session_digest):
+        self.sessions.local(self.session_token)
+        if command != self.command or session_digest != hashlib.sha256(self.session_token.encode()).hexdigest():
+            raise PermissionError('The command binding changed.')
+        validate_permit(records, permit, request, command, session_digest,
+                        clock=self.clock, monotonic_clock=self.monotonic)
+
+    def _decision(self, request, permit=False):
         identity, context, principal = self.principal(request.campaign_id)
         if (request.capability not in CAPABILITIES or request.actor_id != principal['actor']['principal_id']
                 or (request.client_id, request.brand_id, request.workspace_id, request.installation_id) !=
                    (context.scope.client_id, context.scope.brand_id, context.workspace_id, context.installation_id)):
             return 'deny'
-        _, revision, snapshot_hash = native_campaign(self.path, request.campaign_id)
+        current_context, revision, snapshot_hash = self._native_campaign(request.campaign_id)
+        if current_context != context:
+            return 'deny'
         target = {'namespace': 'youtube', 'type': 'campaign', 'id': request.campaign_id}
         effect = 'read' if request.capability == 'youtube:campaign.read' else (
             'external' if request.capability == 'youtube:setup.manage' else 'write')
@@ -144,11 +163,17 @@ class GateplaneAccess:
                 raise ValueError('Expired access decision')
             # Local logout/expiry is a separate fence from the upstream credential.
             session = self.sessions.local(self.session_token)
-            if native_campaign(self.path, request.campaign_id) != (context, revision, snapshot_hash):
+            if self._native_campaign(request.campaign_id) != (context, revision, snapshot_hash):
                 return 'deny'
             if (self.monotonic() - start >= min(5000, result['valid_for_ms']) / 1000
-                    or self.clock() >= min(expiry, identity.expires_at, session[6])):
+                    or self.clock() >= min(expiry, identity.expires_at, session.expires_at)):
                 raise ValueError('Access expired during native verification')
         except Exception:
             raise AccessUnavailable('Current access decision is unavailable.') from None
+        if permit:
+            wall_expiry = min(expiry, identity.expires_at, session.expires_at)
+            deadline = min(start+min(5000,result['valid_for_ms'])/1000,
+                           self.monotonic()+max(0,wall_expiry-self.clock()))
+            return CommandPermit(request, hash_value(self.command), hashlib.sha256(self.session_token.encode()).hexdigest(),
+                                 revision, snapshot_hash, result['decision_id'], deadline, wall_expiry)
         return 'allow'

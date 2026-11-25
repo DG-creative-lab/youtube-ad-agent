@@ -7,7 +7,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import MEDIA_MANIFEST, write_media_manifest
+from campaign_agent.adapters.local_media import MEDIA_MANIFEST, write_media_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]

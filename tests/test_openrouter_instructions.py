@@ -7,9 +7,10 @@ import unittest
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.access import LOCAL_BRAND, Operator
 from campaign_agent.adapters.openrouter_reviews import ENDPOINT, ReviewInferenceError
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from scripts.campaign_drafts import PackageConflict
@@ -73,20 +74,20 @@ class OpenRouterInstructionTests(unittest.TestCase):
         run_id = self.start(operation)
         self.runtime.resume(run_id, max_steps=1)
         with patch.object(self.runtime.drafts, "validate_instruction", side_effect=sqlite3.OperationalError("Interrupted")):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(StorageError):
                 self.runtime.resume(run_id, max_steps=1)
         self.assertEqual(self.runtime.read(run_id)["inference"]["state"], "received")
         self.assertEqual(len(self.runtime.read(run_id)["steps"]), 1)
         reopened = self.reopen(models=())
         reopened.resume(run_id, max_steps=1)
-        save = reopened.drafts.save_instruction_test
+        save = reopened.drafts.save_instruction_test_from
 
         def interrupted(*args, **kwargs):
             save(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted save")
 
-        with patch.object(reopened.drafts, "save_instruction_test", side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(reopened.drafts, "save_instruction_test_from", side_effect=interrupted):
+            with self.assertRaises(StorageError):
                 reopened.resume(run_id, max_steps=1)
         self.assertIsNone(self.case.drafts.read(3))
         result = reopened.resume(run_id)

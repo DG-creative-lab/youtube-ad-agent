@@ -6,20 +6,50 @@ import sqlite3
 from time import time
 from uuid import uuid4
 
-from campaign_agent.access import BrandScope, Operator, WorkspaceContext
-from campaign_agent.assets import AssetStore
+from campaign_agent.domain.scope import BrandScope, Operator, WorkspaceContext
 from campaign_agent.adapters.gateplane import timestamp, validate_record
-from campaign_agent.agent.run import AgentRuntime
+from campaign_agent.bootstrap.hosted import create_hosted_application, create_hosted_runtime, initialize_hosted_storage
+from campaign_agent.bootstrap.runtime import create_asset_store, create_staff_sessions, provision_workspace
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR
-from campaign_agent.hosted import HostedApplication
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
 from campaign_agent.ports.access import AccessUnavailable
-from campaign_agent.staff import StaffSessions, VerifiedIdentity, SignInRequired
-from campaign_agent.workspaces import provision_workspace
+from campaign_agent.staff import VerifiedIdentity, SignInRequired
+from campaign_agent.ports.inference import ProviderError, ChargingProfile
+from campaign_agent.model_catalogue import endpoint_fingerprint
 
 ISSUER = 'https://fixture-issuer.test/realm'
 AUDIENCES = frozenset({'youtube-api', 'gateplane-verifier'})
 CLIENT_ID = 'youtube-web'
+
+
+class AuthoredProviderMetadata:
+    """Synthetic-only metadata/key responses; no live provider transport is held."""
+    synthetic = True
+    keys = ('fixture-openrouter-a-key-not-a-real-secret', 'fixture-openrouter-b-key-not-a-real-secret')
+
+    def __init__(self):
+        self.requests=[]
+        self.rows=[{'id':'fixture/tool-model','name':'Authored tool model','architecture':{'input_modalities':['text'],'output_modalities':['text']},
+                    'supported_parameters':['tools','tool_choice','response_format','structured_outputs'],
+                    'pricing':{'prompt':'0','completion':'0','request':'0'}}]
+        self.endpoint={'tag':'fixture/qualified','model_id':'fixture/tool-model','context_length':32000,
+            'supported_parameters':['tools','tool_choice','parallel_tool_calls','max_completion_tokens','response_format','structured_outputs'],
+            'supports_tool_choice':{'required':True},'pricing':{'prompt':'0','completion':'0','request':'0'}}
+        self.profiles=(ChargingProfile('fixture/tool-model','fixture/qualified','authored-free-v1',
+            endpoint_fingerprint(self.endpoint),time()+3600,evidence='Authored offline fixture; no live qualification'),)
+
+    def validate_key(self, credential):
+        self.requests.append('key')
+        if credential.key not in self.keys:
+            raise ProviderError('credential_mismatch')
+
+    def models(self, credential, *, sort=None):
+        self.requests.append('models')
+        return self.rows
+
+    def endpoints(self, credential, model):
+        self.requests.append('endpoints')
+        return [self.endpoint] if model=='fixture/tool-model' else []
 
 
 class FixtureAuthority:
@@ -122,7 +152,8 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
     }
     seed = _SeedAccess()
     operator = Operator('fixture-provisioner', frozenset(context.scope for context in contexts.values()))
-    store = AssetStore(path, asset_root if asset_root is not None else path.with_suffix('.assets'))
+    initialize_hosted_storage(path)
+    store = create_asset_store(path, asset_root if asset_root is not None else path.with_suffix('.assets'))
     catalogs = {}
     def assets(client, brand):
         scope = BrandScope(client, brand)
@@ -145,15 +176,17 @@ def offline_fixture(path, *, staff_origin='http://127.0.0.1:18985', viewer_origi
                                (context.scope.client_id, context.scope.brand_id, catalog))
                 catalogs[context.scope] = catalog
         examples, media_dir = assets(context.scope.client_id, context.scope.brand_id)
-        r = AgentRuntime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
+        r = create_hosted_runtime(path, operator, context=context, campaign_id=campaign, access=seed, examples=examples, media_dir=media_dir)
         r.planner.catalogs.register('Authored fixture catalog', [
             {'video_id': 'SAMPLE00001', 'description': 'Video editing tutorial', 'source': 'synthetic'},
             {'video_id': 'SAMPLE00002', 'description': 'Audiobook narration tutorial', 'source': 'synthetic'}])
     authority = FixtureAuthority()
-    sessions = StaffSessions(path, authority, issuer=ISSUER, audiences=AUDIENCES, client_id=CLIENT_ID)
+    sessions = create_staff_sessions(path, authority, issuer=ISSUER, audiences=AUDIENCES, client_id=CLIENT_ID)
     # Fixture authority is in-memory, so a restart requires explicit synthetic sign-in.
     # The fixture-owned database retains campaigns, approvals and viewer evidence.
     with closing(sqlite3.connect(path)) as db, db:
         db.execute('DELETE FROM staff_sessions')
-    return HostedApplication(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
-                             fixture_login=authority)
+    metadata=AuthoredProviderMetadata()
+    return create_hosted_application(path, sessions, authority, assets, staff_origin=staff_origin, viewer_origin=viewer_origin,
+                             fixture_login=authority, provider_metadata=metadata, provider_profiles=metadata.profiles,
+                             initialize=False)

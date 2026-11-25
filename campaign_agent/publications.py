@@ -1,13 +1,10 @@
 """Explicit publication grants for exact approved comparison content."""
-from contextlib import closing
 import json
-import secrets
-import sqlite3
-from time import time
 
 from .handoff import caption_bytes, example_content, media_sha256, package_fingerprint, read_media
-from .measurement import ViewerMeasurement, ViewerNotFound
-from scripts.campaign_drafts import PackageConflict
+from .measurement import ViewerNotFound
+from .ports.viewer_storage import PublishedGrant, ViewerReader, ViewerStorage
+from campaign_agent.domain.errors import PackageConflict
 
 
 _REPUBLICATION_REQUIRED = (
@@ -19,69 +16,82 @@ _REPUBLICATION_REQUIRED = (
 
 
 class Publications:
-    def __init__(self, path, assets, *, clock=time):
-        self.path, self.assets, self.clock = path, assets, clock
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('''CREATE TABLE IF NOT EXISTS public_comparisons (
-                id TEXT PRIMARY KEY, client_id TEXT NOT NULL, brand_id TEXT NOT NULL,
-                campaign_id TEXT NOT NULL, revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
-                creative_ref TEXT NOT NULL, snapshot TEXT NOT NULL, expires_at REAL NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1,
-                UNIQUE(campaign_id,revision,fingerprint,creative_ref))''')
+    def __init__(self, storage: ViewerStorage, assets, viewer_for, *, clock, new_token):
+        self.storage, self.assets, self.viewer_for = storage, assets, viewer_for
+        self.clock, self._new_token = clock, new_token
 
     def publish(self, runtime, campaign_id, revision, fingerprint):
         # Publication is an export effect. A read or a model tool cannot publish content.
-        runtime.drafts.require('youtube:campaign.export')
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            package = runtime.drafts.require_approved_package(db, campaign_id, revision, fingerprint)['package']
-            scope = runtime.drafts.scope
-            runtime.drafts.require('youtube:campaign.export')
+        drafts = runtime.drafts
+        drafts.require('youtube:campaign.export')
+        key = (drafts.scope.client_id, drafts.scope.brand_id, campaign_id, revision, fingerprint)
+        with self.storage.write() as unit:
+            package = drafts.require_approved_from(unit.drafts, campaign_id, revision, fingerprint)['package']
+            drafts.require('youtube:campaign.export')
             for group in package['groups']:
-                db.execute('''INSERT INTO public_comparisons
-                    (id,client_id,brand_id,campaign_id,revision,fingerprint,creative_ref,snapshot,expires_at)
-                    VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
-                    (secrets.token_urlsafe(32), scope.client_id, scope.brand_id, campaign_id, revision, fingerprint,
-                     group['creative_version'], json.dumps(group), self.clock() + 3600))
-            links = [{'creative_ref': creative, 'path': '/viewer?attribution=' + key}
-                    for key, creative in db.execute('SELECT id,creative_ref FROM public_comparisons '
-                        'WHERE campaign_id=? AND revision=? AND fingerprint=? AND active=1 AND expires_at>?',
-                        (campaign_id, revision, fingerprint, self.clock()))]
+                grant = PublishedGrant(*key, group['creative_version'], json.dumps(group))
+                unit.add_publication(self._new_token(), grant, self.clock() + 3600)
+            links = self._active_links(unit, key)
             if {link['creative_ref'] for link in links} != {group['creative_version'] for group in package['groups']}:
-                # Fail the whole export and roll back any sibling inserts. In particular,
-                # retrying export cannot revive a revoked grant or replace setup destinations.
+                # Retrying cannot revive old grants. Roll back any sibling inserts.
                 raise PackageConflict(_REPUBLICATION_REQUIRED)
+            unit.commit()
             return links
 
-    def resolve(self, token):
+    def _active_links(self, records: ViewerReader, key):
+        return [{'creative_ref': creative, 'path': '/viewer?attribution=' + token}
+                for token, creative in records.active_links(key, self.clock())]
+
+    def active_links(self, drafts, revision, fingerprint):
+        key = (drafts.scope.client_id, drafts.scope.brand_id, drafts.campaign_id, revision, fingerprint)
+        with self.storage.read() as records:
+            drafts._require_owner(records.drafts)
+            return self._active_links(records, key)
+
+    def _active_grant(self, records: ViewerReader, token):
         if not isinstance(token, str) or len(token) != 43:
             raise ViewerNotFound('This published comparison is unavailable.')
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute('SELECT client_id,brand_id,campaign_id,snapshot FROM public_comparisons '
-                             'WHERE id=? AND active=1 AND expires_at>?', (token, self.clock())).fetchone()
-        if row is None:
+        grant = records.active_grant(token, self.clock())
+        if grant is None:
             raise ViewerNotFound('This published comparison is unavailable.')
-        examples, media_dir = self.assets(row[0], row[1])
-        group = json.loads(row[3])
+        return grant
+
+    def _grant(self, token):
+        with self.storage.read() as records:
+            return self._active_grant(records, token)
+
+    def _comparison(self, grant):
+        examples, media_dir = self.assets(grant.client_id, grant.brand_id)
+        group = json.loads(grant.snapshot)
         example = next((e for e in examples if e.ref == group['comparison_version']
-                        and e.creative_ref == group['creative_version']), None)
+                        and e.creative_ref == group['creative_version'] == grant.creative_ref
+                        and (e.scope.client_id, e.scope.brand_id) == (grant.client_id, grant.brand_id)), None)
         if example is None:
             raise ViewerNotFound('This published comparison is unavailable.')
         actual = example_content(example, media_dir)
         actual['instruction'] = group['content']['instruction']
         if actual != group['content'] or any(not take['sha256'] for take in actual['takes']):
             raise PackageConflict('The published comparison media changed.')
-        viewer = ViewerMeasurement(self.path, [example], campaign_id=row[2])
-        return row[2], group, example, media_dir, viewer
+        return group, example, media_dir
+
+    def _require_current(self, records: ViewerReader, token, grant):
+        if self._active_grant(records, token) != grant:
+            raise ViewerNotFound('This published comparison is unavailable.')
+
+    def resolve(self, token):
+        grant = self._grant(token)
+        return self._comparison(grant)
 
     def open(self, token, visit_id, rehearsal=False):
-        _, group, _, _, viewer = self.resolve(token)
-        with closing(viewer.connect()) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            self._require_active(db, token)
-            result = viewer.open_example(group['creative_version'], group['comparison_version'], visit_id,
-                        content_fingerprint=package_fingerprint(group['content']), ad_link_id=token,
-                        rehearsal=rehearsal, connection=db)
+        grant = self._grant(token)
+        group, example, _ = self._comparison(grant)
+        viewer = self.viewer_for([example], grant.campaign_id)
+        with self.storage.write() as unit:
+            self._require_current(unit, token, grant)
+            result = viewer.open_from(unit, group['creative_version'], group['comparison_version'], visit_id,
+                                      content_fingerprint=package_fingerprint(group['content']), ad_link_id=token,
+                                      rehearsal=rehearsal)
+            unit.commit()
         result['creative_ref'] = group['creative_version']
         result['example']['instruction'] = group['content']['instruction']
         for take in result['example']['takes']:
@@ -89,11 +99,7 @@ class Publications:
         result['example']['captions'] = f'/published/{token}/captions'
         return result
 
-    def approved_links(self, package, fingerprint):
-        with closing(sqlite3.connect(self.path)) as db:
-            rows = db.execute('SELECT id,creative_ref,snapshot,active,expires_at FROM public_comparisons WHERE campaign_id=? '
-                              'AND revision=? AND fingerprint=?',
-                              (package['campaign_id'], package['revision'], fingerprint)).fetchall()
+    def approved_links(self, package, rows):
         if any(not active or expires_at <= self.clock() for _, _, _, active, expires_at in rows):
             raise PackageConflict(_REPUBLICATION_REQUIRED)
         published = {creative: (token, json.loads(snapshot)) for token, creative, snapshot, _, _ in rows}
@@ -111,31 +117,36 @@ class Publications:
     def event(self, payload):
         if set(payload) != {'creative_ref', 'visit_id', 'example_ref', 'event_id', 'kind', 'take'}:
             raise ValueError('Send an allowed viewer event.')
-        with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute('SELECT ad_link_id FROM viewer_visits WHERE id=?', (payload['visit_id'],)).fetchone()
-        if row is None:
-            raise ViewerNotFound('This visit is unavailable.')
-        _, group, _, _, viewer = self.resolve(row[0])
+        with self.storage.read() as records:
+            link = records.visit_link_row(payload['visit_id'])
+            if link is None:
+                raise ViewerNotFound('This visit is unavailable.')
+            token = link[0]
+            grant = self._active_grant(records, token)
+        group, example, _ = self._comparison(grant)
         if (payload['creative_ref'], payload['example_ref']) != (group['creative_version'], group['comparison_version']):
             raise ViewerNotFound('This visit is unavailable.')
-        with closing(viewer.connect()) as db, db:
-            db.execute('BEGIN IMMEDIATE')
-            self._require_active(db, row[0])
-            return viewer.record(**payload, connection=db)
-
-    def _require_active(self, db, token):
-        if not db.execute('SELECT 1 FROM public_comparisons WHERE id=? AND active=1 AND expires_at>?',
-                          (token, self.clock())).fetchone():
-            raise ViewerNotFound('This published comparison is unavailable.')
+        viewer = self.viewer_for([example], grant.campaign_id)
+        with self.storage.write() as unit:
+            self._require_current(unit, token, grant)
+            result = viewer.record_from(unit, **payload,
+                                        expected_attribution=(package_fingerprint(group['content']), token))
+            unit.commit()
+            return result
 
     def media(self, token, take):
-        _, group, example, media_dir, _ = self.resolve(token)
+        grant = self._grant(token)
+        group, example, media_dir = self._comparison(grant)
         if take == 'captions':
-            return caption_bytes(example), 'text/vtt; charset=utf-8'
-        source = next((item for item in group['content']['takes'] if item['id'] == take), None)
-        if source is None:
-            raise ViewerNotFound('This sample is unavailable.')
-        data = read_media(media_dir, source['asset'])
-        if media_sha256(data) != source['sha256']:
-            raise PackageConflict('The published comparison media changed.')
-        return data, 'video/mp4' if source['asset'].endswith('.mp4') else 'audio/mpeg'
+            data, content_type = caption_bytes(example), 'text/vtt; charset=utf-8'
+        else:
+            source = next((item for item in group['content']['takes'] if item['id'] == take), None)
+            if source is None:
+                raise ViewerNotFound('This sample is unavailable.')
+            data = read_media(media_dir, source['asset'])
+            if media_sha256(data) != source['sha256']:
+                raise PackageConflict('The published comparison media changed.')
+            content_type = 'video/mp4' if source['asset'].endswith('.mp4') else 'audio/mpeg'
+        with self.storage.read() as records:
+            self._require_current(records, token, grant)
+        return data, content_type

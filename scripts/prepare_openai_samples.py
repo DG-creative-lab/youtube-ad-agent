@@ -16,7 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import write_media_manifest
+from campaign_agent.adapters.local_media import write_media_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]

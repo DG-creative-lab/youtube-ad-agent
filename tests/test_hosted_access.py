@@ -1,6 +1,7 @@
 """HTTP -> native state -> current authority -> effect checks, all synthetic."""
 from contextlib import closing
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -11,9 +12,11 @@ from uuid import uuid4
 
 from starlette.testclient import TestClient
 
-from campaign_agent.adapters.fixture_access import offline_fixture
-from campaign_agent.adapters.gateplane import GateplaneAccess, timestamp
-from campaign_agent.hosted import HostedApplication
+from campaign_agent.adapters.fixture_access import AUDIENCES, CLIENT_ID, ISSUER, offline_fixture
+from campaign_agent.adapters.gateplane import timestamp
+from campaign_agent.adapters.sqlite_access import SQLiteCampaignAccessStorage
+from campaign_agent.bootstrap.hosted import create_hosted_application as HostedApplication
+from campaign_agent.bootstrap.runtime import create_staff_sessions
 from campaign_agent.ports.access import AccessRequest, AccessUnavailable
 
 
@@ -90,6 +93,20 @@ class HostedAccessTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT campaign_id FROM viewer_visits WHERE id=?', (visit['visit_id'],)).fetchone()[0], 'campaign-a')
             self.assertEqual(db.execute('SELECT COUNT(*) FROM viewer_completions').fetchone()[0], 1)
 
+    def test_hosted_requests_use_prepared_store_and_current_authority(self):
+        with patch('campaign_agent.bootstrap.runtime.startup.initialize_runtime_schema',
+                   side_effect=AssertionError('request attempted schema initialization')):
+            existing = self.buyer.get('/api/campaign')
+            self.assertEqual(existing.status_code, 200, existing.text)
+            self.assertEqual(existing.json()['revision'], 1)
+            # Unprovisioned native history cannot be invented by an HTTP request,
+            # even when the upstream buyer has a draft capability.
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute("DELETE FROM campaign_revisions WHERE campaign_id='campaign-a'")
+            self.assertEqual(self.buyer.get('/api/campaign').status_code, 403)
+            with closing(sqlite3.connect(self.path)) as db:
+                self.assertIsNone(db.execute("SELECT 1 FROM campaign_revisions WHERE campaign_id='campaign-a'").fetchone())
+
     def test_client_brand_campaign_and_session_selectors_cannot_grant_access(self):
         args = self.prepare()
         self.post(self.other, '/api/campaign/approve', args, 403)
@@ -125,6 +142,50 @@ class HostedAccessTests(unittest.TestCase):
         self.authority.unavailable = False
         self.assertEqual(self.buyer.get('/api/campaign').status_code, 401)
 
+    def test_staff_selection_rolls_back_on_storage_failure_and_survives_reopen(self):
+        token = self.buyer.cookies.get(self.app.cookie)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            original = db.execute('SELECT * FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone()
+            db.execute("""CREATE TRIGGER fail_staff_selection AFTER UPDATE OF campaign_id ON staff_sessions
+                          BEGIN SELECT RAISE(FAIL, 'private database detail'); END""")
+        args = {'campaign_id': 'campaign-a-brand2'}
+        self.assertEqual(self.post(self.buyer, '/api/session/context', args, 503),
+                         {'error': 'Could not complete this action.'})
+        with closing(sqlite3.connect(self.path)) as db, db:
+            self.assertEqual(db.execute('SELECT * FROM staff_sessions WHERE token_hash=?',
+                                        (token_hash,)).fetchone(), original)
+            db.execute('DROP TRIGGER fail_staff_selection')
+
+        self.post(self.buyer, '/api/session/context', args)
+        reopened_sessions = create_staff_sessions(self.path, self.authority, issuer=ISSUER,
+                                                   audiences=AUDIENCES, client_id=CLIENT_ID)
+        reopened = HostedApplication(self.path, reopened_sessions, self.authority, self.app.assets,
+                                     staff_origin=self.app.staff_origin, viewer_origin=self.app.viewer_origin,
+                                     fixture_login=self.authority, initialize=False)
+        client = self.enterContext(TestClient(reopened.staff, base_url=reopened.staff_origin))
+        client.cookies.set(reopened.cookie, token)
+        response = client.get('/api/session')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['campaign_id'], args['campaign_id'])
+        self.assertEqual(response.headers['x-csrf-token'], self.buyer.headers['x-csrf-token'])
+        self.assertEqual(self.other.get('/api/session').json()['campaign_id'], 'campaign-b')
+        with closing(sqlite3.connect(self.path)) as db:
+            stored = db.execute('SELECT * FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone()
+        self.assertEqual(stored, (*original[:5], args['campaign_id'], *original[6:]))
+
+    def test_expired_staff_session_only_allows_local_logout(self):
+        token = self.buyer.cookies.get(self.app.cookie)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE staff_sessions SET expires_at=0 WHERE token_hash=?', (token_hash,))
+        self.assertEqual(self.buyer.get('/api/session').status_code, 401)
+        self.post(self.buyer, '/api/session/context', {'campaign_id': 'campaign-a-brand2'}, 401)
+        self.authority.unavailable = True
+        self.post(self.buyer, '/api/session/end', {})
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertIsNone(db.execute('SELECT 1 FROM staff_sessions WHERE token_hash=?', (token_hash,)).fetchone())
+
     def test_permission_and_draft_mandate_are_independent_and_denied_setup_does_not_dispatch(self):
         config = self.buyer.get('/api/mode').json()
         operation = uuid4().hex
@@ -151,8 +212,10 @@ class HostedAccessTests(unittest.TestCase):
         self.assertEqual(self.buyer.get('/api/campaign').status_code, 403)
         self.authority.result_filter = lambda r: r
         ticks = [0.0]
-        access = GateplaneAccess(self.path, self.app.sessions, self.buyer.cookies.get(self.app.cookie),
-            self.authority, application_id='youtube', command={'path': '/api/campaign'}, monotonic_clock=lambda: ticks[0])
+        records = SQLiteCampaignAccessStorage(self.path)
+        access = self.app.authority_factory(self.path, self.app.sessions, self.buyer.cookies.get(self.app.cookie),
+            self.authority, application_id='youtube', command={'path': '/api/campaign'},
+            monotonic_clock=lambda: ticks[0], campaign_access=records)
         decide = self.authority.decide
         def delayed(wire):
             response = decide(wire)
@@ -161,8 +224,7 @@ class HostedAccessTests(unittest.TestCase):
         with patch.object(self.authority, 'decide', side_effect=delayed), self.assertRaises(AccessUnavailable):
             access.decide(AccessRequest('gp-buyer-a','tenant-a','brand','workspace-a','install-a',
                                        'youtube:campaign.read','campaign-a'))
-        from campaign_agent.adapters import gateplane
-        native = gateplane.native_campaign
+        native = records.access_record
         decision_returned = [False]
         ticks[0] = 0.0
         def issued(wire):
@@ -175,7 +237,7 @@ class HostedAccessTests(unittest.TestCase):
                 ticks[0] += 5.001
             return result
         with patch.object(self.authority, 'decide', side_effect=issued), \
-                patch.object(gateplane, 'native_campaign', side_effect=slow_native_check), self.assertRaises(AccessUnavailable):
+                patch.object(records, 'access_record', side_effect=slow_native_check), self.assertRaises(AccessUnavailable):
             access.decide(AccessRequest('gp-buyer-a','tenant-a','brand','workspace-a','install-a',
                                        'youtube:campaign.read','campaign-a'))
 
@@ -233,6 +295,43 @@ class HostedAccessTests(unittest.TestCase):
             db.execute('UPDATE public_comparisons SET active=0 WHERE id=?', (token,))
         self.assertEqual(self.public.get(links[0]['path']).status_code, 404)
         self.assertEqual(self.public.get(opened.json()['example']['takes'][0]['url']).status_code, 404)
+
+    def test_public_grant_change_during_media_resolution_blocks_write_and_download(self):
+        args = self.prepare()
+        self.post(self.reviewer, '/api/campaign/approve', args)
+        link = self.post(self.reviewer, '/api/campaign/export', args)['public_comparisons'][0]
+        token = link['path'].split('attribution=')[1]
+        headers = {'Origin': self.app.viewer_origin}
+        opened = self.public.post('/api/viewer/open', json={'attribution': token, 'visit_id': None}, headers=headers)
+        self.assertEqual(opened.status_code, 200, opened.text)
+        visit = opened.json()
+        assets = self.app.publications.assets
+
+        def replace_after_lookup(*scope):
+            loaded = assets(*scope)
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('UPDATE public_comparisons SET revision=revision+1 WHERE id=?', (token,))
+            return loaded
+
+        requests = (
+            lambda: self.public.post('/api/viewer/open', json={'attribution': token, 'visit_id': None}, headers=headers),
+            lambda: self.public.post('/api/viewer/event', json={
+                'creative_ref': visit['creative_ref'], 'example_ref': visit['example']['ref'],
+                'event_id': uuid4().hex, 'visit_id': visit['visit_id'], 'kind': 'start', 'take': 'a',
+            }, headers=headers),
+            lambda: self.public.get(visit['example']['takes'][0]['url']),
+        )
+        for request in requests:
+            with patch.object(self.app.publications, 'assets', side_effect=replace_after_lookup):
+                self.assertEqual(request().status_code, 404)
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('UPDATE public_comparisons SET revision=? WHERE id=?', (args['revision'], token))
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM viewer_visits').fetchone(), (1,))
+                self.assertEqual(db.execute('SELECT kind FROM viewer_events').fetchall(), [('arrival',)])
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE viewer_visits SET content_fingerprint=? WHERE id=?', ('0' * 64, visit['visit_id']))
+        self.assertEqual(requests[1]().status_code, 404)
+        self.assertEqual(self.public.get(visit['example']['takes'][0]['url']).status_code, 200)
 
     def test_expired_or_revoked_publications_fail_export_atomically_with_recovery_guidance(self):
         args = self.prepare()

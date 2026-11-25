@@ -1,5 +1,30 @@
 # Campaign agent design direction
 
+## Next UI build · owner direction, 19 November 2026
+
+After the functional MVP and #123 eval gate, refine the planner around a quieter
+conversation and artefact workspace. This direction supersedes the square-control
+and separate activity-inspector prescriptions below; those sections retain their
+historical implementation evidence.
+
+- Use modest corner radii on buttons, inputs, menus, dialogs and artefact surfaces,
+  with fewer visible boxes and less administrative copy in the conversation.
+- Add light, dark and system appearance settings using shared semantic colors.
+- Make the navigation sidebar collapsible. Keep account and invite administration
+  behind the avatar in a compact, rounded, accessible account surface.
+- Reserve the auxiliary panel for artefacts. Show agent progress, tool results and
+  concise explanations within the relevant dialogue, expandable on demand, with
+  typography that distinguishes activity from the final response. Do not present
+  private model reasoning as an audit trail or fabricate thinking text.
+- Explore a restrained animation of the existing nested-square mark during active
+  work, with a static reduced-motion alternative and a textual execution status.
+- Keep one campaign agent. Future specialist activity can use the same inline
+  pattern without requiring the user to select or manage agents in the composer.
+
+Acceptance should cover desktop and narrow layouts, keyboard and focus behavior,
+both color schemes, reduced motion, long artefact titles and provider failures.
+These are queued design requirements; this eval build does not change the UI.
+
 6 November 2026 · Working direction for the independent application project. [Product brief](product-brief.md) · [Architecture](architecture-plan.md)
 
 ## Brand foundations
@@ -44,3 +69,19 @@ Verification used a fresh temporary SQLite database with the portable propose sc
 The navigation review reproduced both earlier failures in Chromium before the fixes. Follow-up checks cancelled Campaign, identity-link, New request and reload navigation with unsaved selections; verified that changing the visible creative did not hide another creative's edits; and confirmed no warning after saving. A request started from placements used a new conversation ID, `after_message: 0` and `draft_permission: none`. Reload retained that new conversation, and the previous transcript could still be reopened. All 156 offline tests and the planner build passed again.
 
 The follow-up review checked search results and imported proposals without selected placements in the in-app browser. Attempted navigation retained the search results and all four authored proposals. Saving an imported selection still retained the proposals and protected them from navigation. An isolated source copy without a planner build served the standalone page at both `/` and `/placements`, with planner links hidden and build commands visible. Adding the planner build enabled both links and their destinations. These checks used local sample search and authored imports, with zero live-provider calls; all 156 offline tests and the planner build passed.
+
+
+## Foreground account and model controls · 15 November 2026
+
+OpenRouter lives beside the staff identity in the rail. The account surface uses
+native dialog modal behavior, labelled password input, native Escape/focus return
+and scoped overscroll containment. It uses the existing paper/ink colors, square
+controls and 44px primary actions. The browser field clears immediately on submit;
+status and errors describe the retained connection rather than exposing key data.
+
+The composer model panel keeps offline choices visible and groups provider search,
+exact budget selection, prices, compatibility/reasons and pagination below them.
+No-training routing and possible safety retention are stated together; the budget
+is described as a local reservation ceiling. Changing model/budget retains the
+message and resets Changes to Review only. Waiting and unknown original operations
+have visible recovery wording and never silently switch inference modes.

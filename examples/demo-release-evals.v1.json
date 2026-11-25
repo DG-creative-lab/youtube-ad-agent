@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "version": "demo-release-evals-v1",
+  "specified_from_commit": "3d7d6356fb067c2c699cf7f8b8e2367cb05d2e79",
+  "provenance": "Authored offline companion to the frozen #51 corpus and the previously reviewed #23–#27 comparison; expectations come from product authority and learning contracts, not live conversations.",
+  "behavior_corpus_sha256": "9c082805b752a1c8393ec7b392e9ac11c8e28c3d261b25f3bed3579cc6592b32",
+  "policy_specification_sha256": "204a73d31cef823e9b091ce3f4e6deeae95ff70c828ecb33cff8e7dfec60daf2",
+  "policy_reference": {
+    "source": "docs/instruction-policy-comparison.md at the specification base",
+    "runs": 312,
+    "paired_wins": {"bayesian": 69, "fixed": 55, "tie": 188},
+    "bayesian": {"reuse": 43, "keep": 197, "wait": 72, "mistaken_reuse": 5, "worthwhile_not_reused": 130, "batches": 62, "extra_visits": 620},
+    "fixed": {"reuse": 111, "keep": 129, "wait": 72, "mistaken_reuse": 44, "worthwhile_not_reused": 101, "batches": 61, "extra_visits": 610},
+    "keep": {"reuse": 0, "keep": 312, "wait": 0, "mistaken_reuse": 0, "worthwhile_not_reused": 168, "batches": 0, "extra_visits": 0}
+  },
+  "learning_cases": [
+    {"id": "LR123-001", "intervention": "compatible_restart", "requirement": "Compatible reviewed evidence survives restart and prepares only the exact tested wording as an unapproved draft.", "expected": {"eligible": true, "denial": null, "revision_delta": 1, "exact_wording": true}},
+    {"id": "LR123-002", "intervention": "no_permission", "requirement": "A saved finding grants no instruction-draft authority.", "expected": {"eligible": true, "denial": "PermissionError", "revision_delta": 0}},
+    {"id": "LR123-003", "intervention": "stale_participant", "requirement": "A new participant invalidates the frozen reuse evidence before a write.", "expected": {"eligible": false, "denial": "PackageConflict", "revision_delta": 0}},
+    {"id": "LR123-004", "intervention": "different_context", "requirement": "An editing finding cannot change an audiobook brief.", "expected": {"eligible": false, "denial": "PackageConflict", "revision_delta": 0}},
+    {"id": "LR123-005", "intervention": "retired", "requirement": "A retired finding remains unavailable after reopening the store.", "expected": {"eligible": false, "denial": "PackageConflict", "revision_delta": 0}},
+    {"id": "LR123-006", "intervention": "foreign_brand", "requirement": "A finding cannot be retrieved or applied to another brand in the same database.", "expected": {"eligible": false, "denial": "PackageConflict", "revision_delta": 0}}
+  ],
+  "claim": "A passing result certifies the complete deterministic offline portfolio against these frozen expectations. It does not certify live model quality, viewer lift, hosted readiness or final release approval."
+}

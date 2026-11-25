@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 
-from .access import BrandScope
+from campaign_agent.domain.scope import BrandScope
 from .assets import asset_name, read_blob, write_blob
 from .handoff import package_fingerprint
 from .migrations import MIGRATIONS, SchemaConflict, versions
@@ -54,6 +54,8 @@ def _validate(db):
 def _clear_sessions(db):
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='staff_sessions'").fetchone():
         db.execute('DELETE FROM staff_sessions')
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_connections'").fetchone():
+        db.execute("UPDATE provider_connections SET revoked_at=CAST(strftime('%s','now') AS REAL) WHERE revoked_at IS NULL")
 
 
 def _new_directory(path):

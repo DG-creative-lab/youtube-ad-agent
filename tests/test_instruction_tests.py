@@ -6,8 +6,10 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.access import LOCAL_BRAND, Operator
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST, RecordedInference
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST, RecordedInference
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
 from campaign_agent.measurement import ViewerNotFound
@@ -78,11 +80,11 @@ class InstructionTestTests(unittest.TestCase):
         epoch = 1_700_000_000_000
         for index, event in enumerate(visits):
             event.update(id=index, admitted_ms=event["arrived_ms"] or 0, batch=0)
-            with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["admitted_ms"]) * 1_000_000):
+            with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(epoch + event["admitted_ms"]) * 1_000_000):
                 source = event["source"] if event["source"] != "unknown" else "participant"
                 visit = self.open(event["arm"], source=source)
             if event["completed_ms"] is not None:
-                with patch("campaign_agent.measurement.time_ns", return_value=(epoch + event["completed_ms"]) * 1_000_000):
+                with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(epoch + event["completed_ms"]) * 1_000_000):
                     self.complete(visit)
                     self.complete(visit)
             with closing(self.viewer.connect()) as db, db:
@@ -101,7 +103,7 @@ class InstructionTestTests(unittest.TestCase):
     def save_reuse_finding(self):
         self.start(allow_additional_batch=True)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 18)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -138,6 +140,18 @@ class InstructionTestTests(unittest.TestCase):
         self.assertEqual(old["groups"][0]["content"]["instruction"], finding["before"])
         request = {"finding_id": finding["id"], "correction_id": eligible["correction"]["id"],
                    "draft_permission": "instruction_test"}
+        save_revision = reopened.drafts._save_instruction_revision_from
+
+        def interrupt_after_write(*args):
+            save_revision(*args)
+            raise sqlite3.OperationalError("Interrupted after writing the reused draft")
+
+        with patch.object(reopened.drafts, "_save_instruction_revision_from", side_effect=interrupt_after_write):
+            with self.assertRaises(StorageError):
+                reopened.instruction_findings.apply(*target, **request)
+        self.assertIsNone(reopened.drafts.read(target[1] + 1))
+        self.assertEqual(reopened.instruction_findings.read(*target), eligible)
+
         saved = reopened.instruction_findings.apply(*target, **request)
         reviewed = reopened.drafts.review_package(self.campaign, saved["revision"])
         self.assertEqual(saved["revision"], target[1] + 1)
@@ -250,7 +264,7 @@ class InstructionTestTests(unittest.TestCase):
         self.assertIsNone(self.read()["evidence_decision"])
 
         start = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=start * 1_000_000):
             for arm, completions in (("original", 6), ("revised", 10)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -273,7 +287,7 @@ class InstructionTestTests(unittest.TestCase):
             second = reopened.save_evidence_snapshot(*ref, uuid4().hex)
         self.assertEqual(reopened.read(*ref)["evidence_decision"], {**recommendation, "snapshot_id": second["id"]})
 
-        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(cutoff + 1) * 1_000_000):
             self.open("original")
         self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
@@ -284,7 +298,7 @@ class InstructionTestTests(unittest.TestCase):
         self.assertEqual(after["batch_checkpoint_id"], second["id"])
 
         batch_arrival = cutoff + 3
-        with patch("campaign_agent.measurement.time_ns", return_value=batch_arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=batch_arrival * 1_000_000):
             for _ in range(9):
                 self.open("revised")
         self.assertEqual(reopened.read(*ref)["evidence_decision"]["action"], "refresh_snapshot")
@@ -303,7 +317,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 6), ("revised", 10)):
                 for index in range(20):
                     visit = self.open(arm)
@@ -313,7 +327,7 @@ class InstructionTestTests(unittest.TestCase):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
         decision = self.read()["evidence_decision"]
         self.assertEqual((decision["action"], decision["assigned"]), ("wait_for_evidence", 40))
-        with patch("campaign_agent.measurement.time_ns", return_value=(arrival + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(arrival + 1) * 1_000_000):
             self.open("original")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(arrival + 1) * 1_000_000):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
@@ -333,7 +347,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm in ("original", "revised"):
                 for _ in range(20):
                     self.open(arm)
@@ -342,7 +356,7 @@ class InstructionTestTests(unittest.TestCase):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
         decision = self.read()["evidence_decision"]
         self.assertEqual((decision["action"], decision["batch_status"]), ("keep", "evaluated"))
-        with patch("campaign_agent.measurement.time_ns", return_value=(cutoff + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(cutoff + 1) * 1_000_000):
             self.open("original")
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(cutoff + 2) * 1_000_000):
             self.tests.save_evidence_snapshot(*ref, uuid4().hex)
@@ -357,7 +371,7 @@ class InstructionTestTests(unittest.TestCase):
         self.start(allow_additional_batch=True)
         ref = (self.campaign, 3, self.fingerprint)
         arrival = 1_800_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 20)):
                 for index in range(25):
                     visit = self.open(arm)
@@ -396,7 +410,7 @@ class InstructionTestTests(unittest.TestCase):
         window = 300_000
         start = 1_800_000_000_000
         participant = uuid4().hex
-        with patch("campaign_agent.measurement.time_ns", return_value=start * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=start * 1_000_000):
             completed = self.open("original", participant)
             late = self.open("original")
             self.open("revised")
@@ -412,9 +426,9 @@ class InstructionTestTests(unittest.TestCase):
         with closing(self.viewer.connect()) as db, db:
             db.execute("UPDATE instruction_test_assignments SET source = NULL WHERE visit_id = ?", (unknown["visit_id"],))
             db.execute("UPDATE viewer_completions SET completed_ms = NULL WHERE visit_id = ?", (missing_time["visit_id"],))
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + 1) * 1_000_000):
             immature = self.open("revised")
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + window) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + window) * 1_000_000):
             self.complete(completed)
             self.complete(immature)
         with self.assertRaisesRegex(ValueError, "separate browser reference"):
@@ -439,7 +453,7 @@ class InstructionTestTests(unittest.TestCase):
 
         reopened = AgentRuntime(self.path, media_dir=self.media).instruction_tests
         self.assertEqual(reopened.open(test["id"], participant)["visit_id"], completed["visit_id"])
-        with patch("campaign_agent.measurement.time_ns", return_value=(start + window + 1) * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=(start + window + 1) * 1_000_000):
             self.complete(completed)
             self.complete(late)
         with patch("campaign_agent.instruction_tests.time_ns", return_value=(start + 2 * window) * 1_000_000):
@@ -509,14 +523,14 @@ class InstructionTestTests(unittest.TestCase):
 
     def test_assignment_and_viewer_arrival_roll_back_together(self):
         self.start()
-        open_example = self.viewer.open_example
+        open_example = self.viewer.open_from
 
         def interrupted(*args, **kwargs):
             open_example(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted assignment")
 
-        with patch.object(self.viewer, "open_example", side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(self.viewer, "open_from", side_effect=interrupted):
+            with self.assertRaises(StorageError):
                 self.open("original")
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM instruction_test_assignments").fetchone()[0], 0)
@@ -573,15 +587,16 @@ class InstructionTestTests(unittest.TestCase):
         self.runtime.resume(run_id, max_steps=2)
         self.open("original")
         reopened = AgentRuntime(self.path, media_dir=self.media)
-        save_review = reopened.instruction_tests.save_review
+        save_review = reopened.instruction_tests.save_review_from
 
         def interrupted(*args, **kwargs):
             save_review(*args, **kwargs)
             raise sqlite3.OperationalError("Interrupted review commit")
 
-        with patch.object(reopened.instruction_tests, "save_review", side_effect=interrupted):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(reopened.instruction_tests, "save_review_from", side_effect=interrupted):
+            with self.assertRaises(StorageError) as caught:
                 reopened.resume(run_id, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         self.assertIsNone(self.read()["review"])
         self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
         result = reopened.resume(run_id)

@@ -14,11 +14,10 @@ import secrets
 import sqlite3
 import stat
 
-from .access import BrandScope, require_access
+from campaign_agent.domain.scope import BrandScope
+from .access import require_access
 from .creatives import Example
 from .handoff import media_sha256, package_fingerprint
-from .migrations import migrate_path
-from .workspaces import verify
 
 MAX_BLOB_BYTES = 64 * 1024 * 1024
 
@@ -94,11 +93,9 @@ class CatalogMedia:
 
 
 class AssetStore:
-    def __init__(self, path, root):
+    def __init__(self, path, root, *, verify_owner):
         self.path, self.root = Path(path), Path(root).resolve()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        migrate_path(self.path)
+        self._verify_owner = verify_owner
 
     def import_catalog(self, context, campaign_id, examples, source, *, operator, access):
         """Trusted provisioning; no upload or ownership assertion endpoint is added."""
@@ -113,7 +110,7 @@ class AssetStore:
         # Existing blobs are never overwritten; an aborted import can only leave unused bytes.
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('BEGIN IMMEDIATE')
-            verify(db, context, campaign_id)
+            self._verify_owner(db, context, campaign_id)
             assets = {}
             for name in names:
                 file = Path(source) / name

@@ -7,13 +7,18 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.adapters.sqlite_evidence import _EvidenceUnit
+from campaign_agent.ports.storage_errors import StorageError
 from campaign_agent.access import BrandScope
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.handoff import package_fingerprint
-from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
-from campaign_agent.performance import CampaignPerformance
-from campaign_agent.agent.run import AgentRuntime, RecordedInference
-from scripts.campaign_drafts import CampaignDrafts, PackageConflict
+from campaign_agent.bootstrap.runtime import create_viewer as ViewerMeasurement
+from campaign_agent.measurement import ViewerNotFound
+from campaign_agent.bootstrap.runtime import create_performance as CampaignPerformance
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import RecordedInference
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import PackageConflict
 
 
 class CampaignPerformanceTests(unittest.TestCase):
@@ -54,20 +59,40 @@ class CampaignPerformanceTests(unittest.TestCase):
         run_id = runtime.start_next_test(self.campaign, 2, self.fingerprint, review["id"])
         return runtime, review, run_id
 
+    def test_interrupted_performance_review_rolls_back_and_retries_once(self):
+        reference = self.campaign, 2, self.fingerprint
+        self.drafts.approve_package(*reference)
+        write_review = _EvidenceUnit.save_performance_review
+
+        def fail_after_insert(records, *args):
+            write_review(records, *args)
+            raise sqlite3.OperationalError("Interrupted after storing the review")
+
+        with patch.object(_EvidenceUnit, "save_performance_review", fail_after_insert):
+            with self.assertRaises(StorageError):
+                self.performance.review(*reference, "balanced")
+        reopened = CampaignPerformance(self.drafts, self.viewer)
+        self.assertIsNone(reopened.read(*reference)["review"])
+        review = reopened.review(*reference, "balanced")
+        self.assertEqual(reopened.review(*reference, "balanced"), review)
+        with closing(sqlite3.connect(self.drafts.path)) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM campaign_performance_reviews").fetchone(), (1,))
+
     def test_instruction_run_resumes_one_revision_and_preserves_source_and_content_attribution(self):
         runtime, source, run_id = self.instruction_run()
         runtime.resume(run_id, max_steps=2)
         reopened = AgentRuntime(self.drafts.path, media_dir=self.drafts.media_dir)
         self.assertEqual(reopened.start_next_test(self.campaign, 2, self.fingerprint, source["id"]), run_id)
-        save = reopened.drafts.save_instruction_test
+        save = reopened.drafts.save_instruction_test_from
 
         def fail_after_save(*args):
             save(*args)
             raise sqlite3.OperationalError("Simulated lost transaction")
 
-        with patch.object(reopened.drafts, "save_instruction_test", side_effect=fail_after_save):
-            with self.assertRaises(sqlite3.OperationalError):
+        with patch.object(reopened.drafts, "save_instruction_test_from", side_effect=fail_after_save):
+            with self.assertRaises(StorageError) as caught:
                 reopened.resume(run_id, max_steps=1)
+        self.assertEqual(caught.exception.kind, 'unavailable')
         self.assertIsNone(self.drafts.read(3))
         self.assertEqual(len(reopened.read(run_id)["steps"]), 2)
         with closing(sqlite3.connect(self.drafts.path)) as db, db:

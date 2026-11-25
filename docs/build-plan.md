@@ -1,6 +1,214 @@
 # Campaign agent build plan
 
-Updated 14 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
+## Current demo slice · #123 measurement context, 20 November 2026
+
+Campaign advice needs the application's measurement contract to distinguish
+existing viewer outcomes from proposed tracking integrations. The current slice
+supplies versioned measurement definitions in the first live planner context and
+both retained and typed `read_campaign` results. It describes comparison completion,
+the arrival denominator, content/cohort attribution and unsupported viewer analytics
+without querying visits or claiming observed results. Prompt v9 guides use of
+those facts; existing commands still own report reads and authority. Tests bind
+the definitions to real event/count behavior and check that grading criteria never
+enter provider requests. The frozen capability corpus/rubric stay unchanged;
+future rubric calibration and another authorized live sample remain separate work.
+
+Resumption keeps the run's saved planner version. Historical v7/v8 prompts,
+schemas and context projections remain available; only v9 receives measurement
+facts in the initial context or campaign-read result. Unsupported versions stop
+before reservation/dispatch. A paid v8 ledger receipt interrupted before the
+planner receipt write recovers through the normal hash checks without a key,
+metadata request or another completion call. Authored historical wire fixtures
+and the HTTP recovery regression protect this upgrade boundary.
+
+Non-foreground OpenRouter planner admission also accepts supported v7/v8 pins
+under the current model, limit, credential and browser checks. The availability
+comparison does not rewrite saved settings; rendered requests and receipts retain
+the old pin. The native planner regression pauses a v8 run after its first tool,
+reopens it with the v9 adapter default and verifies the next inference completes.
+
+PR #131 delivered the isolated live capability runner and human grading workflow.
+The preceding harness slice exposes
+scoped current campaign context IDs, makes classification errors actionable, and
+guides advice to answer the request without unnecessary classification or another
+permission question. Planner prompt v8 retains the application authority checks.
+The [prepared Mini/Terra comparison](live-capability-benchmark.md#prepared-mini--terra-comparison--20-november-2026)
+uses the same frozen tasks/rubric and corrected source for both models. Offline
+regressions and bounded route qualification precede separately authorized live
+sampling; neither a public model listing nor a claimed credit allowance proves
+live compatibility, quality or paid-account entitlement.
+
+PR #130 delivered the deterministic gate and CI evidence. The next slice is the
+[live capability benchmark](live-capability-benchmark.md): 20 frozen campaign tasks,
+repeatable isolated foreground trials, explicit whole-batch authorization and
+separate automated outcome checks and human quality grades. CI validates the
+contract without live calls; real samples and rubric calibration retain their
+credential, budget and review requirements.
+
+PR #129 delivered live OpenRouter configuration, route qualification and safe
+execution diagnostics. The [deterministic demo eval gate](demo-release-evals.md)
+retains the 11 frozen behavior cases, reports the 312 paired policy simulations
+with the keep/no-change baseline, checks learning-reuse safety, and publishes
+sanitized revision-bound evidence in CI. Hosted smoke and live model quality stay
+separate gates. This does not close the wider eval or functional MVP roadmap.
+
+After the functional MVP, implement the [owner's next UI direction](design-direction.md#next-ui-build--owner-direction-19-november-2026):
+softer controls, dark mode, collapsible navigation, artefact-only auxiliary panels
+and inline expandable activity for the single campaign agent. Keep this redesign
+separate from the eval runner and existing runtime/authority contracts.
+
+The staged map includes #87 foundation contracts/offline injection before #86;
+#86 owns every pilot native participant and its minimal factory, with #87 final
+external adoption and #88 consolidation afterward.
+
+## Current architecture milestone · #88 startup and entrypoints
+
+Local demo, hosted staff/public and authored fixtures explicitly prepare the
+native SQLite store before serving commands. The local HTTP and placement CLI
+launchers use the same placement composition. Hosted requests bind the current
+staff principal and campaign without rerunning schema initialization. The
+standalone sandbox command retains its opt-in configuration and delegates to its
+own composition root.
+
+The runtime still qualifies only the native foreground adapters selected by its
+bootstrap. Storage connection and repository ownership for retained commands
+continues under [#37](native-storage-migration.md).
+
+### Delivered #86 local placement pilot
+
+The next build targets the whole accepted local authored simulated-placement pilot,
+not another single participant. `bootstrap/planner.py:create_local_planner` performs
+explicit native startup/admission and constructs the existing runtime without
+constructor DDL. Its router selects typed placement start/follow-up, read,
+classification/reservation, commit and receipt recovery through the actual local UI
+and shared dispatcher. The context participant reads real approvals, saved reviews,
+corrections and started tests; logical media facts and original command permits
+retain their full scope and preimage checks. Other tools and foreground workflows
+remain supported on the original native store through their retained paths.
+
+#86 was accepted by human merge of [PR #104](https://github.com/DG-creative-lab/youtube-ad-agent/pull/104).
+The [residual native graph](native-storage-migration.md) assigns the remaining
+families to #37/#87/#88 and records the compatibility schema copies. No backend
+switch, PostgreSQL acceptance, provider activation or hosted release follows.
+
+### Delivered planner storage lifecycle
+
+Catalogue read/save now require typed repositories throughout; the application
+module has no remaining SQL or native connection path. All planner catalogue
+reads borrow their existing transaction, including start/classification/tool reads.
+Planner options/run-existence reads use the snapshot reader. Run/planner schema
+initialization and local legacy backfill are explicit native adapter operations.
+Each model/classifier receive/fail write uses a core-owned receipt port and its own
+adapter transaction, preserving separately durable receipts before tool commit.
+
+The receipt port changes storage ownership, not inference retry or failure policy.
+Schemas, raw serialized data and local-only legacy identities are preserved. The
+reservation/start/preflight/access graph, remaining tool commits and composition
+still retain legacy boundaries; this does not complete #86 or select another backend.
+
+### Delivered placement commit
+
+The non-foreground placement save now uses a typed write unit. Scoped run/session
+and revision checks, catalogue/provenance reads, draft append, step, run outcome
+and assistant reply share one transaction. The adapter owns BEGIN, savepoint,
+commit, rollback and close. Model receipts remain separately durable before tool
+commit, so interrupted saves recover without repeating inference/classification.
+One application placement-save policy serves both the adopted and legacy paths.
+
+Foreground-origin commits (including detached receipt recovery), other tools,
+startup/reservation phases and existing access/permit coupling retain their legacy
+outer boundaries. Native failure mappings are preserved. This is the complete local
+placement *commit*, not acceptance of the whole #86 pilot or a backend switch.
+
+### Delivered planner read snapshot
+
+The planner run projection now uses a typed scoped reader and an adapter-owned
+snapshot. Run status, saved outcome, turns and joined tool history observe the same
+committed view even if another worker finishes a turn during the read. Both current
+access checks and all four ownership dimensions are retained before detail reads.
+History rendering in write paths borrows the existing transaction's repository.
+
+The shared planner/draft/access write unit and native error mapping remain legacy
+boundaries for the complete #86 pilot. No alternate runtime backend is selected.
+
+### Delivered conversation participant
+
+Following PR #99's catalogue foundation, conversation commands now consume typed
+repositories. Planner begin/session/finish borrow that repository from the exact
+existing planner transaction, including running-run reads and superseded
+status/outcome/reply writes. Conversation schema initialization and transcript
+adoption remain atomic in the SQLite adapter; application code retains dialogue,
+access and reply policy. Standalone transcript reads use adapter-owned snapshots.
+
+This adopts one participant, not the full placement UOW. The planner/draft/access
+transaction owners and native error mapping remain legacy boundaries until the
+whole unit is adopted. No alternate runtime backend is selected. #86 stays open.
+
+### Delivered catalogue foundation
+
+#85 closed under its revised scope after PR #97. PR #98 supplied the first #87
+planning/classifier contracts and supplied-model seam; broader provider inversion
+and composition remain open.
+
+The first #86 adoption is catalogue registration/listing through typed core-owned
+records and read/write units. The SQLite adapter owns these connections, snapshot
+reads, commit/rollback and catalogue initialization. Registration commits the
+catalogue and its provenance entries together, with an explicit application commit.
+Native catalogue IDs, raw snapshots and duplicate-registration behavior remain.
+
+This is a preparatory adoption, not completion of the placement pilot. Planner
+catalogue read/save still borrow the existing native transaction; campaign,
+conversation, review/access and run/step participants must join the later complete
+UOW. Runtime composition keeps catalogue operations on that same SQLite path;
+alternate storage is exercised only against isolated registration/listing commands.
+One unused SQLite import exception retires; raw-handle/SQL use still needs review
+and migration even when an import disappears. #86 remains open.
+
+### Delivered #85 foundations
+
+Initial #84 was human-merged in [PR #91](https://github.com/DG-creative-lab/youtube-ad-agent/pull/91)
+at `9fabf358b30cbc794455c1da78440043593d1497`. The small static Python import
+checker is the accepted guard; deeper effect/authority properties remain test and
+review responsibilities. #84 stays open through its later strict-zero milestone.
+
+The first bounded #85 slice gives shared scope values, campaign/inference errors
+and video-ID syntax pure domain owners. Runtime consumers import those owners;
+legacy paths reexport the same objects for compatibility. The baseline shrinks
+from 88 to 86 module edges, with no new exceptions. No SQL, transaction, provider,
+identity-default or wire behavior moves in this slice. Relocated classes acquire
+new Python module metadata; application JSON/error/fingerprint semantics remain.
+
+The subsequent #85 policy slice moves the unchanged instruction-test decision calculations into the domain package. The old module remains a compatibility reexport; monkeypatches of globals on that wrapper do not change the implementation globals.
+
+CampaignDrafts now has an application owner; the script remains an inward compatibility
+wrapper. Its native storage, defaults and authority checks remain for later inversion.
+#85's broader module-map sweep was deferred by the agreed scope reduction;
+remaining baseline entries are visible, not declared completed. #87
+foundation contracts/offline injection precede #86 whole pilot-native UOW; #87
+external and #88 composition follow. #37's residual named native graph, #84 import
+strict zero and #89 broader conformance retain their gates. PostgreSQL/cloud and
+provider/identity activation remain separate. Each PR requires independent review,
+verification, current CI and human merge.
+
+Updated 15 November 2026 · [Product brief](product-brief.md) · [Architecture](architecture-plan.md) · [Design direction](design-direction.md) · [Engineering workflow](engineering-workflow.md)
+
+## Current factory decision checkpoint · 15 November 2026
+
+#52 capability catalogue/API and #53 capability UI are delivered; #54 foreground
+BYOK implementation is delivered with real activation retained by #70. PR #69
+accepted project product rules and PR #72 merged the A3a #55 artifact agreement;
+#55 runtime remains blocked on producer #79 registration, #81 native client,
+#83 composed service/recipient/revoke evidence and separate #36/#37 agreement.
+No project migration, endpoint or new authority follows from artifact acceptance.
+
+#59 now supplies the [proposed hosted topology and bounded migration contract](hosted-topology-decision.md):
+two Frankfurt Vercel Python ASGI origins, Neon Postgres and private Vercel Blob.
+Human acceptance selects this reference; it deploys nothing. Preserve local
+SQLite/private files and the zero-cost demo. #37's first native placement unit of
+work, complete reader/writer port, all-campaign restore fence and DB/blob drills
+precede composition. #40/#41/#42 own privacy, eligible plan/budget, ingress and
+measured deployed acceptance; #38 unattended execution remains deferred. The
+historical checkpoints below retain their original dates and evidence.
 
 ## Application deliverable
 
@@ -131,7 +339,7 @@ Build this slice in Python and SQLite with the existing browser screen. React an
 
 Start the viewer path as soon as the creative and destination IDs exist. Use original recordings if suitable ElevenLabs output is unavailable within the zero-cost and rights constraints. Label the source of the audio shown in the application.
 
-Before recording viewer events, bind the comparison example to the seeded client and brand on the backend. Use an opaque local visit ID and a stable event ID. Count one completion per visit and example version after two distinct takes finish and the viewer chooses one. Attribute activity to the example actually played and retain the original CTA version separately if the viewer switches contexts. [POC access checks](tenancy.md#when-to-build-each-layer)
+Before recording viewer events, bind the comparison example to the seeded client and brand on the backend. Use an opaque local visit ID and a stable event ID. Count one completion per visit and example version after two distinct takes finish and the viewer chooses one. Attribute activity to the example actually played and retain the original CTA version separately if the viewer switches contexts. [POC access checks](tenancy.md#compatibility-and-verification)
 
 ## First tool contracts
 

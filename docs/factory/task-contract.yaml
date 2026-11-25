@@ -1,0 +1,35 @@
+# TEMPLATE ONLY. Copy and resolve required nulls before dispatch; this is not an assignment.
+schema_version: 1
+task_id: null
+issue_url: null
+contract_version: 1
+stage: queued
+base_commit: null # Full reachable SHA.
+plan_commit: null # Full reachable SHA containing the accepted handoff.
+integration_target: null
+branch: null # feature/description or fix/description
+checkout: null # Actual isolated path.
+outcome: null
+dependencies: [] # Each: issue, contract_version, accepted_commit, acceptance_evidence.
+owned_files: []
+exclusive_resources: [] # Include migration chains, databases, media roots and ports.
+scope: []
+out_of_scope: []
+protected_invariants: []
+acceptance_scenarios: [] # Each: observable outcome, required check and evidence.
+permitted_commands: []
+permitted_network: []
+provider_calls: forbidden
+cost_limit_gbp: 0
+roles:
+  coordinator: null
+  builder: null
+  reviewer: null
+  verifier: null
+repair_attempt_limit: 2
+stop_conditions:
+  - Changed or unaccepted dependency contract
+  - Overlapping file or resource ownership
+  - Inaccessible base, plan or required handoff
+  - Required out-of-scope effect or unavailable verification dependency
+merge_authority: human

@@ -5,8 +5,10 @@ from unittest.mock import patch
 
 from campaign_agent.access import LOCAL_BRAND
 from campaign_agent.adapters.google_ads_sandbox import GoogleAdsSandbox
-from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
-from campaign_agent.campaign_setup import CampaignSetup, SetupProviderError
+from campaign_agent.bootstrap.runtime import create_simulated_setup as SimulatedCampaignSetup
+from campaign_agent.bootstrap.runtime import create_setup
+from campaign_agent.adapters.sqlite_setup_delivery import verified_viewer_link
+from campaign_agent.campaign_setup import SetupProviderError
 from scripts.campaign_drafts import PackageConflict
 import test_placement_planner as fixtures
 
@@ -50,7 +52,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
             for group, video, context in zip(review['package']['groups'], CREATIVE_VIDEOS, CONTEXTS)
         }
         self.provider = GoogleAdsSandbox(MANAGER, ACCOUNT, self.creatives, LOGO, self.post)
-        self.setup = CampaignSetup(self.drafts, self.provider)
+        self.setup = create_setup(self.drafts, self.provider)
 
     def post(self, account, endpoint, body):
         if endpoint == 'googleAds:mutate':
@@ -130,6 +132,12 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         self.manager_currency = 'USD'
         preview = self.setup.validate(*self.reference)
         self.assertEqual(preview['validation_request_id'], 'validate-fixture')
+        # Fixed from the pre-migration implementation. The operation must still
+        # match an existing approval and the campaign name used for read-back.
+        self.assertEqual(self.reference[2], '4d448a38a639a8c4de81df79c705cf51e0d6f45b0f1e23da5a13c6c378debf47')
+        self.assertEqual(preview['id'], '14f29acc4a432f8cea76cf27712eae558057e20be7560b6d9f2ac3cb69ed31c9')
+        self.assertEqual(preview['plan']['expected_readback']['name'],
+                         'Campaign Agent Sandbox 96dca84f8921b42119f0c080')
         self.assertIsNone(self.case.runtime.setup.read(*self.reference))
         self.assertIsNone(preview['approval'])
         self.assertIsNone(self.native_campaign)
@@ -167,7 +175,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
             result = self.setup.create(*self.reference, preview['id'])
         self.assertEqual(result['status'], 'mismatch')
         with closing(sqlite3.connect(self.drafts.path)) as db:
-            self.assertIsNone(CampaignSetup.verified_viewer_link(db, LOCAL_BRAND, link['id']))
+            self.assertIsNone(verified_viewer_link(db, LOCAL_BRAND, link['id']))
 
     def test_migrates_existing_setup_and_keeps_provider_accounts_separate(self):
         simulator = self.case.runtime.setup
@@ -186,7 +194,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
                           SELECT client_id, brand_id, campaign_id, revision, fingerprint, snapshot FROM setup_fixture''')
             db.execute('DROP TABLE setup_fixture')
 
-        sandbox = CampaignSetup(self.drafts, self.provider)
+        sandbox = create_setup(self.drafts, self.provider)
         self.assertIsNone(sandbox.read(*self.reference))
         sandbox_preview = sandbox.validate(*self.reference)
         self.assertEqual(sandbox.read(*self.reference), sandbox_preview)
@@ -196,7 +204,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
 
         other_provider = SimulatedCampaignSetup(self.drafts.path)
         other_provider.account_id = 'other-offline-account'
-        other_setup = CampaignSetup(self.drafts, other_provider)
+        other_setup = create_setup(self.drafts, other_provider)
         self.assertIsNone(other_setup.read(*self.reference))
         other_preview = other_setup.validate(*self.reference)
         self.assertNotEqual(other_preview['id'], verified['id'])
@@ -216,7 +224,7 @@ class GoogleAdsSandboxTests(unittest.TestCase):
         preview = self.setup.validate(*self.reference)
         self.lose_receipt = True
         self.assertEqual(self.setup.create(*self.reference, preview['id'])['status'], 'unknown')
-        reopened = CampaignSetup(self.case.reopen().drafts, self.provider)
+        reopened = create_setup(self.case.reopen().drafts, self.provider)
         self.swap_targets = True
         observed = reopened.reconcile(*self.reference, preview['id'])
         self.assertEqual(observed['status'], 'mismatch')

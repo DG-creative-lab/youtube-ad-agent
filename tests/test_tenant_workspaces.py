@@ -9,14 +9,20 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+from campaign_agent.adapters.sqlite_planner import SQLitePlannerStore
+
 from campaign_agent.access import BrandScope, LOCAL_BRAND, LOCAL_CONTEXT, LOCAL_OPERATOR, Operator, WorkspaceContext
-from campaign_agent.agent.run import AgentRuntime, DEMO_REQUEST
+from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.agent.run import DEMO_REQUEST
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import DEMO_MEDIA_DIR, package_fingerprint
-from campaign_agent.measurement import ViewerMeasurement, ViewerNotFound
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.handoff import package_fingerprint
+from campaign_agent.bootstrap.runtime import create_viewer as ViewerMeasurement
+from campaign_agent.measurement import ViewerNotFound
 from campaign_agent.ports.access import AccessUnavailable
-from campaign_agent.workspaces import provision_workspace
-from scripts.campaign_drafts import BRIEF, POLICY, CampaignDrafts, PackageConflict
+from campaign_agent.bootstrap.runtime import provision_workspace
+from campaign_agent.bootstrap.runtime import create_drafts as CampaignDrafts
+from scripts.campaign_drafts import BRIEF, POLICY, PackageConflict
 
 
 class Decisions:
@@ -82,7 +88,7 @@ class TenantWorkspaceTests(unittest.TestCase):
                 other.drafts.export_setup(first.drafts.campaign_id, 2, review["fingerprint"])
             foreign_catalog = self.catalog(first)
             with closing(sqlite3.connect(self.path)) as db, self.assertRaises(ValueError):
-                other.planner.catalogs.read(db, foreign_catalog)
+                other.planner.catalogs.read(SQLitePlannerStore(db).catalogs, foreign_catalog)
         # Different campaigns under one brand are also independent execution contexts.
         provision_workspace(self.path, self.contexts[0], "another-campaign", operator=self.operator, access=self.policy)
         sibling = self.runtime(campaign_id="another-campaign")
@@ -127,6 +133,38 @@ class TenantWorkspaceTests(unittest.TestCase):
             provision_workspace(self.path, c, "tts-sample", operator=self.operator, access=self.policy)
         with self.assertRaises(PermissionError):
             CampaignDrafts(self.path, False, self.operator, context=c, campaign_id="campaign-0", access=self.policy)
+
+    def test_provisioning_rolls_back_brand_and_campaign_together_and_can_retry(self):
+        context = WorkspaceContext(BrandScope('tenant-c', 'brand-c'), 'workspace-c', 'install-c')
+        operator = Operator('provisioner', frozenset({context.scope}))
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("""CREATE TRIGGER fail_new_owner AFTER INSERT ON campaign_owners
+                          WHEN NEW.campaign_id='campaign-c'
+                          BEGIN SELECT RAISE(FAIL,'authored fault'); END""")
+        with self.assertRaisesRegex(PermissionError, 'already bound'):
+            provision_workspace(self.path, context, 'campaign-c', operator=operator, access=self.policy)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            self.assertIsNone(db.execute("SELECT 1 FROM brand_workspaces WHERE client_id='tenant-c'").fetchone())
+            self.assertIsNone(db.execute("SELECT 1 FROM campaign_owners WHERE campaign_id='campaign-c'").fetchone())
+            db.execute('DROP TRIGGER fail_new_owner')
+
+        provision_workspace(self.path, context, 'campaign-c', operator=operator, access=self.policy)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT client_id,brand_id FROM campaign_owners WHERE campaign_id='campaign-c'").fetchone(),
+                             ('tenant-c', 'brand-c'))
+
+    def test_provisioning_rejects_an_installation_with_conflicting_legacy_tenants(self):
+        home = self.contexts[0]
+        sibling = replace(home, scope=BrandScope(home.scope.client_id, 'brand-new'), workspace_id='workspace-new')
+        operator = Operator('provisioner', frozenset({sibling.scope}))
+        # This authored legacy row has the accepted schema but a conflicting installation binding.
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('INSERT INTO brand_workspaces VALUES(?,?,?,?)',
+                       ('foreign-tenant', 'legacy-brand', 'legacy-workspace', home.installation_id))
+        with self.assertRaisesRegex(PermissionError, 'belongs to a different workspace'):
+            provision_workspace(self.path, sibling, 'campaign-new', operator=operator, access=self.policy)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM campaign_owners WHERE campaign_id='campaign-new'").fetchone())
 
     def test_current_decisions_and_business_approval_both_apply(self):
         runtime = self.runtime()
@@ -232,7 +270,7 @@ class TenantWorkspaceTests(unittest.TestCase):
         drafts.approve_package(campaign, 3, fingerprint)
         test = runtime.instruction_tests.start(campaign, 3, fingerprint, allow_additional_batch=True)
         arrival = 1_700_000_000_000
-        with patch("campaign_agent.measurement.time_ns", return_value=arrival * 1_000_000):
+        with patch("campaign_agent.bootstrap.runtime.time_ns", return_value=arrival * 1_000_000):
             for arm, completions in (("original", 2), ("revised", 18)):
                 with patch("campaign_agent.instruction_tests.secrets.choice", return_value=arm):
                     for index in range(20):
@@ -266,8 +304,8 @@ class TenantWorkspaceTests(unittest.TestCase):
             with self.assertRaises(PackageConflict):
                 other.instruction_findings.apply(*foreign_target, finding_id=finding["id"],
                                                 correction_id=eligible["correction"]["id"], draft_permission="instruction_test")
-            with closing(sqlite3.connect(self.path)) as db, self.assertRaises(ViewerNotFound):
-                other.instruction_tests._test(db, finding["test_id"])
+            with other.instruction_tests.storage.read() as records, self.assertRaises(ViewerNotFound):
+                other.instruction_tests.test_from(records, finding["test_id"])
             self.assertEqual(other.drafts.read()["revision"], 3)
         with self.assertRaises(PermissionError):
             reopened.instruction_findings.apply(*target, finding_id=finding["id"], correction_id=eligible["correction"]["id"])
