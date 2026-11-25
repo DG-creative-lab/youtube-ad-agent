@@ -41,8 +41,12 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.after_fetch = None
         self.transport = Mock(side_effect=self.post)
         self.reporting = GoogleAdsReporting(fixtures.MANAGER, fixtures.ACCOUNT, lambda: nullcontext(self.transport))
-        self.runtime = self.sandbox.case.reopen(reporting=self.reporting)
+        self.runtime = self.reopen(reporting=self.reporting)
         self.delivery = self.runtime.delivery
+
+    def reopen(self, **options):
+        # Reporting resumes the sandbox's already approved historical package.
+        return self.sandbox.case.reopen(examples=self.sandbox.drafts.examples, **options)
 
     def verify_setup(self):
         plan = self.sandbox.setup.validate(*self.reference)
@@ -88,7 +92,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.assertEqual((partial['coverage'], partial['placement_coverage']), ('partial', 'partial'))
         self.assertIsNone(partial['groups'][1]['metrics'])
         self.assertEqual(partial['placements'][0]['kind'], 'other')
-        self.assertEqual(self.sandbox.case.reopen(reporting=self.reporting).delivery.read(*self.reference)['report'], partial)
+        self.assertEqual(self.reopen(reporting=self.reporting).delivery.read(*self.reference)['report'], partial)
 
         self.placements = SetupProviderError('Fixture placement view unavailable')
         unavailable = self.delivery.review(*self.reference)
@@ -99,7 +103,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.verify_setup()
         case = self.sandbox.case
         simulator = Mock()
-        runtime = case.reopen(reporting=self.reporting, planner_simulator=simulator)
+        runtime = self.reopen(reporting=self.reporting, planner_simulator=simulator)
         session = uuid4().hex
         run = runtime.planner.start('Please review Google Ads delivery for this campaign.',
                                     'simulated', session, uuid4().hex, case.catalog,
@@ -138,7 +142,7 @@ class GoogleAdsReportingTests(unittest.TestCase):
         self.test_account = True
         wrong_account = GoogleAdsReporting(fixtures.MANAGER, '3333333333', lambda: nullcontext(self.transport))
         with self.assertRaises(PackageConflict):
-            self.sandbox.case.reopen(reporting=wrong_account).delivery.review(*self.reference)
+            self.reopen(reporting=wrong_account).delivery.review(*self.reference)
         self.transport.assert_not_called()
 
         self.after_fetch = self.sandbox.edit_draft

@@ -1,0 +1,2 @@
+# Optional authoring dependency; never required for application playback.
+Pillow==13.0.0

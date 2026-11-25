@@ -7,10 +7,14 @@ import shutil
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from campaign_agent.access import LOCAL_CONTEXT
 from campaign_agent.adapters.sqlite_planner_startup import initialize_local_planner
 from campaign_agent.bootstrap.runtime import create_runtime as AgentRuntime
+from campaign_agent.bootstrap.runtime import DEMO_MEDIA_DIR
+from campaign_agent.bootstrap.local import create_local_planner
+from campaign_agent.handoff import read_media
 from campaign_agent.application.campaigns import BRIEF, POLICY
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.migrations import migrate
@@ -18,6 +22,37 @@ from campaign_agent.adapters.sqlite_workspace_admission import _bind
 
 
 class PlannerStartupTests(unittest.TestCase):
+    def test_selected_local_planner_rejects_mismatched_override_before_store_initialization(self):
+        for example in EXAMPLES:
+            with self.subTest(context=example.ref):
+                media = self.root / example.ref
+                shutil.copytree(DEMO_MEDIA_DIR, media)
+                (media / example.takes[0][2]).write_bytes(b'previous passage recording')
+                path = self.root / (example.ref + '.sqlite')
+                with patch('campaign_agent.bootstrap.local.MEDIA_DIR', media):
+                    with self.assertRaisesRegex(ValueError, 'Local comparison media'):
+                        create_local_planner(path)
+                self.assertFalse(path.exists())
+
+    def test_selected_planner_reuses_bound_media_and_rejects_later_file_changes(self):
+        media = self.root / 'media'
+        shutil.copytree(DEMO_MEDIA_DIR, media)
+        path = self.root / 'planner.sqlite'
+        with patch('campaign_agent.bootstrap.local.MEDIA_DIR', media):
+            runtime = create_local_planner(path)
+        # HTTP re-composition may reuse the already verified source for the
+        # selected placement graph as well as the retained commands.
+        reopened = create_local_planner(path, media_dir=runtime.drafts.media_dir)
+        for example in EXAMPLES:
+            name = example.takes[0][2]
+            self.assertEqual(read_media(reopened.drafts.media_dir, name), (DEMO_MEDIA_DIR / name).read_bytes())
+            (media / name).write_bytes(b'replaced after startup')
+            with self.assertRaises(FileNotFoundError):
+                read_media(reopened.drafts.media_dir, name)
+        package = reopened.drafts.review_package('tts-sample', 1)
+        self.assertIn('Prepare the preview and comparison media for Video editing.', package['blockers'])
+        self.assertIn('Prepare the preview and comparison media for Audiobook production.', package['blockers'])
+
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

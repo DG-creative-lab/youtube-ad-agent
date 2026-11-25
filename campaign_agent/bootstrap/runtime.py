@@ -10,6 +10,7 @@ from campaign_agent.access import LOCAL_CONTEXT, LOCAL_OPERATOR
 from campaign_agent.adapters import demo_delivery, sqlite_planner_startup as startup
 from campaign_agent.adapters.catalogue_cache import CatalogueCache
 from campaign_agent.adapters.local_access import LocalDemoAccess
+from campaign_agent.adapters.local_media import BoundLocalMedia
 from campaign_agent.adapters.openrouter_instructions import OpenRouterInstructions
 from campaign_agent.adapters.openrouter_reviews import OpenRouterPlanner, OpenRouterReviews
 from campaign_agent.adapters.simulated_setup import SimulatedCampaignSetup
@@ -84,12 +85,16 @@ class _NativeCampaignDrafts(CampaignDrafts):
 
 def create_drafts(path, live, operator=LOCAL_OPERATOR, *, media_dir=None, context=LOCAL_CONTEXT,
                   campaign_id=None, access=None, examples=None, initialize=True):
+    default_override = media_dir is None and MEDIA_DIR.is_dir()
     if media_dir is None:
         media_dir = MEDIA_DIR if MEDIA_DIR.is_dir() else DEMO_MEDIA_DIR
     drafts = _NativeCampaignDrafts(path, live, operator, context=context, media_dir=media_dir,
                                    campaign_id=campaign_id, examples=examples,
                                    access=LocalDemoAccess() if access is None else access)
     drafts.require('youtube:campaign.read')
+    if default_override:
+        drafts.media_dir = BoundLocalMedia(media_dir, drafts.examples,
+                                          bundled_directory=DEMO_MEDIA_DIR, bundled_examples=EXAMPLES)
     if initialize:
         startup.initialize_drafts(drafts.path, context=context, campaign_id=drafts.campaign_id,
                                   seed_snapshot=draft_seed(drafts.campaign_id), authorize=drafts.require, live=live)

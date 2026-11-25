@@ -181,7 +181,7 @@ The default assignment uses local rules. To explicitly enable the billed Jev ada
 
 ## Viewer comparison
 
-The [bundled viewer media](examples/viewer-media/README.md) uses original scripts and graphics with Flite synthetic speech. Open **Preview local creatives** to play the captioned previews and follow their comparison links. Ordinary `serve` preserves an existing `.local/viewer-media/` directory for packages approved with locally generated media. Portable demo mode always uses the bundled versions.
+The [bundled viewer media](examples/viewer-media/README.md) uses original scripts, AI-generated speech and scene artwork. Four additional [sample ads](examples/ad-samples/README.md) include alternate hooks, narration, visuals and calls to action. Playback is offline; the optional authoring tool is separate from the application. Open **Preview local creatives** to play the captioned comparisons and follow their links. Ordinary `serve` verifies an existing `.local/viewer-media/` directory against its generation manifest before using it. An unmanifested override must match the current bundle byte for byte; incompatible recordings require regeneration or replacement. Portable demo mode always uses the bundled versions.
 
 The comparison records local viewer activity in the draft database. A visit keeps its original creative reference when the viewer switches examples. Playing both takes through and choosing one records one completion per visit and example version. The viewer retries pending activity with the same event IDs after a refresh in the same tab.
 

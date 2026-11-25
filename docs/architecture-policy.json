@@ -128,6 +128,7 @@
     "scripts/hosted_access_fixture.py": "bootstrap",
     "scripts/placement_review.py": "bootstrap",
     "scripts/prepare_viewer_media.py": "developer_tool",
+    "scripts/prepare_openai_samples.py": "developer_tool",
     "scripts/product_storage.py": "inbound"
   }
 }

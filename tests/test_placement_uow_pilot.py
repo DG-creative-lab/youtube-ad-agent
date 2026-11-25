@@ -27,6 +27,7 @@ from campaign_agent.placement_discovery import SimulatedClassifier
 from campaign_agent.ports.access import AccessUnavailable
 from campaign_agent.ports.storage_errors import StorageError, StorageClosed
 import test_placement_planner as fixtures
+from legacy_comparison_examples import LEGACY_EXAMPLES
 
 
 class PlacementPilotTests(unittest.TestCase):
@@ -98,8 +99,8 @@ class PlacementPilotTests(unittest.TestCase):
 
     def test_raw_run_rows_and_seed_fingerprint_match_original_runtime(self):
         native_path = self.directory / 'original.sqlite3'
-        old = AgentRuntime(native_path, media_dir=self.media)
-        current = self.runtime()
+        old = AgentRuntime(native_path, media_dir=self.media, examples=LEGACY_EXAMPLES)
+        current = self.runtime(examples=LEGACY_EXAMPLES)
         for runtime in (old, current):
             catalog = runtime.planner.catalogs.register('Authored catalogue', fixtures.CATALOG)
             runtime.planner.start('Find placements for the saved campaign.', 'simulated', self.session,
@@ -117,7 +118,7 @@ class PlacementPilotTests(unittest.TestCase):
                     expected = [row[:-1] for row in expected]
                 self.assertEqual(rows, expected, table)
         # A legacy runtime can still read the adopted run without a history rewrite.
-        self.assertEqual(AgentRuntime(self.path, media_dir=self.media).read(self.run), current.read(self.run))
+        self.assertEqual(AgentRuntime(self.path, media_dir=self.media, examples=LEGACY_EXAMPLES).read(self.run), current.read(self.run))
 
     def test_failed_followup_rolls_back_supersession_and_new_message_together(self):
         runtime = self.runtime()

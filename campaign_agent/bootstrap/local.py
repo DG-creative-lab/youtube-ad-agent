@@ -14,7 +14,7 @@ from campaign_agent.bootstrap.placement_router import PlacementRouter
 from campaign_agent.creatives import EXAMPLES
 from campaign_agent.placement_discovery import SimulatedClassifier
 from campaign_agent.adapters.local_access import LocalDemoAccess
-from campaign_agent.adapters.local_media import LocalMedia
+from campaign_agent.adapters.local_media import BoundLocalMedia, LocalMedia
 from campaign_agent.adapters.local_placement_authority import LocalPlacementAuthority
 from campaign_agent.adapters.sqlite_planner import SQLitePlacementStorage, SafePlannerReceipts, _storage_failure
 from campaign_agent.adapters.sqlite_planner_startup import SQLiteLocalPlannerStartup
@@ -51,9 +51,13 @@ def create_local_planner(path=DEFAULT_DRAFT_PATH, operator=LOCAL_OPERATOR, *, me
         raise PermissionError('This composition supports the original authored demo campaigns only.')
     path = Path(path)
     examples = tuple(examples)
+    default_override = media_dir is None and MEDIA_DIR.is_dir()
     media_dir = media_dir if media_dir is not None else (MEDIA_DIR if MEDIA_DIR.is_dir() else DEMO_MEDIA_DIR)
-    if not isinstance(media_dir, (str, Path)):
+    if not isinstance(media_dir, (str, Path, BoundLocalMedia)):
         raise ValueError('The authored local planner requires a filesystem media directory.')
+    if default_override:
+        media_dir = BoundLocalMedia(media_dir, examples,
+                                   bundled_directory=DEMO_MEDIA_DIR, bundled_examples=EXAMPLES)
     authority = authority if authority is not None else LocalPlacementAuthority(path, clock=clock, monotonic_clock=monotonic_clock)
     try:
         if initialize:

@@ -30,7 +30,7 @@ from campaign_agent.adapters.demo_delivery import SCENARIOS
 from campaign_agent.adapters.google_ads_reporting import GoogleAdsReporting
 from campaign_agent.domain.inference_errors import ReviewInferenceError
 from campaign_agent.creatives import EXAMPLES
-from campaign_agent.handoff import caption_bytes, media_sha256
+from campaign_agent.handoff import caption_bytes, media_sha256, read_media
 from campaign_agent.domain.instruction_policy import ADDITIONAL_BATCH_SIZE, INITIAL_SAMPLE_SIZE, POLICY_V1, SAMPLE_CAP
 from campaign_agent.placements import read_catalog, rule_assignment
 from campaign_agent.measurement import ViewerNotFound
@@ -670,7 +670,7 @@ def build_handler(live, draft_path, *, operator_token, openrouter_review_models=
                         name = example.preview
                     if name is None:
                         raise ViewerNotFound()
-                    data = (drafts.media_dir / name).read_bytes()
+                    data = read_media(drafts.media_dir, name)
                     content_type = "video/mp4" if name.endswith(".mp4") else "audio/mpeg"
             except (ValueError, ViewerNotFound, FileNotFoundError):
                 self.send(404, {"error": "This sample is unavailable."})
